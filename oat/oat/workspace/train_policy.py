@@ -328,7 +328,7 @@ class TrainPolicyWorkspace(BaseWorkspace):
                                 # action prediction
                                 obs_dict = batch['obs']         # {key: [B, To, *]}
                                 gt_action = batch['action']     # [B, Ta, Da]
-                                result = policy.predict_action(obs_dict)
+                                result = policy.predict_action_adaptive(obs_dict)
                                 pred_action = result['action_pred']  # [B, Ta, Da]
                                 mse = F.mse_loss(pred_action, gt_action).item()
 

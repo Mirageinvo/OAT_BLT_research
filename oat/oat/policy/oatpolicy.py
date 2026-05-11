@@ -214,6 +214,19 @@ class OATPolicy(BasePolicy):
         }
         return result
 
+	def predict_action_adaptive(self, obs_dict, entropy_threshold=1.0):
+    	features = self.obs_encoder(obs_dict)
+    	action_tokens = torch.full([B, 1], bos_id, ...)  # [<BOS>]
+    	for step in range(self.max_seq_len):
+        	logits = self.model(action_tokens, cond=features)  # [B, step+1, vocab]
+        	next_logits = logits[:, -1, :]                     # [B, vocab]
+        	probs = F.softmax(next_logits, dim=-1)
+        	entropy = -(probs * probs.log()).sum(-1).mean()    # скаляр
+        	next_token = sample(next_logits)
+        	action_tokens = cat([action_tokens, next_token])
+        	if step >= 1 and entropy < entropy_threshold:
+            	break  # достаточно токенов
+    	return self.action_tokenizer.detokenize(action_tokens[:, 1:])
 
     def forward(self, batch) -> torch.Tensor:
         # tokenize trajectory

@@ -249,7 +249,7 @@ class LiberoRunner(BaseRunner):
 
                 # run policy
                 with torch.inference_mode():
-                    action = policy.predict_action({
+                    action = policy.predict_action_adaptive({
                         port: obs_dict[port] 
                         for port in policy.get_observation_ports()
                     }, **kwargs)['action'].detach().cpu().numpy()
