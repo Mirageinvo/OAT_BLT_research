@@ -214,19 +214,57 @@ class OATPolicy(BasePolicy):
         }
         return result
 
-	def predict_action_adaptive(self, obs_dict, entropy_threshold=1.0):
-    	features = self.obs_encoder(obs_dict)
-    	action_tokens = torch.full([B, 1], bos_id, ...)  # [<BOS>]
-    	for step in range(self.max_seq_len):
-        	logits = self.model(action_tokens, cond=features)  # [B, step+1, vocab]
-        	next_logits = logits[:, -1, :]                     # [B, vocab]
-        	probs = F.softmax(next_logits, dim=-1)
-        	entropy = -(probs * probs.log()).sum(-1).mean()    # скаляр
-        	next_token = sample(next_logits)
-        	action_tokens = cat([action_tokens, next_token])
-        	if step >= 1 and entropy < entropy_threshold:
-            	break  # достаточно токенов
-    	return self.action_tokenizer.detokenize(action_tokens[:, 1:])
+    def predict_action_adaptive(self,
+        obs_dict: Dict[str, torch.Tensor],
+        use_k_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        topk: Optional[int] = None,
+        entropy_threshold: float = 1.0,
+    ) -> Dict[str, torch.Tensor]:
+        if use_k_tokens is None:
+            use_k_tokens = self.max_seq_len
+        else:
+            use_k_tokens = min(use_k_tokens, self.max_seq_len)
+        if temperature is None:
+            temperature = self.temperature
+        if topk is None:
+            topk = self.topk
+
+        features = self.obs_encoder(obs_dict)   # [B, To, d]
+        B = features.shape[0]
+
+        action_tokens = torch.full(
+            (B, 1), self.bos_id,
+            dtype=torch.long, device=self.device,
+        )
+        for step in range(use_k_tokens):
+            logits = self.model(action_tokens, cond=features)        # [B, T, vocab]
+            next_logits = logits[:, -1, :] / max(temperature, 1e-6)  # [B, vocab]
+
+            probs = F.softmax(next_logits, dim=-1)
+            entropy = -(probs * (probs + 1e-12).log()).sum(-1).mean()
+
+            if topk is not None:
+                v, _ = torch.topk(next_logits, min(topk, next_logits.size(-1)))
+                next_logits = next_logits.masked_fill(next_logits < v[:, [-1]], float('-inf'))
+                probs = F.softmax(next_logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)     # [B, 1]
+            action_tokens = torch.cat([action_tokens, next_token], dim=1)
+
+            if step >= 1 and entropy.item() < entropy_threshold:
+                break
+
+        action_tokens = action_tokens[:, 1:]   # drop <BOS>; detokenize pads to latent_horizon
+
+        with torch.inference_mode():
+            action_pred = self.action_tokenizer.detokenize(tokens=action_tokens)
+
+        action = action_pred[:, :self.n_action_steps]
+
+        return {
+            'action': action,
+            'action_pred': action_pred,
+        }
 
     def forward(self, batch) -> torch.Tensor:
         # tokenize trajectory
