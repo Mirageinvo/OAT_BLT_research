@@ -237,12 +237,15 @@ class OATPolicy(BasePolicy):
             (B, 1), self.bos_id,
             dtype=torch.long, device=self.device,
         )
+        entropies = []
         for step in range(use_k_tokens):
             logits = self.model(action_tokens, cond=features)        # [B, T, vocab]
             next_logits = logits[:, -1, :] / max(temperature, 1e-6)  # [B, vocab]
 
             probs = F.softmax(next_logits, dim=-1)
             entropy = -(probs * (probs + 1e-12).log()).sum(-1).mean()
+            entropy_val = entropy.item()
+            entropies.append(entropy_val)
 
             if topk is not None:
                 v, _ = torch.topk(next_logits, min(topk, next_logits.size(-1)))
@@ -251,7 +254,7 @@ class OATPolicy(BasePolicy):
             next_token = torch.multinomial(probs, num_samples=1)     # [B, 1]
             action_tokens = torch.cat([action_tokens, next_token], dim=1)
 
-            if step >= 1 and entropy.item() < entropy_threshold:
+            if step >= 1 and entropy_val < entropy_threshold:
                 break
 
         action_tokens = action_tokens[:, 1:]   # drop <BOS>; detokenize pads to latent_horizon
@@ -266,6 +269,7 @@ class OATPolicy(BasePolicy):
             'action': action,
             'action_pred': action_pred,
             'n_tokens': n_tokens,
+            'entropies': entropies,
         }
 
     def forward(self, batch) -> torch.Tensor:
