@@ -255,6 +255,7 @@ class OATPolicy(BasePolicy):
                 break
 
         action_tokens = action_tokens[:, 1:]   # drop <BOS>; detokenize pads to latent_horizon
+        n_tokens = action_tokens.shape[1]
 
         with torch.inference_mode():
             action_pred = self.action_tokenizer.detokenize(tokens=action_tokens)
@@ -264,6 +265,7 @@ class OATPolicy(BasePolicy):
         return {
             'action': action,
             'action_pred': action_pred,
+            'n_tokens': n_tokens,
         }
 
     def forward(self, batch) -> torch.Tensor:

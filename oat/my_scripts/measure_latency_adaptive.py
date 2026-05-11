@@ -65,21 +65,24 @@ def measure_latency(
                 policy.predict_action_adaptive(obs_dict, use_k_tokens=k)
 
         # timed runs
+        total_tokens = 0
         torch.cuda.synchronize()
         start = time.perf_counter()
         with torch.inference_mode():
             for _ in range(runs):
-                policy.predict_action_adaptive(obs_dict, use_k_tokens=k)
+                out = policy.predict_action_adaptive(obs_dict, use_k_tokens=k)
+                total_tokens += out['n_tokens']
         torch.cuda.synchronize()
 
         elapsed_ms = (time.perf_counter() - start) / runs * 1000
-        results[k] = elapsed_ms
-        print(f"OAT({k:2d} tokens): {elapsed_ms:7.2f} ms")
+        avg_tokens = total_tokens / runs
+        results[k] = (elapsed_ms, avg_tokens)
+        print(f"OAT(cap={k:2d}): {elapsed_ms:7.2f} ms | avg tokens used: {avg_tokens:.2f}")
 
-    print(f"\nSpeedup vs OAT(8):")
-    ref = results.get(8, results[max(results.keys())])
-    for k, ms in results.items():
-        print(f"  OAT({k}): {ref / ms:.2f}x faster")
+    print(f"\nSpeedup vs OAT(cap=8):")
+    ref_ms, _ = results.get(8, results[max(results.keys())])
+    for k, (ms, avg) in results.items():
+        print(f"  OAT(cap={k}, avg={avg:.2f}): {ref_ms / ms:.2f}x faster")
 
 
 if __name__ == '__main__':
