@@ -105,11 +105,11 @@ def eval_policy_sim(
             if isinstance(value, wandb.sdk.data_types.video.Video):
                 runner_log[key] = [value]
         all_runs.append({k: v for k, v in runner_log.items() if not isinstance(v, list)})
-        print(f"Exp 1: success rate = {runner_log['mean_success_rate']}")
-        
+        print(f"Exp 1: success rate = {runner_log['mean_success_rate']}, mean tokens used = {runner_log.get('mean_tokens_used', 'N/A')}")
+
         for i in range(num_exp - 1):
             this_log = env_runner.run(policy, **kwargs)
-            print(f"Exp {i + 2}: success rate = {this_log['mean_success_rate']}")
+            print(f"Exp {i + 2}: success rate = {this_log['mean_success_rate']}, mean tokens used = {this_log.get('mean_tokens_used', 'N/A')}")
             all_runs.append({k: v for k, v in this_log.items() if not isinstance(v, list)})
             # merge logs
             for key, value in this_log.items():

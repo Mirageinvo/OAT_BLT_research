@@ -208,6 +208,7 @@ class LiberoRunner(BaseRunner):
         # allocate data
         all_video_paths = [None] * n_inits
         all_success = [False] * n_inits
+        all_token_counts = []
 
         for chunk_idx in range(n_chunks):
             start = chunk_idx * n_envs
@@ -249,10 +250,13 @@ class LiberoRunner(BaseRunner):
 
                 # run policy
                 with torch.inference_mode():
-                    action = policy.predict_action_adaptive({
-                        port: obs_dict[port] 
+                    result = policy.predict_action_adaptive({
+                        port: obs_dict[port]
                         for port in policy.get_observation_ports()
-                    }, **kwargs)['action'].detach().cpu().numpy()
+                    }, **kwargs)
+                    action = result['action'].detach().cpu().numpy()
+                    if 'n_tokens' in result:
+                        all_token_counts.append(result['n_tokens'])
 
                 if not np.all(np.isfinite(action)):
                     raise RuntimeError("NaN of Inf action")
@@ -303,6 +307,8 @@ class LiberoRunner(BaseRunner):
             
         # log aggregate metrics
         log_data['mean_success_rate'] = np.mean(all_success)
+        if all_token_counts:
+            log_data['mean_tokens_used'] = np.mean(all_token_counts)
         
         return log_data
 
