@@ -95,7 +95,7 @@ def measure_latency(
         start = time.perf_counter()
         with torch.inference_mode():
             for i in range(runs):
-                out = policy.predict_action_adaptive(obs_batches[i % n_obs], use_k_tokens=k)
+                out = policy.predict_action_adaptive(obs_batches[i % n_obs], use_k_tokens=k, entropy_threshold=2.5)
                 token_counts.append(out['n_tokens'])
                 for step_idx, e in enumerate(out['entropies']):
                     entropies_by_step[step_idx].append(e)
