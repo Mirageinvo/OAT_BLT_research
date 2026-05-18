@@ -219,7 +219,7 @@ class OATPolicy(BasePolicy):
         use_k_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         topk: Optional[int] = None,
-        entropy_threshold: float = 2.5,
+        entropy_threshold: float = 2.75,
     ) -> Dict[str, torch.Tensor]:
         if use_k_tokens is None:
             use_k_tokens = self.max_seq_len
