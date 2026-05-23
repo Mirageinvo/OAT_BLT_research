@@ -112,3 +112,81 @@ OAT has a two-stage training pipeline: **tokenizer training** then **policy trai
 - Evaluation checkpointing keeps top-k by LIBERO task success rate.
 
 **Config system**: Hydra-based under `oat/config/`, with task overrides in `config/task/tokenizer/` and `config/task/policy/`. The `scripts/run_workspace.py` entry point instantiates the workspace class via Hydra. Distributed training uses HuggingFace Accelerate. SLURM scripts are in `slurm/`.
+
+---
+
+## Active research: adaptive token budget for OAT
+
+Goal: cut inference cost of `OATPolicy` by predicting *how many* action tokens are actually needed per observation, instead of always generating the full `max_seq_len` (=10).
+
+### Branches
+
+- `first_improvement` — introduced `OATPolicy.predict_action_adaptive` in `oat/policy/oatpolicy.py`: greedy autoregressive generation with **per-step entropy threshold** early-stopping. `libero_runner.py` was switched from `predict_action` to `predict_action_adaptive`; runner now also accumulates `n_tokens` and reports `mean_tokens_used` in the eval log. `scripts/eval_policy_sim.py` prints it alongside `mean_success_rate`.
+- `tok_num_generator` (current branch) — replace the entropy threshold with a **learned complexity predictor** that estimates min-k per observation. Labels are MSE-based, not simulation-based. Dataset collection script is done; predictor model is next.
+
+### Label generation (MSE-based)
+
+Implemented in `oat/scripts/collect_min_k_dataset.py`:
+- Iterate the policy's training `ZarrDataset` (same Hydra config used to train the checkpoint).
+- Per batch: encode obs → features; greedy-decode all `max_seq_len` tokens; for each `k = 1..max_seq_len`, detokenize the first `k` tokens and compute **normalized RMS per-dim error** in the action-normalizer space `[-1, 1]`: `err(k) = sqrt(mean((norm(a_pred(k)) - norm(a_gt))^2))`. This makes ε interpretable as average fraction of each dim's data range.
+- GT actions are sliced to `n_action_steps` (=16) before comparison — the dataset stores 32 steps but policy only predicts 16.
+- Save `features [N, To, d]`, `errors [N, max_k]`, `task_uids` to `.npz`. Storing the full `errors` array (not just `min_k`) so ε can be varied later without re-running.
+- Default ε for stats: **10%**. `min_k = first k where err < ε`, else `max_k`. Script prints detailed stats: per-k error percentiles, cumulative success fractions, effective-k histogram.
+- Features (post-`obs_encoder`) are saved rather than raw obs: dataset is policy-specific anyway, and obs are large (128×128 images).
+
+Run:
+```bash
+cd oat && uv run python scripts/collect_min_k_dataset.py \
+    -c my_models/policy_ep-0250_sr-0.596.ckpt \
+    -o data/libero/libero10_min_k_features.npz
+```
+
+Output: `data/libero/libero10_min_k_features.npz` with keys `features`, `errors`, optionally `task_uids`.
+
+### Methodological notes
+
+- "Circularity" concern (using the trained policy to label data for its own helper) is intrinsic to the task — we are predicting a property *of this policy*. This is the same pattern used by CALM, Adaptive Computation Time, early-exit networks, and speculative decoding.
+- MSE labels capture "policy's output stabilized" — a proxy for "this input is easy". They may diverge from "policy succeeds at the task" (the simulation-success label). The plan is to validate the learned predictor end-to-end via LIBERO success rate, treating MSE labels as the cheap-to-collect training signal.
+- If MSE-trained predictor degrades success rate, fall back to simulation-success labels (≈10× more expensive: run eval with `use_k_tokens=1..10`, take per-episode min-k where success=True).
+
+### `predict_action_adaptive` details
+
+- Defined in `oat/oat/policy/oatpolicy.py:217-273`. Greedy AR generation **without KV-cache** (calls `self.model()` each step, not `self.model.generate()`). Conscious trade-off for simplicity (~3.5 ms/token overhead vs KV-cache version).
+- Entropy computed on **full** distribution (before top-k masking), averaged across batch. Early stop: `if step >= 1 and entropy < threshold` (minimum 2 tokens always generated).
+- Default `entropy_threshold=2.75`. Entropy range: `[0, log(1000) ≈ 6.91]` nats (codebook size 1000).
+- Returns: `{'action', 'action_pred', 'n_tokens', 'entropies'}`.
+
+### Eval pipeline
+
+- `oat/scripts/eval_policy_sim.py` — CLI entry point. Flags: `-c`, `-o`, `-n`, `-d`, `--temperature`, `--topk`, `--use_k_tokens`. **No `--entropy_threshold` flag** — always uses default 2.75 from `predict_action_adaptive` signature. Adding this flag is a known TODO.
+- `oat/oat/env_runner/libero_runner.py` — rollout runner. Calls `policy.predict_action_adaptive()`, accumulates `n_tokens` per step, reports `mean_tokens_used` in log.
+- `oat/oat/workspace/train_policy.py:331` — validation also uses `predict_action_adaptive`.
+
+### Latency benchmarking
+
+`oat/my_scripts/measure_latency_adaptive.py` — measures inference latency per token-cap value.
+- `--obs_from_checkpoint_dataset` flag loads real obs from val dataset (important: dummy random obs produce near-uniform entropy ~6.9, never triggering early stop).
+- `--n_batches N` cycles through N distinct obs batches during timing.
+- Prints per-step entropy percentiles and speedup table.
+
+```bash
+cd oat && uv run python my_scripts/measure_latency_adaptive.py \
+    -c my_models/policy_ep-0250_sr-0.596.ckpt \
+    --obs_from_checkpoint_dataset --n_batches 10
+```
+
+### Key files touched
+
+- `oat/oat/policy/oatpolicy.py` — `predict_action` (line 170, with KV-cache) and `predict_action_adaptive` (line 217, without KV-cache)
+- `oat/oat/env_runner/libero_runner.py` — uses `predict_action_adaptive`, tracks `mean_tokens_used`
+- `oat/scripts/eval_policy_sim.py` — prints `mean_tokens_used`
+- `oat/scripts/collect_min_k_dataset.py` — label generation for token-count predictor
+- `oat/my_scripts/measure_latency_adaptive.py` — latency benchmarking with real obs
+
+### TODO next
+
+1. **Analyze `collect_min_k_dataset.py` output** — check min-k distribution, error curves, decide if ε=0.10 is right.
+2. **Build token-count predictor** — small MLP/transformer in `oat/oat/model/` that maps features → predicted min-k. Training script in `oat/workspace/` or `oat/scripts/`.
+3. **Wire predictor into `predict_action_adaptive`** — as alternative to entropy threshold: predictor says how many tokens to generate, no per-step entropy check needed.
+4. **Add `--entropy_threshold` flag to `eval_policy_sim.py`** — for threshold sweep experiments.
+5. **End-to-end validation** — run LIBERO eval with predictor-based adaptive generation, compare success rate vs full-budget baseline.
