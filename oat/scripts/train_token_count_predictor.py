@@ -54,7 +54,8 @@ def build_labels(errors: np.ndarray, eps: float):
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, max_k):
+def evaluate(model, loader, device, max_k, errors_val, eps):
+    """errors_val [n_val, max_k] aligned with loader order (val_loader is shuffle=False)."""
     model.eval()
     preds, trues = [], []
     for feats, labels in loader:
@@ -63,13 +64,18 @@ def evaluate(model, loader, device, max_k):
         trues.append(labels)
     pred = torch.cat(preds).numpy() + 1        # k in [1, max_k]
     true = torch.cat(trues).numpy() + 1
-    n = len(true)
 
     exact = (pred == true).mean()
-    under = (pred < true).mean()               # too few tokens -> risky
+    under = (pred < true).mean()               # too few tokens vs label -> risky proxy
     over = (pred > true).mean()                # too many -> just slower
-    safe = (pred >= true).mean()               # enough tokens
-    extra = (pred - true).mean()               # avg token delta vs oracle
+    safe = (pred >= true).mean()               # enough tokens (proxy)
+    extra = (pred - true).mean()
+
+    # realized error: plug predicted k back into the errors array (honest, in action units)
+    rows = np.arange(len(pred))
+    err_realized = errors_val[rows, pred - 1]
+    within = err_realized < eps                                  # adaptive "success" (label-space)
+    full_within = errors_val[:, max_k - 1] < eps                 # success at full budget (k=max_k)
     return {
         "exact_acc": float(exact),
         "under_rate": float(under),
@@ -78,6 +84,12 @@ def evaluate(model, loader, device, max_k):
         "mean_pred_k": float(pred.mean()),
         "mean_true_k": float(true.mean()),
         "mean_extra_tokens": float(extra),
+        # --- realized-error metrics (the ones that matter) ---
+        "frac_within_eps": float(within.mean()),                 # adaptive success
+        "full_budget_within_eps": float(full_within.mean()),     # ceiling = 1 - fail_rate
+        "success_retained": float(within.mean() / max(full_within.mean(), 1e-9)),
+        "mean_err_realized": float(err_realized.mean()),
+        "p90_err_realized": float(np.percentile(err_realized, 90)),
         "pred_hist": np.bincount(pred, minlength=max_k + 1)[1:].tolist(),
         "true_hist": np.bincount(true, minlength=max_k + 1)[1:].tolist(),
     }
@@ -119,6 +131,7 @@ def main(dataset, output, epsilon, hidden_dims, dropout, epochs, batch_size,
     perm = np.random.permutation(N)
     n_val = int(N * val_ratio)
     val_idx, train_idx = perm[:n_val], perm[n_val:]
+    errors_val = errors[val_idx]               # aligned with val_loader (shuffle=False)
 
     feats_t = torch.from_numpy(features)
     labels_t = torch.from_numpy(labels)
@@ -164,13 +177,13 @@ def main(dataset, output, epsilon, hidden_dims, dropout, epochs, batch_size,
         scheduler.step()
 
         if epoch % 5 == 0 or epoch == epochs - 1:
-            m = evaluate(model, val_loader, device, max_k)
+            m = evaluate(model, val_loader, device, max_k, errors_val, epsilon)
             print(f"ep {epoch:3d} | loss {total_loss / len(train_idx):.4f} | "
-                  f"acc {m['exact_acc']:.3f} | under {m['under_rate']:.3f} | "
-                  f"safe {m['safe_rate']:.3f} | pred_k {m['mean_pred_k']:.2f} "
-                  f"(oracle {m['mean_true_k']:.2f}, full {max_k})")
-            # select on safe_rate, tie-break by fewer mean tokens
-            score = m['safe_rate'] - 1e-3 * m['mean_pred_k']
+                  f"acc {m['exact_acc']:.3f} | within_eps {m['frac_within_eps']:.3f}"
+                  f"/{m['full_budget_within_eps']:.3f} | retained {m['success_retained']:.3f} | "
+                  f"pred_k {m['mean_pred_k']:.2f} (full {max_k})")
+            # select on realized success, tie-break by fewer mean tokens
+            score = m['frac_within_eps'] - 1e-3 * m['mean_pred_k']
             if score > best_safe:
                 best_safe = score
                 best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
@@ -179,10 +192,11 @@ def main(dataset, output, epsilon, hidden_dims, dropout, epochs, batch_size,
     print("\nBest val metrics:")
     for k, v in best_metrics.items():
         print(f"  {k}: {v}")
-    print(f"\nLatency proxy: predictor uses {best_metrics['mean_pred_k']:.2f} tokens/step "
-          f"vs full budget {max_k} "
-          f"(~{(1 - best_metrics['mean_pred_k'] / max_k) * 100:.0f}% fewer AR steps), "
-          f"under-predicting on {best_metrics['under_rate'] * 100:.1f}% of samples.")
+    print(f"\nTrade-off (label-space): predictor uses {best_metrics['mean_pred_k']:.2f} tokens/step "
+          f"vs full budget {max_k} (~{(1 - best_metrics['mean_pred_k'] / max_k) * 100:.0f}% fewer AR steps), "
+          f"reaching within-eps on {best_metrics['frac_within_eps'] * 100:.1f}% of samples "
+          f"vs {best_metrics['full_budget_within_eps'] * 100:.1f}% at full budget "
+          f"({best_metrics['success_retained'] * 100:.1f}% of achievable success retained).")
 
     pathlib.Path(output).parent.mkdir(parents=True, exist_ok=True)
     torch.save({
