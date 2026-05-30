@@ -27,6 +27,7 @@ import json
 import numpy as np
 from oat.env_runner.base_runner import BaseRunner
 from oat.policy.base_policy import BasePolicy
+from oat.model.token_count_predictor import TokenCountPredictor
 from typing import List, Optional
 
 @click.command()
@@ -37,6 +38,9 @@ from typing import List, Optional
 @click.option('--temperature', default=None, type=float, help="temperature for policy inference")
 @click.option('--topk', default=None, type=int, help="topk for policy inference")
 @click.option('--use_k_tokens', default=None, type=int, help="number of tokens to use for policy inference")
+@click.option('--token_predictor', default=None, type=str,
+              help="path to a TokenCountPredictor .ckpt; if set, adaptive generation uses it "
+                   "instead of the entropy threshold")
 def eval_policy_sim(
     checkpoint: str,
     output_dir: str,
@@ -46,6 +50,7 @@ def eval_policy_sim(
     temperature: Optional[float] = None,
     topk: Optional[int] = None,
     use_k_tokens: Optional[int] = None,
+    token_predictor: Optional[str] = None,
 ):
     if os.path.exists(output_dir):
         click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
@@ -79,7 +84,13 @@ def eval_policy_sim(
         device = torch.device(device)
         policy.to(device)
         policy.eval()
-        
+
+        # optionally attach a learned token-count predictor for adaptive generation
+        if token_predictor is not None:
+            predictor = TokenCountPredictor.from_checkpoint(token_predictor)
+            policy.set_token_predictor(predictor)
+            print(f"Attached token-count predictor from {token_predictor}")
+
         # run eval
         print(f"Running evaluation on {ckpt}")
         env_runner: BaseRunner = hydra.utils.instantiate(

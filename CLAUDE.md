@@ -151,7 +151,7 @@ Output: `my_datasets/libero10_min_k_features.npz` with keys `features`, `errors`
 
 ### Token-count predictor (model + training)
 
-Status: model and training script written, **not yet trained on cluster**. min_k distribution at ε=0.10 was checked and looks good.
+Status: trained on cluster (ε=0.10). Wired into `OATPolicy` for end-to-end eval (see below); **LIBERO success-rate validation still pending**. Chosen operating point: **`w=2.0`** (`my_models/token_count_predictor_w2.0.ckpt`).
 
 - Model: `oat/oat/model/token_count_predictor.py` — `TokenCountPredictor`, a small MLP `features [B, To, d] → flatten(To·d) → hidden(256,256) → max_k logits` (classes = k=1..max_k). Feature z-score stats (`feat_mean`/`feat_std`) are stored as buffers so a loaded predictor normalizes raw `features` itself (self-contained inference). Helpers: `predict_k()` → k∈[1,max_k], `from_checkpoint()`.
 - Training: `oat/scripts/train_token_count_predictor.py`. Loads the `.npz`, builds labels `min_k(ε) = first k with err<ε else max_k` (fail → full budget), standardizes on the train split, trains with CE.
@@ -163,18 +163,40 @@ Status: model and training script written, **not yet trained on cluster**. min_k
         -i my_datasets/libero10_min_k_features.npz \
         -o my_models/token_count_predictor.ckpt --epsilon 0.10
     ```
+Results — `--underpredict_weight` sweep (ε=0.10, val; `full_budget_within_eps=0.624` is the hard ceiling, since 31% of samples never reach ε at any k):
+
+| `w` | `mean_pred_k` | AR steps saved | `frac_within_eps` | `success_retained` | `under_rate` | `over_rate` |
+|-----|---------------|----------------|-------------------|--------------------|--------------|-------------|
+| 1.0 | 4.00 | ~50% | 0.520 | 83.4% | 0.224 | 0.206 |
+| 2.0 | 4.76 | ~40% | 0.547 | 87.7% | 0.154 | 0.314 |
+| 4.0 | 6.02 | ~25% | 0.582 | 93.3% | 0.082 | 0.474 |
+
+Findings:
+- The predictor effectively **collapses to binary**: `pred_hist` is concentrated on k∈{1,2,8}, almost never k=3..7 (middle classes are ~14% of data and noisy → unpredictable from features). So it is an "easy (1/2) vs hard (8)" detector; `w` just shifts the decision boundary toward the safe side.
+- `mean_err_realized` is nearly constant across the sweep (~0.135/0.133/0.129, p90 ~0.282): aggressive settings do **not** blow up action error; the extra `within_eps` misses are marginal samples near the ε boundary, not catastrophes.
+- All offline numbers use **greedy** decoding + GT-demonstration labels, while the policy **samples** at inference (temp=1, topk=10) — treat as optimistic proxy; only LIBERO success (TODO #5) is decisive.
 - Possible v2 if CE under-predicts too much: per-k binary "is k sufficient" heads → pick smallest sufficient k at inference, with a tunable decision threshold (no retrain to change it).
 
-### `predict_action_adaptive` details
+### Adaptive generation: entropy vs learned predictor
 
-- Defined in `oat/oat/policy/oatpolicy.py:217-273`. Greedy AR generation **without KV-cache** (calls `self.model()` each step, not `self.model.generate()`). Conscious trade-off for simplicity (~3.5 ms/token overhead vs KV-cache version).
-- Entropy computed on **full** distribution (before top-k masking), averaged across batch. Early stop: `if step >= 1 and entropy < threshold` (minimum 2 tokens always generated).
+`OATPolicy.predict_action_adaptive` now **dispatches**: if a token-count predictor is attached (`policy.set_token_predictor(...)`), it calls `predict_action_predictor`; otherwise it runs the original entropy-threshold path. So the runner / eval call site is unchanged — attaching a predictor switches modes.
+
+`predict_action_adaptive` (entropy mode):
+- Greedy-ish AR generation **without KV-cache** (calls `self.model()` each step, not `self.model.generate()`). Conscious trade-off for simplicity (~3.5 ms/token overhead vs KV-cache version).
+- Entropy computed on **full** distribution (before top-k masking), averaged across batch. Early stop: `if step >= 1 and entropy < threshold` (minimum 2 tokens; batch stops together).
 - Default `entropy_threshold=2.75`. Entropy range: `[0, log(1000) ≈ 6.91]` nats (codebook size 1000).
 - Returns: `{'action', 'action_pred', 'n_tokens', 'entropies'}`.
 
+`predict_action_predictor` (learned mode):
+- `features = obs_encoder(obs)` → `k_pred = token_predictor.predict_k(features)` (per-sample, clamped to `[1, use_k_tokens or max_seq_len]`).
+- Generates `K = max(k_pred)` tokens for the whole batch via the **KV-cache** `self.model.generate()` (no per-step entropy needed → faster than entropy mode), then decodes each sample at its **own** `k_pred` via `OATTok.detokenize(tokens, eval_keep_k=k_pred)`. NB: batched AR latency is bound by `max(k_pred)`; with batch_size=1 it is exact per-sample.
+- `detokenize` gained an optional `eval_keep_k: List[int]` (per-sample budget) for this.
+- Returns: `{'action', 'action_pred', 'n_tokens' (batch-mean budget), 'k_pred'}`.
+- The predictor is attached post-hoc (not a submodule), so it is excluded from the policy checkpoint and stays frozen.
+
 ### Eval pipeline
 
-- `oat/scripts/eval_policy_sim.py` — CLI entry point. Flags: `-c`, `-o`, `-n`, `-d`, `--temperature`, `--topk`, `--use_k_tokens`. **No `--entropy_threshold` flag** — always uses default 2.75 from `predict_action_adaptive` signature. Adding this flag is a known TODO.
+- `oat/scripts/eval_policy_sim.py` — CLI entry point. Flags: `-c`, `-o`, `-n`, `-d`, `--temperature`, `--topk`, `--use_k_tokens`, `--token_predictor` (path to a `TokenCountPredictor` ckpt → attaches it for learned adaptive generation). **No `--entropy_threshold` flag** — entropy mode always uses default 2.75. Adding that flag is a known TODO.
 - `oat/oat/env_runner/libero_runner.py` — rollout runner. Calls `policy.predict_action_adaptive()`, accumulates `n_tokens` per step, reports `mean_tokens_used` in log.
 - `oat/oat/workspace/train_policy.py:331` — validation also uses `predict_action_adaptive`.
 
@@ -193,7 +215,8 @@ cd oat && uv run python my_scripts/measure_latency_adaptive.py \
 
 ### Key files touched
 
-- `oat/oat/policy/oatpolicy.py` — `predict_action` (line 170, with KV-cache) and `predict_action_adaptive` (line 217, without KV-cache)
+- `oat/oat/policy/oatpolicy.py` — `predict_action` (KV-cache), `predict_action_adaptive` (entropy mode, dispatches to predictor when one is attached), `predict_action_predictor` (learned mode), `set_token_predictor`
+- `oat/oat/tokenizer/oat/tokenizer.py` — `OATTok.detokenize` gained optional per-sample `eval_keep_k`
 - `oat/oat/env_runner/libero_runner.py` — uses `predict_action_adaptive`, tracks `mean_tokens_used`
 - `oat/scripts/eval_policy_sim.py` — prints `mean_tokens_used`
 - `oat/scripts/collect_min_k_dataset.py` — label generation for token-count predictor
@@ -205,6 +228,12 @@ cd oat && uv run python my_scripts/measure_latency_adaptive.py \
 
 1. ~~**Analyze `collect_min_k_dataset.py` output**~~ — done; min_k distribution at ε=0.10 checked, looks good.
 2. ~~**Build token-count predictor**~~ — model + training script written (`oat/oat/model/token_count_predictor.py`, `oat/scripts/train_token_count_predictor.py`). **Next: train on cluster and check `safe_rate`/`under_rate`/`mean_pred_k`.**
-3. **Wire predictor into `predict_action_adaptive`** — as alternative to entropy threshold: predictor says how many tokens to generate, no per-step entropy check needed. Use `TokenCountPredictor.from_checkpoint` + reuse the already-computed `features` (no extra obs-encoder pass).
+3. ~~**Wire predictor into `predict_action_adaptive`**~~ — done: `predict_action_predictor` + `set_token_predictor` + `eval_policy_sim.py --token_predictor` + `detokenize(eval_keep_k=...)`. Compiles; **not yet run in sim.**
 4. **Add `--entropy_threshold` flag to `eval_policy_sim.py`** — for threshold sweep experiments.
-5. **End-to-end validation** — run LIBERO eval with predictor-based adaptive generation, compare success rate vs full-budget baseline.
+5. **End-to-end validation (next)** — run LIBERO eval and compare three modes: full budget (k=8), entropy threshold (2.75), learned predictor (`w=2.0` ckpt). Command:
+   ```bash
+   uv run scripts/eval_policy_sim.py -c my_models/policy_ep-0250_sr-0.596.ckpt \
+       -o output/eval/predictor_w2 --num_exp 5 \
+       --token_predictor my_models/token_count_predictor_w2.0.ckpt
+   ```
+   Watch `mean_success_rate` vs `mean_tokens_used`. If success holds, try `w=1.0` for more savings; if it drops, `w=4.0`.

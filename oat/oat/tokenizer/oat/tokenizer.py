@@ -118,11 +118,15 @@ class OATTok(BaseTokenizer):
         _, tokens = self.encode(samples)
         return tokens
 
-    def detokenize(self, 
+    def detokenize(self,
         tokens: Union[torch.Tensor, List[List[int]]],
+        eval_keep_k: Optional[List[int]] = None,
     ) -> torch.Tensor:
         # tokens: (B, T') or list of list of int
-        
+        # eval_keep_k: optional per-sample number of tokens to actually decode from
+        #   (tensor input only). Lets each sample use a different budget while the
+        #   batch is generated to a common length. If None, uses all provided tokens.
+
         # standardize
         if isinstance(tokens, list):
             token_lens = [t.shape[1] for t in tokens]
@@ -131,7 +135,12 @@ class OATTok(BaseTokenizer):
                 for t in tokens
             ], dim=0)
         elif isinstance(tokens, torch.Tensor):
-            token_lens = [tokens.shape[1]] * tokens.shape[0]
+            if eval_keep_k is not None:
+                assert len(eval_keep_k) == tokens.shape[0], \
+                    "eval_keep_k must have one entry per sample"
+                token_lens = list(eval_keep_k)
+            else:
+                token_lens = [tokens.shape[1]] * tokens.shape[0]
             if tokens.shape[-1] < self.latent_horizon:
                 tokens = pad_token_seq(tokens, self.latent_horizon)
         else:

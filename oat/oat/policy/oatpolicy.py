@@ -78,6 +78,10 @@ class OATPolicy(BasePolicy):
         self.temperature = temperature
         self.topk = topk
 
+        # optional learned token-count predictor (attached post-hoc, not a submodule
+        # so it is excluded from the policy's own checkpoint / training)
+        self.token_predictor = None
+
         # report
         num_obs_params = sum(p.numel() for p in obs_encoder.parameters())
         num_trainable_obs_params = sum(p.numel() for p in obs_encoder.parameters() if p.requires_grad)
@@ -125,6 +129,16 @@ class OATPolicy(BasePolicy):
     def set_normalizer(self, normalizer):
         self.obs_encoder.set_normalizer(normalizer)
         # self.action_tokenizer.set_normalizer(normalizer)
+
+    def set_token_predictor(self, predictor):
+        """Attach a frozen TokenCountPredictor. When set, `predict_action_adaptive`
+        uses it (predicts per-observation token budget) instead of the entropy
+        threshold. Pass None to revert to entropy-threshold mode."""
+        self.token_predictor = predictor
+        if predictor is not None:
+            predictor.to(self.device).eval()
+            for p in predictor.parameters():
+                p.requires_grad_(False)
 
     def get_optimizer(
         self, 
@@ -221,6 +235,14 @@ class OATPolicy(BasePolicy):
         topk: Optional[int] = None,
         entropy_threshold: float = 2.75,
     ) -> Dict[str, torch.Tensor]:
+        # if a learned token-count predictor is attached, use it instead of the
+        # entropy threshold (no per-step entropy check, KV-cache fast generation)
+        if getattr(self, 'token_predictor', None) is not None:
+            return self.predict_action_predictor(
+                obs_dict, use_k_tokens=use_k_tokens,
+                temperature=temperature, topk=topk,
+            )
+
         if use_k_tokens is None:
             use_k_tokens = self.max_seq_len
         else:
@@ -270,6 +292,51 @@ class OATPolicy(BasePolicy):
             'action_pred': action_pred,
             'n_tokens': n_tokens,
             'entropies': entropies,
+        }
+
+    @torch.inference_mode()
+    def predict_action_predictor(self,
+        obs_dict: Dict[str, torch.Tensor],
+        use_k_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        topk: Optional[int] = None,
+    ) -> Dict[str, torch.Tensor]:
+        """Adaptive generation driven by the attached `token_predictor`:
+        predict a per-observation budget k, generate that many tokens (KV-cache),
+        and decode each sample at its own k. `use_k_tokens` optionally caps the budget."""
+        if temperature is None:
+            temperature = self.temperature
+        if topk is None:
+            topk = self.topk
+        cap = self.max_seq_len if use_k_tokens is None else min(use_k_tokens, self.max_seq_len)
+
+        # encode observation
+        features = self.obs_encoder(obs_dict)   # [B, To, d]
+        B = features.shape[0]
+
+        # predict per-sample token budget from the same features
+        k_pred = self.token_predictor.predict_k(features).clamp(min=1, max=cap)  # [B]
+        K = int(k_pred.max().item())
+
+        # generate K tokens for the whole batch (batched AR is bound by the max budget)
+        bos = torch.full((B, 1), self.bos_id, dtype=torch.long, device=self.device)
+        action_tokens = self.model.generate(
+            bos, cond=features, max_new_tokens=K,
+            temperature=temperature, top_k=topk,
+        )[:, 1:]    # [B, K], drop <BOS>
+
+        # decode each sample at its own predicted budget
+        action_pred = self.action_tokenizer.detokenize(
+            tokens=action_tokens,
+            eval_keep_k=k_pred.tolist(),
+        )
+        action = action_pred[:, :self.n_action_steps]
+
+        return {
+            'action': action,
+            'action_pred': action_pred,
+            'n_tokens': float(k_pred.float().mean().item()),  # mean budget over batch
+            'k_pred': k_pred,
         }
 
     def forward(self, batch) -> torch.Tensor:
