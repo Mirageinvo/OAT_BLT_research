@@ -41,6 +41,10 @@ from typing import List, Optional
 @click.option('--token_predictor', default=None, type=str,
               help="path to a TokenCountPredictor .ckpt; if set, adaptive generation uses it "
                    "instead of the entropy threshold")
+@click.option('--entropy_threshold', default=None, type=float,
+              help="entropy threshold for entropy-mode early stopping (default 2.75). "
+                   "Set <=0 to disable early stopping (full budget k=max_seq_len). "
+                   "Ignored when --token_predictor is set.")
 def eval_policy_sim(
     checkpoint: str,
     output_dir: str,
@@ -51,6 +55,7 @@ def eval_policy_sim(
     topk: Optional[int] = None,
     use_k_tokens: Optional[int] = None,
     token_predictor: Optional[str] = None,
+    entropy_threshold: Optional[float] = None,
 ):
     if os.path.exists(output_dir):
         click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
@@ -105,6 +110,8 @@ def eval_policy_sim(
             kwargs['topk'] = topk
         if use_k_tokens is not None:
             kwargs['use_k_tokens'] = use_k_tokens
+        if entropy_threshold is not None:
+            kwargs['entropy_threshold'] = entropy_threshold
         runner_log = env_runner.run(
             policy,
             **kwargs
