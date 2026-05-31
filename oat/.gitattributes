@@ -4,3 +4,6 @@ my_models/backup/policy_ep-0250_sr-0.596.ckpt filter=lfs diff=lfs merge=lfs -tex
 my_models/backup/policy_ep-0500_sr-0.57.ckpt filter=lfs diff=lfs merge=lfs -text
 my_models/backup/tokenizer_ep-0950_mse-0.002.ckpt filter=lfs diff=lfs merge=lfs -text
 my_datasets/libero10_min_k_features.npz filter=lfs diff=lfs merge=lfs -text
+my_models/token_count_predictor_w1.0.ckpt filter=lfs diff=lfs merge=lfs -text
+my_models/token_count_predictor_w2.0.ckpt filter=lfs diff=lfs merge=lfs -text
+my_models/token_count_predictor_w4.0.ckpt filter=lfs diff=lfs merge=lfs -text
