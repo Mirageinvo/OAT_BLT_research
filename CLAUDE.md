@@ -176,6 +176,7 @@ Findings:
 - `mean_err_realized` is nearly constant across the sweep (~0.135/0.133/0.129, p90 ~0.282): aggressive settings do **not** blow up action error; the extra `within_eps` misses are marginal samples near the ε boundary, not catastrophes.
 - All offline numbers use **greedy** decoding + GT-demonstration labels, while the policy **samples** at inference (temp=1, topk=10) — treat as optimistic proxy; only LIBERO success (TODO #5) is decisive.
 - Possible v2 if CE under-predicts too much: per-k binary "is k sufficient" heads → pick smallest sufficient k at inference, with a tunable decision threshold (no retrain to change it).
+- **Idea — online binary stop/continue controller (sequential v2, generation-aware):** instead of predicting k from obs upfront, a per-step binary head decides "stop or generate one more token" conditioned on the **already-generated tokens** (reuse the AR model's last-layer hidden state — ~free — optionally + decoded prefix action `a_k` / `Δ(a_k,a_{k-1})`). This is the learned version of the entropy/info-gain stop and matches SkiP's refine-or-stop. Advantages: fixes the obs-only predictor's *generation-blindness*; per-step binary is a much easier target than 8-way `min_k` (sidesteps the {1,2,8} collapse; 8 labels/sample, no brittle argmin); tunable threshold without retrain. **Caveat:** it improves the *mechanism/trainability*, not the ceiling — if trained on MSE/self-consistency labels it's just a learned action-convergence stop (risks matching the heuristic that ≈ fixed-k in the gate). Payoff still rides on (a) per-sample headroom (gate) and (b) a **task-grounded** training signal. → pair this mechanism with task-grounded labels, not MSE.
 
 ### Adaptive generation: entropy vs learned predictor
 
@@ -229,15 +230,75 @@ cd oat && uv run python my_scripts/measure_latency_adaptive.py \
 | mode | SR | mean tokens | notes |
 |------|-----|-------------|-------|
 | full budget (k=8) | ~0.58 (paper) / 0.596 (train-eval) | 8 | reference |
+| learned predictor w=4.0 | 0.559 ± 0.014 (3 exp) | 6.29 | ~96% of full, −21% tokens |
 | entropy threshold 2.75 | 0.501 ± 0.016 | 5.68 | heuristic baseline |
 | learned predictor w=2.0 | 0.497 ± 0.017 | 5.31 | `token_count_predictor_w2.0.ckpt` |
+| fixed k=5 | 0.496 ± 0.009 (3 exp) | 5.0 | **INVALID baseline — untrained budget** |
+| fixed k=6 | 0.446 (2 exp) | 6.0 | **INVALID baseline — untrained budget** |
+
+**KEY FINDING — the tokenizer only supports k∈{1,2,4,8} (pow2).** `train_oattok.yaml` uses `token_dropout_mode: 'pow2'` with `num_registers=8`, so `MaskedNestedDropout` trains the decoder only on `keep_k ∈ {1,2,4,8}`. k=3,5,6,7 are **untrained budgets** → degraded reconstruction. Mean offline err(k) confirms non-monotonicity: `k1 .158, k2 .138, k3 .131, k4 .129, k5 .141, k6 .142, k7 .133, k8 .124` — dips at the trained budget 4, **jumps up at 5–6**, min at 8.
+- Consequence: **fixed k=5/6 are invalid baselines** (they penalize the decoder for an untrained budget, not for fewer tokens). `SR(6)=0.446 < SR(5)=0.496` is this artifact, not a real frontier. Valid fixed points are only **{1,2,4,8}**.
+- This explains the predictor: its `pred_hist` is concentrated on **{1,2,8}** (trained budgets) — its "mean 6.29" is a mix of mostly-8 + some-1/2, **never actually 6**. The earlier "binary collapse to {1,2,8}" was the predictor *correctly* learning to avoid untrained budgets, not a failure.
+- **Reframes the gate (revives adaptivity with an OAT-specific story):** a fixed integer budget is effectively restricted to {1,2,4,8}; to hit an intermediate *average* cost you must **mix** trained budgets per-sample, and adaptive per-obs mixing is the legitimate way. New gate baseline = the best **obs-agnostic mixture** of {1,2,4,8} at equal mean cost; the predictor wins only if obs-conditioning beats the mixing rate alone.
+- **Re-run gate with valid points:** fixed k∈{1,2,4,8} (have k=8≈0.58), then obs-agnostic {1,2,4,8} mixtures at mean 5.31 / 6.29 vs predictor w2.0/w4.0.
+- **Tokenizer fork:** pow2 is a *design choice* limiting the budget to 4 levels. Retraining the tokenizer with **uniform nested dropout** (all k∈{1..8} valid) would make the err curve monotone, enable fixed k=5/6, and give granular budgets — a FASTer-style lever and possibly a separate contribution.
 
 Conclusions:
-- **Learned predictor ≈ entropy heuristic in SR** (0.497 vs 0.501, CIs fully overlap) but uses **fewer tokens** (5.31 vs 5.68) → marginally Pareto-better, not a decisive win.
-- **The ~8–10pp SR drop vs full budget is method-independent** (both adaptive schemes land at ~0.50). This points to *compounding error over the episode* — slightly worse per-chunk reconstruction accumulates over ~550 steps — which the single-chunk MSE label cannot capture. So polishing the predictor on MSE labels is unlikely to break past this ceiling.
-- Decision pending: ~30% token savings for ~9pp (~15% rel.) success is expensive if success is the priority.
+- **Predictor scales sensibly:** w=2.0→4.0 climbs 0.497→0.559 as tokens go 5.31→6.29; **w=4.0 is the attractive operating point** (only ~0.02 SR below full for −21% tokens).
+- **Learned predictor tentatively Pareto-beats entropy:** predictor line (slope ~0.063 SR/token) interpolated to 5.68 tokens ≈ 0.52 vs entropy's 0.501 at the same budget. CIs overlap at the margin → suggestive, not proven.
+- **But the decisive comparison (adaptive vs fixed-k) is still missing.** All points above are vs full budget or vs the entropy heuristic (another adaptive method). Until fixed k=5/6 SR is measured, we cannot claim adaptivity beats a constant budget. This is GATE TODO #6.
+- The earlier "~9pp drop is method-independent (compounding)" read still holds at the low-token end (w2.0 ≈ entropy); w=4.0 shows the drop shrinks fast as budget rises.
 
 Speed note: eval is dominated by simulation (obs cameras rendered every step for all parallel envs). Use `MUJOCO_GL=egl` (GPU offscreen; training slurm sets it, eval did not), lower `n_test`/`n_test_vis` for iteration. (`eval_policy_sim.py` does not yet expose runner overrides via CLI.)
+
+### Paper directions & related work
+
+**Paper slot (strong motivation):** OAT (RSS 2026) explicitly leaves *adaptive autoregressive depth* as an open problem — it provides prefix-decodable tokens (anytime fidelity↔compute trade-off) but token count is **fixed at deployment**, and they call for a solution "grounded in uncertainty and information, rather than ad hoc engineering heuristics." Our project tackles exactly this.
+
+**Diagnosis so far (the negative result that motivates the method):** naive adaptive budgeting does **not** beat fixed-k:
+- MSE-to-demo labels are an open-loop, single-chunk **proxy** → ignore compounding error over the episode.
+- The obs-only MLP predictor is **blind to the generation process** (no better than entropy) and **collapses to binary** (k∈{1,2,8}; middle k noisy/unpredictable).
+- Token-entropy stopping is the "ad hoc heuristic" OAT warns against; measured in token space, not action space.
+- Distribution shift: labels on demo states (mean k 4.76) vs rollout states (5.31).
+- End-to-end: learned ≈ entropy in SR, both ~8–10pp below full budget → cost looks **method-independent (compounding)**.
+
+**Related work & borrowed ideas:**
+- **AAC** (Adaptive Action Chunking, CVPR 2026, [2604.04161](https://arxiv.org/abs/2604.04161)) — adapts chunk *size* (action steps) using **action-space entropy** as the cue. Borrow: use action-space uncertainty (not token entropy) as the stopping signal. Different axis (chunk size vs token count) → cite as motivation, possibly a 2nd adaptive axis.
+- **SkiP** (When to Skip vs Refine, RLBench, [2605.15536](https://arxiv.org/abs/2605.15536)) — per-step binary **"refine-or-stop"** with a learned predictor + DAgger (Ross et al.) on-policy data. Borrow: reframe from "predict k from obs" to **per-step refine/stop conditioned on the partial generation** (fixes obs-blindness; binary per-step is easier than 8-way min_k).
+- **LAC** ([2602.00686](https://arxiv.org/pdf/2602.00686)) — learnable visual-token caching trained on **task-loss feedback**; 2–3× on LIBERO without SR loss. Borrow: ground the controller's signal in task outcome, not a reconstruction proxy. (LAC cuts *visual* tokens at the encoder; we cut *action* tokens at generation → orthogonal, combinable.)
+- **Spec-VLA** ([2507.22424](https://arxiv.org/abs/2507.22424)) — speculative decoding for VLAs; orthogonal lossless speedup, combinable.
+- **FASTer** ([2512.04952](https://arxiv.org/abs/2512.04952)), **FAST** ([2501.09747](https://arxiv.org/abs/2501.09747)) — learnable / DCT tokenizers; relevant if we instead retrain the tokenizer so fewer tokens suffice (attacks compounding ceiling directly).
+
+**Proposed method (synthesis):** a **generation-aware, per-step "refine-or-stop" controller** for OAT's ordered tokens, using an **action-space uncertainty signal** (action convergence `Δ(a_k, a_{k−1})` or action entropy), with the **decision threshold/head trained on task-grounded, on-policy (DAgger) data** rather than MSE-to-demo. Realizes OAT's "uncertainty/information" desideratum. Training the signal: prefer **offline logged-bandit** (`P(success | features, k)` from fixed-k rollouts — partly produced by the `SR(k)` sweep) over fragile online RL; escalate to DAgger iterations only if off-policy mismatch bites.
+
+**Novelty positioning:** first adaptive-depth controller for *prefix-decodable / ordered action tokenizers* (anytime fidelity), + the diagnosis of why naive variants fail. Narrower than it looks — AAC already does action-entropy adaptivity for VLA (chunk size), so position carefully on the token-count axis + ordered-tokenizer specificity + the failure analysis.
+
+**Two-axis extension — joint `(k, L)` control:** there are two orthogonal adaptive axes, controlling *different costs*:
+- **Axis 1 — token count `k`** (fidelity of the chunk). Cost = AR generation, which is **cheap** (a few small transformer steps). This is OAT's anytime axis.
+- **Axis 2 — executed chunk length `L`** (`n_action_steps`, currently 16/32). Controls **how often we replan**, and each replan pays the **expensive vision CNN** (2 cameras). Episode cost ≈ `(episode_len / L) × (CNN + k·AR)`, so longer `L` cuts the dominant cost. This is AAC's axis.
+
+Implications: (a) the token-count axis we've optimized is the *cheap* one — `measure_latency_adaptive` at batch=1 (TODO #10) must confirm whether reducing `k` saves meaningful wall-clock at all, or whether `L` is the higher-leverage axis. (b) The axes are **coupled, not independent**: a long open-loop `L` demands high fidelity → high `k`; short `L` tolerates low `k` (replans soon). Compounding error accumulates *within* the open-loop segment, so cutting `k` and extending `L` together is risky. → a **joint/coupled controller** `(k, L)` (one uncertainty signal drives both, or pick `L` by reactivity then `k` by the fidelity `L` needs), **not** two independent predictors. (c) Both axes are available on the current OAT model without retraining (decode horizon is 32; execute `L∈[1,32]`, generate `k∈[1,8]`). (d) Novelty caveat: axis `L` alone = re-doing AAC; the defensible contribution is the **joint `(k,L)` on a prefix-decodable tokenizer + the fidelity↔length coupling**. Sequencing: gate (#6) first, then a latency measurement to decide which axis is worth it, before building the joint controller.
+
+**Caveat on per-obs credit assignment:** task-grounded labels (B/C) inherit a fundamental difficulty — episode success is binary over ~34 chunk decisions, so per-obs attribution is noisy (mitigate by per-episode labels, counterfactual single-step k variation, or averaging over many rollouts).
+
+### Proposed method — Closed-loop Adaptive OAT (`(K, R)` controller)
+
+Per replan, a lightweight controller picks a pair `(K, R)` from obs features: **`K`** = number of OAT tokens to generate (autoregressive depth), **`R`** = number of leading continuous actions of the decoded chunk to execute open-loop before the next replan. OAT tokenizer/decoder/policy stay **frozen** (it still decodes the full fixed-length chunk); we only control refinement depth + open-loop horizon.
+
+- **Data:** rollout-state dataset (not just demos) — states visited by full-OAT8, fixed-k, the current predictor, and *failed* rollouts.
+- **Labels (full-OAT8 teacher):** for each `K`, prefix-decode the chunk; for each `R`, check **closed-loop consistency** — do the next `R` actions of the prefix-`K` chunk match what a fresh full-OAT8 replan would produce in the corresponding future states. Target `(K,R)` = cheapest pair preserving sufficient consistency, with `cost(K,R) = (C_vision + C_AR·K) / R` (vision-CNN per replan amortized over executed steps).
+- **Training:** small pair-policy `π(K,R | obs_features)` via supervised / soft offline-bandit target; optional online refinement with reward `success − λ·tokens − μ·num_policy_calls − η·jerk`, OAT frozen.
+- **Goal:** *approach* full-OAT8 success at lower total inference cost (fewer action tokens, fewer replans, fewer vision-encoder passes) → better SR-vs-latency Pareto. Not to beat OAT8.
+
+**Why it's the right synthesis:** joint `(K,R)` on a frozen prefix-decodable tokenizer (only OAT gives the `K` axis); the **amortized cost objective** is the real Pareto target and is absent in AAC; closed-loop teacher labels are cheaper than sim-success.
+
+**Risks / gates (must address before trusting it):**
+1. **Not yet gated on headroom.** Our k-gate is negative (adaptive K ≈ fixed K at ~5 tokens); the R axis is untested. → run a **2D fixed-`(K,R)` sweep first**; the learned controller must beat the best *constant* `(K,R)`.
+2. **Offline target is still a per-chunk proxy** (consistency<ε ≠ task success) — the same trap as MSE `min_k` (offline-good ≠ SR-good, cf. w=2.0). So offline = **prior only**; the real work falls on the **fragile online RL**. Start with offline logged-bandit; online only if off-policy gap bites.
+3. **Cost gradient pushes `(small K, large R)`** — `C_AR·K` is small vs `C_vision`, and dividing by `R` rewards long open-loop execution of *coarse* (small-K) chunks = max compounding. Needs a guard (min fidelity per `R`, or constraint `K ≥ f(R)`).
+4. **`R` label is off-policy** — future states depend on what was actually executed (prefix-`K`), not on the OAT8 trajectory; label along the candidate's own short rollout or accept approximation + DAgger.
+5. **Value may concentrate in `R`** (K cheap + low-headroom, and cost barely depends on K) → risks collapsing to "R matters, K≈const" = AAC. Defend novelty via joint+cost+ordered-tokenizer; **include an AAC-style action-entropy `R` baseline**.
+6. **Strong distribution shift from `R`** (changes replan schedule → visited states) → **DAgger** iterations required, not optional.
 
 ### TODO next
 
@@ -246,6 +307,9 @@ Speed note: eval is dominated by simulation (obs cameras rendered every step for
 3. ~~**Wire predictor into `predict_action_adaptive`**~~ — done: `predict_action_predictor` + `set_token_predictor` + `eval_policy_sim.py --token_predictor` + `detokenize(eval_keep_k=...)`. Compiles; **not yet run in sim.**
 4. **Add `--entropy_threshold` flag to `eval_policy_sim.py`** — for threshold sweep experiments.
 5. ~~**End-to-end validation**~~ — done for full / entropy-2.75 / predictor-w2.0 (see "End-to-end results" above). Result: learned ≈ entropy in SR, both ~8–10pp below full budget; cost looks method-independent (compounding error).
-6. **Map the knee: run predictor `w=4.0`** (~6 tokens, expect SR ~0.52–0.54) to complete the SR-vs-tokens frontier and pick the operating point.
-7. **If a real tradeoff win is needed:** switch the predictor's training signal from MSE-to-demo labels to **simulation-success** labels (per-episode min-k where success holds) — directly targets task success and removes the compounding-error gap. ~8× more eval cost.
-8. **Latency reality check:** `measure_latency_adaptive.py` at `batch_size=1` for true per-sample ms (batched runner latency is bound by `max(k_pred)`, not the mean).
+6. **GATE (reframed — pow2 finding).** fixed k=5/6 are invalid (untrained budgets). Valid fixed points = **{1,2,4,8}**: run fixed k∈{1,2,4} (`--entropy_threshold 0 --use_k_tokens k`; have k=8≈0.58). Then the real test: compare predictor (w2.0 5.31→0.497, w4.0 6.29→0.559) against the best **obs-agnostic mixture** of {1,2,4,8} at the same mean cost. Adaptivity wins only if obs-conditioning beats the mixing rate. If predictor ≈ agnostic mix → no adaptivity value → pivot to tokenizer (uniform-dropout / FASTer) or analysis paper.
+7. **Better heuristic baseline:** action-space stopping — `Δ(a_k, a_{k−1})` convergence (or action entropy, AAC-style) instead of token entropy. Cheap, generation-aware; test on the same frontier.
+8. **Method (if gate passes):** learned **per-step refine-or-stop** head conditioned on partial generation, trained on task-grounded labels. Start with **offline logged-bandit** `P(success | features, k)` from fixed-k rollouts (reuse `SR(k)` data); DAgger iterations only if needed. Avoid online RL as the starting point.
+9. **Map the knee: run predictor `w=4.0`** (~6 tokens) to complete the current MSE-predictor frontier.
+10. **Latency reality check:** `measure_latency_adaptive.py` at `batch_size=1` for true per-sample ms (batched runner latency is bound by `max(k_pred)`, not the mean).
+11. **For the paper:** multi-suite LIBERO (spatial/object/goal/long), not just libero10; baselines = fixed-k, token-entropy, action-entropy, learned controller; Pareto SR-vs-tokens + latency.
