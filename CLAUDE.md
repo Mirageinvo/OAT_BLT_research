@@ -224,16 +224,28 @@ cd oat && uv run python my_scripts/measure_latency_adaptive.py \
 - `oat/scripts/train_token_count_predictor.py` — trains the predictor from the `.npz`
 - `oat/my_scripts/measure_latency_adaptive.py` — latency benchmarking with real obs
 
+### End-to-end results (LIBERO, `policy_ep-0250`, 5 exps each)
+
+| mode | SR | mean tokens | notes |
+|------|-----|-------------|-------|
+| full budget (k=8) | ~0.58 (paper) / 0.596 (train-eval) | 8 | reference |
+| entropy threshold 2.75 | 0.501 ± 0.016 | 5.68 | heuristic baseline |
+| learned predictor w=2.0 | 0.497 ± 0.017 | 5.31 | `token_count_predictor_w2.0.ckpt` |
+
+Conclusions:
+- **Learned predictor ≈ entropy heuristic in SR** (0.497 vs 0.501, CIs fully overlap) but uses **fewer tokens** (5.31 vs 5.68) → marginally Pareto-better, not a decisive win.
+- **The ~8–10pp SR drop vs full budget is method-independent** (both adaptive schemes land at ~0.50). This points to *compounding error over the episode* — slightly worse per-chunk reconstruction accumulates over ~550 steps — which the single-chunk MSE label cannot capture. So polishing the predictor on MSE labels is unlikely to break past this ceiling.
+- Decision pending: ~30% token savings for ~9pp (~15% rel.) success is expensive if success is the priority.
+
+Speed note: eval is dominated by simulation (obs cameras rendered every step for all parallel envs). Use `MUJOCO_GL=egl` (GPU offscreen; training slurm sets it, eval did not), lower `n_test`/`n_test_vis` for iteration. (`eval_policy_sim.py` does not yet expose runner overrides via CLI.)
+
 ### TODO next
 
 1. ~~**Analyze `collect_min_k_dataset.py` output**~~ — done; min_k distribution at ε=0.10 checked, looks good.
 2. ~~**Build token-count predictor**~~ — model + training script written (`oat/oat/model/token_count_predictor.py`, `oat/scripts/train_token_count_predictor.py`). **Next: train on cluster and check `safe_rate`/`under_rate`/`mean_pred_k`.**
 3. ~~**Wire predictor into `predict_action_adaptive`**~~ — done: `predict_action_predictor` + `set_token_predictor` + `eval_policy_sim.py --token_predictor` + `detokenize(eval_keep_k=...)`. Compiles; **not yet run in sim.**
 4. **Add `--entropy_threshold` flag to `eval_policy_sim.py`** — for threshold sweep experiments.
-5. **End-to-end validation (next)** — run LIBERO eval and compare three modes: full budget (k=8), entropy threshold (2.75), learned predictor (`w=2.0` ckpt). Command:
-   ```bash
-   uv run scripts/eval_policy_sim.py -c my_models/policy_ep-0250_sr-0.596.ckpt \
-       -o output/eval/predictor_w2 --num_exp 5 \
-       --token_predictor my_models/token_count_predictor_w2.0.ckpt
-   ```
-   Watch `mean_success_rate` vs `mean_tokens_used`. If success holds, try `w=1.0` for more savings; if it drops, `w=4.0`.
+5. ~~**End-to-end validation**~~ — done for full / entropy-2.75 / predictor-w2.0 (see "End-to-end results" above). Result: learned ≈ entropy in SR, both ~8–10pp below full budget; cost looks method-independent (compounding error).
+6. **Map the knee: run predictor `w=4.0`** (~6 tokens, expect SR ~0.52–0.54) to complete the SR-vs-tokens frontier and pick the operating point.
+7. **If a real tradeoff win is needed:** switch the predictor's training signal from MSE-to-demo labels to **simulation-success** labels (per-episode min-k where success holds) — directly targets task success and removes the compounding-error gap. ~8× more eval cost.
+8. **Latency reality check:** `measure_latency_adaptive.py` at `batch_size=1` for true per-sample ms (batched runner latency is bound by `max(k_pred)`, not the mean).
