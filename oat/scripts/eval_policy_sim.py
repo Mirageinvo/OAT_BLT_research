@@ -49,6 +49,9 @@ from typing import List, Optional
               help="obs-agnostic budget mixture baseline, e.g. '1:0.09,2:0.21,8:0.68'. "
                    "Samples k from this categorical per sample (ignores obs). "
                    "Takes precedence over --token_predictor.")
+@click.option('--n_action_steps', default=None, type=int,
+              help="override executed chunk length R (steps executed open-loop before replanning; "
+                   "default 16, max = decode horizon 32). For the fixed-R sweep.")
 def eval_policy_sim(
     checkpoint: str,
     output_dir: str,
@@ -61,6 +64,7 @@ def eval_policy_sim(
     token_predictor: Optional[str] = None,
     entropy_threshold: Optional[float] = None,
     agnostic_mix: Optional[str] = None,
+    n_action_steps: Optional[int] = None,
 ):
     if os.path.exists(output_dir):
         click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
@@ -110,11 +114,21 @@ def eval_policy_sim(
             policy.set_agnostic_mix(k_probs)
             print(f"Attached obs-agnostic budget mixture: {k_probs}")
 
+        # optionally override executed chunk length R (fixed-R sweep): the policy slices
+        # action_pred[:, :n_action_steps], so set it on the policy too (not just the runner)
+        if n_action_steps is not None:
+            policy.n_action_steps = n_action_steps
+            print(f"Override executed chunk length R = {n_action_steps}")
+
         # run eval
         print(f"Running evaluation on {ckpt}")
+        runner_overrides = {}
+        if n_action_steps is not None:
+            runner_overrides['n_action_steps'] = n_action_steps   # sync wrapper action_space to R
         env_runner: BaseRunner = hydra.utils.instantiate(
             cfg.task.policy.env_runner,
             output_dir=output_dir,
+            **runner_overrides,
         )
         
         kwargs = {}
