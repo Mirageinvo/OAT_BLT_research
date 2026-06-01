@@ -233,8 +233,11 @@ cd oat && uv run python my_scripts/measure_latency_adaptive.py \
 | learned predictor w=4.0 | 0.559 ± 0.014 (3 exp) | 6.29 | ~96% of full, −21% tokens |
 | entropy threshold 2.75 | 0.501 ± 0.016 | 5.68 | heuristic baseline |
 | learned predictor w=2.0 | 0.497 ± 0.017 | 5.31 | `token_count_predictor_w2.0.ckpt` |
-| fixed k=5 | 0.496 ± 0.009 (3 exp) | 5.0 | **INVALID baseline — untrained budget** |
-| fixed k=6 | 0.446 (2 exp) | 6.0 | **INVALID baseline — untrained budget** |
+| **fixed k=4** | **0.496 ± 0.025 (5 exp)** | 4.0 | valid budget — **dominates w=2.0 & entropy** |
+| fixed k=5 | 0.496 ± 0.009 (3 exp) | 5.0 | INVALID baseline — untrained budget |
+| fixed k=6 | 0.446 (2 exp) | 6.0 | INVALID baseline — untrained budget |
+
+**GATE read with valid frontier {4,8} — mostly NEGATIVE.** In-pipeline anchors: fixed k=4 = 0.496 @ 4.0, fixed k=8 = 0.58 @ 8.0 (slope 0.021 SR/token). fixed k=4 **Pareto-dominates** predictor w=2.0 (0.497 @ 5.31) and entropy (0.501 @ 5.68): same SR, fewer tokens → at ~0.50 SR a constant k=4 beats both adaptive methods. High end: predictor w=4.0 (0.559 @ 6.29) is **+0.015 above** the {4,8} obs-agnostic mixing line (0.544 at 6.29) → ~1.4σ, suggestive but not significant. **Clean positive byproduct:** fixed k=4 = ~85% of full SR at half the tokens, beating all adaptive variants — a strong simple baseline / analysis-paper headline. Still owed before a final verdict: (1) ~~fixed k=8 in-pipeline~~ done (0.58); (2) actual agnostic-mix at the predictor's **{1,2,8}** marginal (can't be interpolated from fixed-k — must run; note a {4,8} mix may even beat a {1,2,8} mix since k=4 is more useful per token than k=1/2); (3) 4-class predictor retest (current one skips the valid k=4 — see memory `predictor-4class-budgets`).
 
 **KEY FINDING — the tokenizer only supports k∈{1,2,4,8} (pow2).** `train_oattok.yaml` uses `token_dropout_mode: 'pow2'` with `num_registers=8`, so `MaskedNestedDropout` trains the decoder only on `keep_k ∈ {1,2,4,8}`. k=3,5,6,7 are **untrained budgets** → degraded reconstruction. Mean offline err(k) confirms non-monotonicity: `k1 .158, k2 .138, k3 .131, k4 .129, k5 .141, k6 .142, k7 .133, k8 .124` — dips at the trained budget 4, **jumps up at 5–6**, min at 8.
 - Consequence: **fixed k=5/6 are invalid baselines** (they penalize the decoder for an untrained budget, not for fewer tokens). `SR(6)=0.446 < SR(5)=0.496` is this artifact, not a real frontier. Valid fixed points are only **{1,2,4,8}**.

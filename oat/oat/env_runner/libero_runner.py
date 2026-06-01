@@ -209,6 +209,7 @@ class LiberoRunner(BaseRunner):
         all_video_paths = [None] * n_inits
         all_success = [False] * n_inits
         all_token_counts = []
+        all_k_preds = []
 
         for chunk_idx in range(n_chunks):
             start = chunk_idx * n_envs
@@ -257,6 +258,8 @@ class LiberoRunner(BaseRunner):
                     action = result['action'].detach().cpu().numpy()
                     if 'n_tokens' in result:
                         all_token_counts.append(result['n_tokens'])
+                    if 'k_pred' in result:
+                        all_k_preds.append(result['k_pred'].detach().cpu().numpy())
 
                 if not np.all(np.isfinite(action)):
                     raise RuntimeError("NaN of Inf action")
@@ -309,7 +312,19 @@ class LiberoRunner(BaseRunner):
         log_data['mean_success_rate'] = np.mean(all_success)
         if all_token_counts:
             log_data['mean_tokens_used'] = np.mean(all_token_counts)
-        
+
+        # in-sim distribution of per-sample token budget (predictor / agnostic-mix modes)
+        if all_k_preds:
+            ks = np.concatenate([np.atleast_1d(k).ravel() for k in all_k_preds]).astype(int)
+            maxk = int(ks.max())
+            hist = np.bincount(ks, minlength=maxk + 1)[1:]
+            fracs = hist / hist.sum()
+            print(f"[k_pred] in-sim mean={ks.mean():.3f} | hist(k=1..{maxk})={hist.tolist()} | "
+                  f"fracs={[round(float(x), 3) for x in fracs]}")
+            # scalar fractions survive eval_policy_sim's numeric aggregation
+            for kk in range(1, maxk + 1):
+                log_data[f'k_pred_frac_{kk}'] = float((ks == kk).mean())
+
         return log_data
 
     def close(self):

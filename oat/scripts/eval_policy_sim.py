@@ -45,6 +45,10 @@ from typing import List, Optional
               help="entropy threshold for entropy-mode early stopping (default 2.75). "
                    "Set <=0 to disable early stopping (full budget k=max_seq_len). "
                    "Ignored when --token_predictor is set.")
+@click.option('--agnostic_mix', default=None, type=str,
+              help="obs-agnostic budget mixture baseline, e.g. '1:0.09,2:0.21,8:0.68'. "
+                   "Samples k from this categorical per sample (ignores obs). "
+                   "Takes precedence over --token_predictor.")
 def eval_policy_sim(
     checkpoint: str,
     output_dir: str,
@@ -56,6 +60,7 @@ def eval_policy_sim(
     use_k_tokens: Optional[int] = None,
     token_predictor: Optional[str] = None,
     entropy_threshold: Optional[float] = None,
+    agnostic_mix: Optional[str] = None,
 ):
     if os.path.exists(output_dir):
         click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
@@ -95,6 +100,15 @@ def eval_policy_sim(
             predictor = TokenCountPredictor.from_checkpoint(token_predictor)
             policy.set_token_predictor(predictor)
             print(f"Attached token-count predictor from {token_predictor}")
+
+        # optionally attach an obs-agnostic budget mixture (gate baseline)
+        if agnostic_mix is not None:
+            k_probs = {}
+            for part in agnostic_mix.split(','):
+                k_str, p_str = part.split(':')
+                k_probs[int(k_str)] = float(p_str)
+            policy.set_agnostic_mix(k_probs)
+            print(f"Attached obs-agnostic budget mixture: {k_probs}")
 
         # run eval
         print(f"Running evaluation on {ckpt}")

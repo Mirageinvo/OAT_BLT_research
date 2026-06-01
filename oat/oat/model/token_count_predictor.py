@@ -16,7 +16,7 @@ predictor is self-contained: pass raw `features` and it normalizes internally.
 
 import torch
 import torch.nn as nn
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 class TokenCountPredictor(nn.Module):
@@ -24,15 +24,22 @@ class TokenCountPredictor(nn.Module):
         self,
         in_dim: int,            # per-step feature dim d (e.g. 138)
         n_obs_steps: int,       # To (e.g. 2)
-        num_classes: int,       # max_k = num_registers (e.g. 8); classes map to k = idx + 1
+        num_classes: int,       # number of output classes
         hidden_dims: Tuple[int, ...] = (256, 256),
         dropout: float = 0.1,
+        class_values: Optional[List[int]] = None,  # k value per class; default [1..num_classes].
+                                                    # For pow2 OAT use [1,2,4,8] (only trained budgets).
     ):
         super().__init__()
         self.in_dim = in_dim
         self.n_obs_steps = n_obs_steps
         self.num_classes = num_classes
         self.flat_dim = in_dim * n_obs_steps
+
+        if class_values is None:
+            class_values = list(range(1, num_classes + 1))
+        assert len(class_values) == num_classes, "class_values must have length num_classes"
+        self.register_buffer("class_values", torch.tensor(class_values, dtype=torch.long))
 
         # feature standardization (set via set_feature_stats); identity by default
         self.register_buffer("feat_mean", torch.zeros(self.flat_dim))
@@ -59,8 +66,9 @@ class TokenCountPredictor(nn.Module):
 
     @torch.inference_mode()
     def predict_k(self, features: torch.Tensor) -> torch.Tensor:
-        """features: [B, To, d] -> predicted k in [1, num_classes], long tensor [B]."""
-        return self.forward(features).argmax(dim=-1) + 1
+        """features: [B, To, d] -> predicted k (mapped through class_values), long tensor [B]."""
+        idx = self.forward(features).argmax(dim=-1)
+        return self.class_values[idx]
 
     @classmethod
     def from_checkpoint(cls, path: str, map_location="cpu") -> "TokenCountPredictor":

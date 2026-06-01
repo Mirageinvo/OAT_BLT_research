@@ -81,6 +81,9 @@ class OATPolicy(BasePolicy):
         # optional learned token-count predictor (attached post-hoc, not a submodule
         # so it is excluded from the policy's own checkpoint / training)
         self.token_predictor = None
+        # optional obs-agnostic budget mixture (baseline for the adaptivity gate):
+        # per-sample k ~ Categorical(agnostic_k_probs) over k=1..max_seq_len
+        self.agnostic_k_probs = None
 
         # report
         num_obs_params = sum(p.numel() for p in obs_encoder.parameters())
@@ -139,6 +142,24 @@ class OATPolicy(BasePolicy):
             predictor.to(self.device).eval()
             for p in predictor.parameters():
                 p.requires_grad_(False)
+
+    def set_agnostic_mix(self, k_probs):
+        """Attach an obs-agnostic budget mixture (adaptivity-gate baseline). When set,
+        `predict_action_adaptive` samples each sample's budget k ~ Categorical(k_probs),
+        ignoring the observation, instead of predicting it. Takes precedence over the
+        token predictor. Pass None to disable.
+        k_probs: dict {k: prob} or list/tensor over k=1..max_seq_len (renormalized)."""
+        if k_probs is None:
+            self.agnostic_k_probs = None
+            return
+        probs = torch.zeros(self.max_seq_len)
+        if isinstance(k_probs, dict):
+            for k, p in k_probs.items():
+                probs[int(k) - 1] = float(p)
+        else:
+            vals = torch.as_tensor(k_probs, dtype=torch.float)
+            probs[:len(vals)] = vals
+        self.agnostic_k_probs = (probs / probs.sum()).to(self.device)
 
     def get_optimizer(
         self, 
@@ -235,6 +256,12 @@ class OATPolicy(BasePolicy):
         topk: Optional[int] = None,
         entropy_threshold: float = 2.75,
     ) -> Dict[str, torch.Tensor]:
+        # obs-agnostic budget mixture (gate baseline) takes precedence if attached
+        if getattr(self, 'agnostic_k_probs', None) is not None:
+            return self.predict_action_agnostic(
+                obs_dict, use_k_tokens=use_k_tokens,
+                temperature=temperature, topk=topk,
+            )
         # if a learned token-count predictor is attached, use it instead of the
         # entropy threshold (no per-step entropy check, KV-cache fast generation)
         if getattr(self, 'token_predictor', None) is not None:
@@ -295,6 +322,24 @@ class OATPolicy(BasePolicy):
         }
 
     @torch.inference_mode()
+    def _generate_at_budgets(self, features, k_pred, temperature, topk):
+        """Given per-sample budgets k_pred [B], generate max(k_pred) tokens for the batch
+        (KV-cache) and decode each sample at its own k. Returns (action, action_pred)."""
+        B = features.shape[0]
+        K = int(k_pred.max().item())
+        bos = torch.full((B, 1), self.bos_id, dtype=torch.long, device=self.device)
+        action_tokens = self.model.generate(
+            bos, cond=features, max_new_tokens=K,
+            temperature=temperature, top_k=topk,
+        )[:, 1:]    # [B, K], drop <BOS>
+        action_pred = self.action_tokenizer.detokenize(
+            tokens=action_tokens,
+            eval_keep_k=k_pred.tolist(),
+        )
+        action = action_pred[:, :self.n_action_steps]
+        return action, action_pred
+
+    @torch.inference_mode()
     def predict_action_predictor(self,
         obs_dict: Dict[str, torch.Tensor],
         use_k_tokens: Optional[int] = None,
@@ -310,32 +355,43 @@ class OATPolicy(BasePolicy):
             topk = self.topk
         cap = self.max_seq_len if use_k_tokens is None else min(use_k_tokens, self.max_seq_len)
 
-        # encode observation
         features = self.obs_encoder(obs_dict)   # [B, To, d]
-        B = features.shape[0]
-
-        # predict per-sample token budget from the same features
         k_pred = self.token_predictor.predict_k(features).clamp(min=1, max=cap)  # [B]
-        K = int(k_pred.max().item())
-
-        # generate K tokens for the whole batch (batched AR is bound by the max budget)
-        bos = torch.full((B, 1), self.bos_id, dtype=torch.long, device=self.device)
-        action_tokens = self.model.generate(
-            bos, cond=features, max_new_tokens=K,
-            temperature=temperature, top_k=topk,
-        )[:, 1:]    # [B, K], drop <BOS>
-
-        # decode each sample at its own predicted budget
-        action_pred = self.action_tokenizer.detokenize(
-            tokens=action_tokens,
-            eval_keep_k=k_pred.tolist(),
-        )
-        action = action_pred[:, :self.n_action_steps]
+        action, action_pred = self._generate_at_budgets(features, k_pred, temperature, topk)
 
         return {
             'action': action,
             'action_pred': action_pred,
             'n_tokens': float(k_pred.float().mean().item()),  # mean budget over batch
+            'k_pred': k_pred,
+        }
+
+    @torch.inference_mode()
+    def predict_action_agnostic(self,
+        obs_dict: Dict[str, torch.Tensor],
+        use_k_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        topk: Optional[int] = None,
+    ) -> Dict[str, torch.Tensor]:
+        """Obs-agnostic budget mixture (adaptivity-gate baseline): per-sample
+        k ~ Categorical(self.agnostic_k_probs), ignoring the observation. Same marginal
+        budget distribution as the predictor but no obs-conditioning."""
+        if temperature is None:
+            temperature = self.temperature
+        if topk is None:
+            topk = self.topk
+        cap = self.max_seq_len if use_k_tokens is None else min(use_k_tokens, self.max_seq_len)
+
+        features = self.obs_encoder(obs_dict)   # [B, To, d]
+        B = features.shape[0]
+        # sample budgets i.i.d. from the fixed categorical (k = index + 1)
+        k_pred = (torch.multinomial(self.agnostic_k_probs, B, replacement=True) + 1).clamp(min=1, max=cap)
+        action, action_pred = self._generate_at_budgets(features, k_pred, temperature, topk)
+
+        return {
+            'action': action,
+            'action_pred': action_pred,
+            'n_tokens': float(k_pred.float().mean().item()),
             'k_pred': k_pred,
         }
 

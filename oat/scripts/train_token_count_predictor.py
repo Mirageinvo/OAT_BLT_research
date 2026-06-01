@@ -42,28 +42,33 @@ from torch.utils.data import TensorDataset, DataLoader
 from oat.model.token_count_predictor import TokenCountPredictor
 
 
-def build_labels(errors: np.ndarray, eps: float):
-    """errors [N, max_k] -> (labels [N] in [0, max_k-1], is_fail [N] bool)."""
-    below = errors < eps                       # [N, max_k]
-    has_below = below.any(axis=1)              # [N]
-    max_k = errors.shape[1]
-    # argmax on bool returns first True; for all-False rows -> 0, overwrite with max_k-1
-    first_below = below.argmax(axis=1)
-    labels = np.where(has_below, first_below, max_k - 1).astype(np.int64)
+def build_labels(errors: np.ndarray, eps: float, valid_budgets):
+    """errors [N, max_k]; valid_budgets e.g. [1,2,4,8].
+    Label = class index into valid_budgets of the smallest VALID budget with err<eps,
+    else the last class (largest budget). Returns (labels [N] class-index, is_fail [N])."""
+    cols = [b - 1 for b in valid_budgets]      # column of each valid budget in errors
+    sub = errors[:, cols]                      # [N, n_valid]
+    below = sub < eps
+    has_below = below.any(axis=1)
+    first = below.argmax(axis=1)               # first valid class below eps; 0 if none
+    labels = np.where(has_below, first, len(valid_budgets) - 1).astype(np.int64)
     return labels, ~has_below
 
 
 @torch.no_grad()
-def evaluate(model, loader, device, max_k, errors_val, eps):
-    """errors_val [n_val, max_k] aligned with loader order (val_loader is shuffle=False)."""
+def evaluate(model, loader, device, valid_budgets, errors_val, eps):
+    """errors_val [n_val, max_k] aligned with loader order (val_loader is shuffle=False).
+    pred/true are class indices into valid_budgets; mapped to actual k for all metrics."""
     model.eval()
     preds, trues = [], []
     for feats, labels in loader:
         logits = model(feats.to(device))
         preds.append(logits.argmax(-1).cpu())
         trues.append(labels)
-    pred = torch.cat(preds).numpy() + 1        # k in [1, max_k]
-    true = torch.cat(trues).numpy() + 1
+    cv = np.asarray(valid_budgets)
+    pred = cv[torch.cat(preds).numpy()]        # actual k
+    true = cv[torch.cat(trues).numpy()]
+    max_k = errors_val.shape[1]
 
     exact = (pred == true).mean()
     under = (pred < true).mean()               # too few tokens vs label -> risky proxy
@@ -90,8 +95,8 @@ def evaluate(model, loader, device, max_k, errors_val, eps):
         "success_retained": float(within.mean() / max(full_within.mean(), 1e-9)),
         "mean_err_realized": float(err_realized.mean()),
         "p90_err_realized": float(np.percentile(err_realized, 90)),
-        "pred_hist": np.bincount(pred, minlength=max_k + 1)[1:].tolist(),
-        "true_hist": np.bincount(true, minlength=max_k + 1)[1:].tolist(),
+        "pred_hist": {int(b): int((pred == b).sum()) for b in valid_budgets},
+        "true_hist": {int(b): int((true == b).sum()) for b in valid_budgets},
     }
 
 
@@ -108,10 +113,13 @@ def evaluate(model, loader, device, max_k, errors_val, eps):
 @click.option('--val_ratio', default=0.1, type=float)
 @click.option('--underpredict_weight', default=1.0, type=float,
               help='>1 up-weights CE loss on under-predicted samples (safety bias)')
+@click.option('--valid_budgets', default='1,2,4,8',
+              help='comma-separated token budgets to predict over (default the pow2-trained '
+                   'set {1,2,4,8}; k=3,5,6,7 are untrained/degraded for the OAT decoder)')
 @click.option('--device', default='cuda:0')
 @click.option('--seed', default=42, type=int)
 def main(dataset, output, epsilon, hidden_dims, dropout, epochs, batch_size,
-         lr, weight_decay, val_ratio, underpredict_weight, device, seed):
+         lr, weight_decay, val_ratio, underpredict_weight, valid_budgets, device, seed):
     torch.manual_seed(seed)
     np.random.seed(seed)
     device = torch.device(device)
@@ -121,11 +129,13 @@ def main(dataset, output, epsilon, hidden_dims, dropout, epochs, batch_size,
     errors = data['errors'].astype(np.float32)         # [N, max_k]
     N, n_obs_steps, in_dim = features.shape
     max_k = errors.shape[1]
-    print(f"Loaded {N} samples | features [N,{n_obs_steps},{in_dim}] | max_k={max_k}")
+    budgets = [int(b) for b in valid_budgets.split(',') if int(b) <= max_k]
+    print(f"Loaded {N} samples | features [N,{n_obs_steps},{in_dim}] | max_k={max_k} | "
+          f"valid_budgets={budgets}")
 
-    labels, is_fail = build_labels(errors, epsilon)
-    print(f"eps={epsilon} | fail (label=max_k): {is_fail.mean():.3f} | "
-          f"label hist (k=1..{max_k}): {np.bincount(labels + 1, minlength=max_k + 1)[1:].tolist()}")
+    labels, is_fail = build_labels(errors, epsilon, budgets)
+    label_hist = {b: int((labels == i).sum()) for i, b in enumerate(budgets)}
+    print(f"eps={epsilon} | fail (label=max budget): {is_fail.mean():.3f} | label hist: {label_hist}")
 
     # train/val split
     perm = np.random.permutation(N)
@@ -142,8 +152,9 @@ def main(dataset, output, epsilon, hidden_dims, dropout, epochs, batch_size,
     feat_std = train_flat.std(0)
 
     model = TokenCountPredictor(
-        in_dim=in_dim, n_obs_steps=n_obs_steps, num_classes=max_k,
+        in_dim=in_dim, n_obs_steps=n_obs_steps, num_classes=len(budgets),
         hidden_dims=tuple(int(x) for x in hidden_dims.split(',')), dropout=dropout,
+        class_values=budgets,
     ).to(device)
     model.set_feature_stats(feat_mean.to(device), feat_std.to(device))
 
@@ -177,7 +188,7 @@ def main(dataset, output, epsilon, hidden_dims, dropout, epochs, batch_size,
         scheduler.step()
 
         if epoch % 5 == 0 or epoch == epochs - 1:
-            m = evaluate(model, val_loader, device, max_k, errors_val, epsilon)
+            m = evaluate(model, val_loader, device, budgets, errors_val, epsilon)
             print(f"ep {epoch:3d} | loss {total_loss / len(train_idx):.4f} | "
                   f"acc {m['exact_acc']:.3f} | within_eps {m['frac_within_eps']:.3f}"
                   f"/{m['full_budget_within_eps']:.3f} | retained {m['success_retained']:.3f} | "
@@ -202,8 +213,9 @@ def main(dataset, output, epsilon, hidden_dims, dropout, epochs, batch_size,
     torch.save({
         'model_state': best_state,
         'config': {
-            'in_dim': in_dim, 'n_obs_steps': n_obs_steps, 'num_classes': max_k,
+            'in_dim': in_dim, 'n_obs_steps': n_obs_steps, 'num_classes': len(budgets),
             'hidden_dims': tuple(int(x) for x in hidden_dims.split(',')), 'dropout': dropout,
+            'class_values': budgets,
         },
         'epsilon': epsilon,
         'val_metrics': best_metrics,
