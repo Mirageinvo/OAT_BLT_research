@@ -119,7 +119,7 @@ def main(checkpoint, device, batch_size, num_workers, max_samples, budgets, exec
             for name, ee in quantities.items():
                 acc(name, ee, 'full')
                 for R in windows:
-                    acc(name, ee, f'R{R}')
+                    acc(name, ee[:, :R], f'R{R}')   # slice to the executed window
 
             # quantiles for the decisive quantity
             g48 = quantities[f'gain_{budgets[-2]}to{k_max}']
