@@ -307,6 +307,23 @@ Per replan, a lightweight controller picks a pair `(K, R)` from obs features: **
 5. **Value may concentrate in `R`** (K cheap + low-headroom, and cost barely depends on K) → risks collapsing to "R matters, K≈const" = AAC. Defend novelty via joint+cost+ordered-tokenizer; **include an AAC-style action-entropy `R` baseline**.
 6. **Strong distribution shift from `R`** (changes replan schedule → visited states) → **DAgger** iterations required, not optional.
 
+### R-axis (chunk length) gate — PROMISING (opposite of K)
+
+Fixed-R sweep at K=8 (full budget), via `--n_action_steps R --entropy_threshold 0 --use_k_tokens 8` (2 exp each):
+
+| R | SR | replan cost |
+|---|-----|-------------|
+| 8 | **0.635** | 2× |
+| 16 | 0.577 | 1× (OAT default, ≈ paper 0.58 — sanity ✓) |
+| 24 | 0.510 | 0.67× |
+| 32 | 0.440 | 0.5× |
+
+- **SR rises steeply as R shrinks**: R=8 (0.635) **beats** R=16 (0.577) and the paper's 0.58 → replanning more often gives more success; OAT's default R=16 leaves success on the table. **But it's a trade-off, not free** — R=8 doubles the (dominant) vision-CNN cost.
+- **R is high-leverage** (steep curve) — unlike the flat/dead K axis → there is something to exploit.
+- **The SR(R) curve is clean/real, NOT an artifact** (unlike pow2 k=5,6). Steps 17–32 *are* trained — the tokenizer reconstructs all 32 (MSE over 32) and the 8 tokens jointly encode the full 32-step chunk. So R∈[1,32] are all valid operating points. The drop at large R is genuine **reactivity loss + compounding + inherent far-future-prediction difficulty** (predicting 24–32 steps ahead from one obs), not under-training. Only caveat: OAT was designed/reported at R=16, so R=24,32 is a worse point on a real trade-off, outside their chosen operating regime.
+- **Joint (K,R) motivation weakened:** "high K enables long R" fails because long R is bad *regardless* of K → the real lever is **adaptive R at K=8** (closer to AAC — novelty caveat).
+- **Next:** (1) add R=4 to find the SR(R) peak; (2) build variable-R execution (policy returns an R-length chunk, runner executes it, replan) + a heuristic R signal (fidelity-ladder agreement) → test whether **adaptive R beats fixed R at matched mean cost** (the real R-gate: needs per-obs heterogeneity). Steep curve ⇒ potential payoff is large if heterogeneity exists.
+
 ### TODO next
 
 1. ~~**Analyze `collect_min_k_dataset.py` output**~~ — done; min_k distribution at ε=0.10 checked, looks good.
