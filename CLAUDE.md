@@ -224,9 +224,10 @@ cd oat && uv run python my_scripts/measure_latency_adaptive.py \
 - `oat/oat/model/token_count_predictor.py` — `TokenCountPredictor` MLP (features → min_k); `class_values` for 4-class {1,2,4,8}
 - `oat/scripts/train_token_count_predictor.py` — trains the predictor; `--valid_budgets`, realized-error + safe-rate metrics
 - `oat/scripts/per_timestep_recon_error.py` — Step 0: intra-chunk gain/excess concentration + gripper/jerk semantics (H-OAT premise check)
-- `oat/oat/policy/oatpolicy.py` — also `predict_action_agnostic` + `set_agnostic_mix` (gate baseline)
-- `oat/oat/env_runner/libero_runner.py` — logs in-sim `k_pred` histogram
-- `oat/scripts/eval_policy_sim.py` — flags `--token_predictor`, `--entropy_threshold`, `--agnostic_mix`, `--n_action_steps` (fixed-R sweep)
+- `oat/oat/policy/oatpolicy.py` — also `predict_action_agnostic` + `set_agnostic_mix` (gate baseline); `predict_action_variable_r` (GATE 1 variable-R: convergence/random/fixed R-signal, dispatched by `adaptive_r` kwarg)
+- `oat/oat/gymnasium_util/multistep_wrapper.py` — `step` breaks on all-NaN action row (variable-R sentinel)
+- `oat/oat/env_runner/libero_runner.py` — logs in-sim `k_pred` histogram; variable-R: NaN-pad per-env R, `mean_r_exec` + R-hist, `episode_done` desync fix
+- `oat/scripts/eval_policy_sim.py` — flags `--token_predictor`, `--entropy_threshold`, `--agnostic_mix`, `--n_action_steps` (fixed-R sweep), `--adaptive_r`/`--r_coarse_k`/`--r_min`/`--r_max`/`--r_threshold` (variable-R)
 - `oat/my_scripts/measure_latency_adaptive.py` — latency benchmarking with real obs
 
 ### End-to-end results (LIBERO, `policy_ep-0250`, 5 exps each)
@@ -328,6 +329,30 @@ Fixed-R sweep at K=8 (full budget), via `--n_action_steps R --entropy_threshold 
 - **Joint (K,R) motivation weakened:** "high K enables long R" fails because long R is bad *regardless* of K → the real lever is **adaptive R at K=8** (closer to AAC — novelty caveat).
 - **Next:** (1) add R=4 to find the SR(R) peak; (2) build variable-R execution (policy returns an R-length chunk, runner executes it, replan) + a heuristic R signal (fidelity-ladder agreement) → test whether **adaptive R beats fixed R at matched mean cost** (the real R-gate: needs per-obs heterogeneity). Steep curve ⇒ potential payoff is large if heterogeneity exists.
 
+### GATE 1 implementation — variable-R execution (DONE, ready to run)
+
+Per-observation adaptive executed-chunk-length R, **K held fixed at full budget (8)** to isolate the R axis (directly comparable to the fixed-R sweep). Mechanism: policy returns the full r_max-length chunk + per-sample `r_exec`; runner NaN-pads each env's chunk beyond its R; `MultiStepWrapper` stops at the first all-NaN row. Envs then desync in sim-time (independent episodes).
+
+- **`oat/oat/policy/oatpolicy.py` — `predict_action_variable_r`** (dispatched from `predict_action_adaptive` via the `adaptive_r` kwarg, taking precedence over K-budget modes). Generates one full-budget chunk (KV-cache), then picks R per obs:
+  - `convergence` (generation-aware R-signal): decode the SAME tokens at `r_coarse_k` (=4) and at K; per-timestep divergence `d_t = ||norm(A8)_t − norm(A4)_t||` (normalizer space); R = length of the leading prefix where coarse & fine plans agree (`d_t < r_threshold`), clamped `[r_min, r_max]`; early divergence → short R. Reads the decoded plan, **not** obs → dodges the K-gate's obs-wall.
+  - `random` (control): R ~ Uniform{r_min..r_max} — variance in R uncorrelated with obs; must NOT beat fixed-R at matched mean if obs-conditioning is the source of any gain.
+  - `fixed` (sanity): R = r_max for all (== fixed-R sweep at R=r_max).
+  - Returns `{action (full r_max chunk), r_exec [B], n_tokens (=K), div_mean}`.
+- **`oat/oat/gymnasium_util/multistep_wrapper.py`** — `step` breaks on an all-NaN action row (the variable-R sentinel).
+- **`oat/oat/env_runner/libero_runner.py`** — NaN-pads each env's chunk beyond `r_exec`; finite-check only the executed prefix; `pbar.update(min(r_exec))` so the slowest (small-R) env is never cut short (provable: `pbar.n = Σ min_i r_exec ≤ min_i Σ r_exec` = slowest env's accumulated steps); reports `mean_r_exec` (= mean replan interval; replan/vision-CNN cost ∝ `max_episode_steps / mean_r_exec`) + an R histogram.
+  - **Desync correctness fix (`episode_done` per-init):** variable-R desyncs the envs, so a fast (small-R) env that *fails* can truncate early, autoreset, and run a 2nd episode while slow envs still run (`AsyncVectorEnv` autoresets on done). Without a guard, a counted 2nd-episode success would **inflate** adaptive-R SR (fixed-R never hits this — lockstep truncation ends the loop before autoreset). Fix: freeze each env after its FIRST episode; success counted only in the first episode; loop ends when all first episodes are done. Reduces to the original lockstep behaviour for fixed-R. (NB: `n_chunks = ceil(n_inits/n_envs)` is the env-batch count, NOT a time/episode-length bound — episode length is the inner `while pbar.n < max_episode_steps` + per-env wrapper truncation, so it is R-independent.)
+- **`oat/scripts/eval_policy_sim.py`** — flags `--adaptive_r {convergence,random,fixed}`, `--r_coarse_k`, `--r_min`, `--r_max`, `--r_threshold`; forces `n_action_steps = r_max`; prints `mean R`.
+
+Run (sanity first — variable-R plumbing must reproduce fixed R=16 ≈ 0.577):
+```bash
+cd oat && MUJOCO_GL=egl uv run scripts/eval_policy_sim.py \
+  -c my_models/policy_ep-0250_sr-0.596.ckpt -o eval_out/varR_sanity \
+  -n 2 --use_k_tokens 8 --adaptive_r fixed --r_min 16 --r_max 16
+# then: --adaptive_r convergence --r_min 8 --r_max 32 --r_threshold {0.2,0.3,0.5}  (tune so mean R ~16)
+#       --adaptive_r random --r_min 8 --r_max 32   (control)
+```
+**Gate read:** `convergence` passes only if SR(adaptive @ mean R̄) is **above** the fixed-R sweep interpolation at R̄ **and** above `random` at the same mean. If convergence ≈ random ≈ fixed-curve → no R-heterogeneity from this signal (K-axis déjà vu) → the whole patch→R coupling is moot. **Likely need to sweep `--r_threshold`** (0.5 in norm-L2 over 7 dims may rarely trigger → mean R → r_max). **Possible v2 signal: an oracle R** (offline teacher-consistency) to answer "is there ANY R-heterogeneity" before blaming the cheap signal.
+
 ### Step 0 (intra-chunk reconstruction) + H-OAT direction
 
 **Step 0 premise check** (`scripts/per_timestep_recon_error.py`): is the *marginal value of tokens* uneven WITHIN a chunk? Autoencode GT chunks through the frozen tokenizer at k∈{1,2,4,8}; measure per-timestep error e_t(k) and the **gain** `gain_t(a→b)=max(e_t(a)−e_t(b),0)` / **excess** of extra tokens (raw error is misleading — a step can be hard at every k); per-chunk concentration (CV/peak2mean/topN), full + executed windows; + within-chunk correlation of gain with gripper-change/jerk/action-delta. (NB measure within-chunk unevenness, not the avg profile, which smears peaks across arbitrary window starts.)
@@ -357,7 +382,7 @@ obs → OAT coarse prefix (k=4) → decode A4
 
 **Status:** K-axis (token count) adaptivity — **fully explored, NEGATIVE & CLOSED** (predictor w1/2/4, 4-class {1,2,4,8}, entropy, agnostic-mix all ≈ fixed-k frontier; fixed k=4 dominates; obs-conditioning ≈ agnostic mix). R-axis — **promising** (R=8 0.635 > OAT8 0.58). Step 0 — done (intra-chunk concentration real but semantically ungrounded). Current focus = **R / joint (K,R) via generation-aware SparsePatch**, gated.
 
-1. **GATE 1 (do next, decisive):** variable-R execution in the runner (policy returns an R-length chunk; runner/multistep_wrapper executes R then replans) + a simple R signal (action-convergence `Δ(a_k,a_{k-1})` or oracle). Test **adaptive-R vs fixed-R at matched mean replan cost** (SR-vs-cost Pareto). Decides whether the whole joint/H-OAT idea has headroom.
+1. **GATE 1 — infrastructure DONE, RUN it next (decisive):** variable-R execution is implemented (see "GATE 1 implementation" above: `predict_action_variable_r` + sentinel-padding runner + `episode_done` desync fix + eval flags). **Remaining = run the experiment:** sanity (`--adaptive_r fixed --r_min/max 16` ≈ 0.577) → `convergence` (sweep `--r_threshold` to land mean R ~16) vs `random` control, compare against the fixed-R sweep at matched mean R. Decides whether the whole joint/H-OAT idea has headroom.
 2. **(cheap) Add R=4 to the fixed-R sweep** — find the SR(R) peak / where reactivity saturates.
 3. **GATE 2 (if 1 passes):** does a generation-aware patch/instability R-signal beat a simple action-entropy (AAC-style) R-signal? Else it reinvents AAC.
 4. **Build (if 1–2 pass): Generation-aware Sparse Residual H-OAT + adaptive R** — coarse OAT4 + generation-aware sparse residual patches + patch-activity→R. GATE 3 = maintain SR (semantic risk: patches target fast-motion, not grasp).
