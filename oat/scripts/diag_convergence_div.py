@@ -70,9 +70,8 @@ def main(checkpoint, device, batch_size, num_workers, max_samples,
 
     K = min(use_k_tokens, policy.max_seq_len)
     k_coarse = max(1, min(r_coarse_k, K))
-    H = policy.action_tokenizer.latent_horizon
-    r_max = min(r_max, H)
-    r_min = max(1, min(r_min, r_max))
+    # NB: r_max is an action-step horizon (decoded chunk length, e.g. 32), resolved
+    # below from the actual detokenized action -- NOT latent_horizon (=8 token registers).
     norm = policy.action_tokenizer.normalizer['action']
     temperature = policy.temperature
     topk = policy.topk
@@ -103,14 +102,18 @@ def main(checkpoint, device, batch_size, num_workers, max_samples,
 
             a_full = policy.action_tokenizer.detokenize(tokens, eval_keep_k=[K] * B)
             a_coarse = policy.action_tokenizer.detokenize(tokens, eval_keep_k=[k_coarse] * B)
-            d = (norm.normalize(a_full) - norm.normalize(a_coarse)).norm(dim=-1)  # [B,H]
-            d_chunks.append(d[:, :r_max].cpu().numpy())
+            d = (norm.normalize(a_full) - norm.normalize(a_coarse)).norm(dim=-1)  # [B,Ta]
+            d_chunks.append(d.cpu().numpy())
 
             n_processed += B
             if max_samples is not None and n_processed >= max_samples:
                 break
 
-    d = np.concatenate(d_chunks, axis=0)  # [N, r_max]
+    d = np.concatenate(d_chunks, axis=0)  # [N, Ta]
+    H = d.shape[1]                        # decoded action horizon (e.g. 32)
+    r_max = min(r_max, H)
+    r_min = max(1, min(r_min, r_max))
+    d = d[:, :r_max]
     N = d.shape[0]
     print(f"\n=== convergence divergence diagnostic (N={N}, K={K}, coarse_k={k_coarse}, "
           f"r in [{r_min},{r_max}]) ===")
@@ -133,7 +136,7 @@ def main(checkpoint, device, batch_size, num_workers, max_samples,
 
     print("\nthreshold sweep -> R distribution (r_min={}, r_max={}):".format(r_min, r_max))
     print(f"  {'thr':>5} | {'meanR':>6} {'medR':>5} {'%@min':>6} {'%@max':>6} {'stdR':>5} | hist")
-    for thr in [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0]:
+    for thr in [0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0]:
         r = r_exec_for(thr)
         at_min = 100.0 * (r == r_min).mean()
         at_max = 100.0 * (r == r_max).mean()

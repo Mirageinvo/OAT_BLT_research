@@ -448,11 +448,6 @@ class OATPolicy(BasePolicy):
         if topk is None:
             topk = self.topk
         K = self.max_seq_len if use_k_tokens is None else min(use_k_tokens, self.max_seq_len)
-        H = self.action_tokenizer.latent_horizon
-        if r_max is None:
-            r_max = H
-        r_max = min(int(r_max), H)
-        r_min = max(1, min(int(r_min), r_max))
 
         features = self.obs_encoder(obs_dict)   # [B, To, d]
         B = features.shape[0]
@@ -463,7 +458,15 @@ class OATPolicy(BasePolicy):
             bos, cond=features, max_new_tokens=K,
             temperature=temperature, top_k=topk,
         )[:, 1:]    # [B, K], drop <BOS>
-        action_pred = self.action_tokenizer.detokenize(tokens, eval_keep_k=[K] * B)  # [B,H,D] raw
+        action_pred = self.action_tokenizer.detokenize(tokens, eval_keep_k=[K] * B)  # [B,Ta,D] raw
+
+        # R is an executed-action-step count, bounded by the DECODED action horizon
+        # (action_pred.shape[1], e.g. 32) -- NOT latent_horizon (=num token registers, 8).
+        H = action_pred.shape[1]
+        if r_max is None:
+            r_max = H
+        r_max = min(int(r_max), H)
+        r_min = max(1, min(int(r_min), r_max))
 
         div_mean = torch.zeros(B, device=self.device)
         if adaptive_r == 'fixed':
