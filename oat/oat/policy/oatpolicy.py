@@ -255,7 +255,22 @@ class OATPolicy(BasePolicy):
         temperature: Optional[float] = None,
         topk: Optional[int] = None,
         entropy_threshold: float = 2.75,
+        adaptive_r: Optional[str] = None,
+        r_coarse_k: int = 4,
+        r_min: int = 8,
+        r_max: Optional[int] = None,
+        r_threshold: float = 0.5,
     ) -> Dict[str, torch.Tensor]:
+        # variable-R execution (GATE 1): hold K fixed (= use_k_tokens, default full
+        # budget) and adapt the executed chunk length R per observation. Distinct axis
+        # from the K-budget modes below, so it takes precedence when requested.
+        if adaptive_r is not None:
+            return self.predict_action_variable_r(
+                obs_dict, use_k_tokens=use_k_tokens,
+                temperature=temperature, topk=topk,
+                adaptive_r=adaptive_r, r_coarse_k=r_coarse_k,
+                r_min=r_min, r_max=r_max, r_threshold=r_threshold,
+            )
         # obs-agnostic budget mixture (gate baseline) takes precedence if attached
         if getattr(self, 'agnostic_k_probs', None) is not None:
             return self.predict_action_agnostic(
@@ -393,6 +408,91 @@ class OATPolicy(BasePolicy):
             'action_pred': action_pred,
             'n_tokens': float(k_pred.float().mean().item()),
             'k_pred': k_pred,
+        }
+
+    @torch.inference_mode()
+    def predict_action_variable_r(self,
+        obs_dict: Dict[str, torch.Tensor],
+        use_k_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        topk: Optional[int] = None,
+        adaptive_r: str = 'convergence',
+        r_coarse_k: int = 4,
+        r_min: int = 8,
+        r_max: Optional[int] = None,
+        r_threshold: float = 0.5,
+    ) -> Dict[str, torch.Tensor]:
+        """Variable executed-chunk-length (R) generation for the R-axis gate (GATE 1).
+
+        Generates a single full-budget chunk (K = use_k_tokens, default max_seq_len) and
+        picks, per observation, how many leading actions R to execute open-loop before the
+        next replan. The token budget K is held FIXED -- this isolates the R axis so SR-vs-R
+        is directly comparable to the fixed-R sweep.
+
+        R-signal modes:
+          'convergence' : decode the SAME tokens at a coarse budget (r_coarse_k) and at K;
+                          R = length of the leading prefix where the coarse and fine action
+                          plans agree (per-timestep L2 divergence in normalizer space below
+                          r_threshold). Stable plan -> long R; early divergence -> short R.
+                          Generation-aware (reads the decoded plan, not the obs).
+          'random'      : R ~ Uniform{r_min..r_max} (control: variance in R uncorrelated with
+                          obs; must NOT beat fixed-R at matched mean if obs-conditioning is the
+                          source of any gain).
+          'fixed'       : R = r_max for every sample (sanity == fixed-R sweep at R=r_max).
+
+        Returns the FULL r_max-length chunk plus per-sample `r_exec`; the runner NaN-pads
+        beyond each sample's R so MultiStepWrapper executes only that prefix.
+        """
+        if temperature is None:
+            temperature = self.temperature
+        if topk is None:
+            topk = self.topk
+        K = self.max_seq_len if use_k_tokens is None else min(use_k_tokens, self.max_seq_len)
+        H = self.action_tokenizer.latent_horizon
+        if r_max is None:
+            r_max = H
+        r_max = min(int(r_max), H)
+        r_min = max(1, min(int(r_min), r_max))
+
+        features = self.obs_encoder(obs_dict)   # [B, To, d]
+        B = features.shape[0]
+
+        # full-budget generation (KV-cache), then prefix-decode for the R signal
+        bos = torch.full((B, 1), self.bos_id, dtype=torch.long, device=self.device)
+        tokens = self.model.generate(
+            bos, cond=features, max_new_tokens=K,
+            temperature=temperature, top_k=topk,
+        )[:, 1:]    # [B, K], drop <BOS>
+        action_pred = self.action_tokenizer.detokenize(tokens, eval_keep_k=[K] * B)  # [B,H,D] raw
+
+        div_mean = torch.zeros(B, device=self.device)
+        if adaptive_r == 'fixed':
+            r_exec = torch.full((B,), r_max, dtype=torch.long, device=self.device)
+        elif adaptive_r == 'random':
+            r_exec = torch.randint(r_min, r_max + 1, (B,), device=self.device)
+        elif adaptive_r == 'convergence':
+            k_coarse = max(1, min(int(r_coarse_k), K))
+            action_coarse = self.action_tokenizer.detokenize(tokens, eval_keep_k=[k_coarse] * B)
+            norm = self.action_tokenizer.normalizer['action']
+            d = (norm.normalize(action_pred) - norm.normalize(action_coarse)).norm(dim=-1)  # [B,H]
+            d = d[:, :r_max]
+            exceed = d > r_threshold                       # [B, r_max]
+            first = exceed.float().argmax(dim=1)           # first exceed idx (0 if none)
+            r_exec = torch.where(
+                exceed.any(dim=1), first,
+                torch.full_like(first, r_max),
+            ).clamp(min=r_min, max=r_max).long()
+            div_mean = d.mean(dim=1)
+        else:
+            raise ValueError(f"unknown adaptive_r mode: {adaptive_r}")
+
+        action = action_pred[:, :r_max]
+        return {
+            'action': action,
+            'action_pred': action_pred,
+            'n_tokens': float(K),
+            'r_exec': r_exec,
+            'div_mean': float(div_mean.mean().item()),
         }
 
     def forward(self, batch) -> torch.Tensor:

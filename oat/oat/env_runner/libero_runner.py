@@ -208,8 +208,13 @@ class LiberoRunner(BaseRunner):
         # allocate data
         all_video_paths = [None] * n_inits
         all_success = [False] * n_inits
+        # per-init: has its FIRST episode ended? Needed because variable-R desyncs the
+        # envs -> a fast env can finish & autoreset into a 2nd episode while slow envs
+        # are still running; we must not count that 2nd episode (would inflate SR).
+        episode_done = np.zeros(n_inits, dtype=bool)
         all_token_counts = []
         all_k_preds = []
+        all_r_execs = []
 
         for chunk_idx in range(n_chunks):
             start = chunk_idx * n_envs
@@ -261,24 +266,47 @@ class LiberoRunner(BaseRunner):
                     if 'k_pred' in result:
                         all_k_preds.append(result['k_pred'].detach().cpu().numpy())
 
-                if not np.all(np.isfinite(action)):
-                    raise RuntimeError("NaN of Inf action")
+                # variable-R (GATE 1): NaN-pad each env's chunk beyond its executed
+                # length R so MultiStepWrapper stops there; envs then advance at
+                # different sim-rates (independent episodes -> fine).
+                r_exec = None
+                if 'r_exec' in result:
+                    r_exec = result['r_exec'].detach().cpu().numpy().astype(int)
+                    all_r_execs.append(r_exec)
+                    action = np.array(action, copy=True)   # ensure writable
+                    for i in range(action.shape[0]):
+                        action[i, int(r_exec[i]):, :] = np.nan
+
+                if r_exec is None:
+                    if not np.all(np.isfinite(action)):
+                        raise RuntimeError("NaN of Inf action")
+                else:
+                    # only the executed (non-sentinel) prefix must be finite
+                    for i in range(action.shape[0]):
+                        if not np.all(np.isfinite(action[i, :int(r_exec[i])])):
+                            raise RuntimeError("NaN or Inf action")
 
                 # step env
-                obs, reward, done, _, _ = self.env.step(action) # NOTE: reward=1 if success
-                done = np.logical_or(
-                    done[this_local_slice],
-                    all_success[this_global_slice][this_local_slice]
-                )
-                done = np.all(done[this_local_slice])
+                obs, reward, env_done, _, _ = self.env.step(action) # NOTE: reward=1 if success
 
-                all_success[this_global_slice] = np.logical_or(
-                    all_success[this_global_slice],
-                    [r >= 1 for r in reward[this_local_slice]]
-                )
+                # first-episode bookkeeping (variable-R desync safety, see episode_done).
+                # success is counted only while the env is still in its first episode;
+                # once an env's first episode ends it is frozen so its autoreset 2nd
+                # episode cannot change the result. Reduces to the original lockstep
+                # behaviour when all envs finish on the same cycle (fixed-R).
+                env_done_local = np.asarray(env_done[this_local_slice], dtype=bool)
+                succ_local = np.asarray([r >= 1 for r in reward[this_local_slice]], dtype=bool)
+                ep_done_local = episode_done[start:end]
+                first_ep = ~ep_done_local
+                cur_success = np.asarray(all_success[this_global_slice], dtype=bool)
+                all_success[this_global_slice] = (cur_success | (succ_local & first_ep)).tolist()
+                episode_done[start:end] = ep_done_local | env_done_local | succ_local
+                done = bool(np.all(episode_done[start:end]))
 
-                # update pbar
-                pbar.update(action.shape[1])
+                # update pbar by the slowest env's progress so we never cut a slow
+                # (small-R) env short before it reaches its episode end
+                step_advance = int(r_exec.min()) if r_exec is not None else action.shape[1]
+                pbar.update(step_advance)
             pbar.close()
 
             # collect data for this round
@@ -324,6 +352,16 @@ class LiberoRunner(BaseRunner):
             # scalar fractions survive eval_policy_sim's numeric aggregation
             for kk in range(1, maxk + 1):
                 log_data[f'k_pred_frac_{kk}'] = float((ks == kk).mean())
+
+        # in-sim distribution of per-sample executed chunk length R (variable-R mode).
+        # mean_r_exec is the mean replan interval -> replan/vision-CNN cost ~ 1/mean_r_exec
+        if all_r_execs:
+            rs = np.concatenate([np.atleast_1d(r).ravel() for r in all_r_execs]).astype(int)
+            log_data['mean_r_exec'] = float(rs.mean())
+            lo, hi = int(rs.min()), int(rs.max())
+            hist = np.bincount(rs, minlength=hi + 1)[lo:]
+            print(f"[r_exec] in-sim mean={rs.mean():.3f} | range=[{lo},{hi}] | "
+                  f"hist(R={lo}..{hi})={hist.tolist()}")
 
         return log_data
 

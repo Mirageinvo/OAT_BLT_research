@@ -221,8 +221,12 @@ cd oat && uv run python my_scripts/measure_latency_adaptive.py \
 - `oat/oat/env_runner/libero_runner.py` — uses `predict_action_adaptive`, tracks `mean_tokens_used`
 - `oat/scripts/eval_policy_sim.py` — prints `mean_tokens_used`
 - `oat/scripts/collect_min_k_dataset.py` — label generation for token-count predictor
-- `oat/oat/model/token_count_predictor.py` — `TokenCountPredictor` MLP (features → min_k)
-- `oat/scripts/train_token_count_predictor.py` — trains the predictor from the `.npz`
+- `oat/oat/model/token_count_predictor.py` — `TokenCountPredictor` MLP (features → min_k); `class_values` for 4-class {1,2,4,8}
+- `oat/scripts/train_token_count_predictor.py` — trains the predictor; `--valid_budgets`, realized-error + safe-rate metrics
+- `oat/scripts/per_timestep_recon_error.py` — Step 0: intra-chunk gain/excess concentration + gripper/jerk semantics (H-OAT premise check)
+- `oat/oat/policy/oatpolicy.py` — also `predict_action_agnostic` + `set_agnostic_mix` (gate baseline)
+- `oat/oat/env_runner/libero_runner.py` — logs in-sim `k_pred` histogram
+- `oat/scripts/eval_policy_sim.py` — flags `--token_predictor`, `--entropy_threshold`, `--agnostic_mix`, `--n_action_steps` (fixed-R sweep)
 - `oat/my_scripts/measure_latency_adaptive.py` — latency benchmarking with real obs
 
 ### End-to-end results (LIBERO, `policy_ep-0250`, 5 exps each)
@@ -324,16 +328,38 @@ Fixed-R sweep at K=8 (full budget), via `--n_action_steps R --entropy_threshold 
 - **Joint (K,R) motivation weakened:** "high K enables long R" fails because long R is bad *regardless* of K → the real lever is **adaptive R at K=8** (closer to AAC — novelty caveat).
 - **Next:** (1) add R=4 to find the SR(R) peak; (2) build variable-R execution (policy returns an R-length chunk, runner executes it, replan) + a heuristic R signal (fidelity-ladder agreement) → test whether **adaptive R beats fixed R at matched mean cost** (the real R-gate: needs per-obs heterogeneity). Steep curve ⇒ potential payoff is large if heterogeneity exists.
 
+### Step 0 (intra-chunk reconstruction) + H-OAT direction
+
+**Step 0 premise check** (`scripts/per_timestep_recon_error.py`): is the *marginal value of tokens* uneven WITHIN a chunk? Autoencode GT chunks through the frozen tokenizer at k∈{1,2,4,8}; measure per-timestep error e_t(k) and the **gain** `gain_t(a→b)=max(e_t(a)−e_t(b),0)` / **excess** of extra tokens (raw error is misleading — a step can be hard at every k); per-chunk concentration (CV/peak2mean/topN), full + executed windows; + within-chunk correlation of gain with gripper-change/jerk/action-delta. (NB measure within-chunk unevenness, not the avg profile, which smears peaks across arbitrary window starts.)
+- **Concentration: REAL & robust.** `gain_4to8` top2 vs uniform ref: 1.3× (R=4), 2.0× (R=8), **2.6× (R=16)**, 3.4× (full); median ≈ mean → not driven by a few extreme chunks. A few timesteps carry most of the 4→8 improvement.
+- **Semantics: WEAK / FAILED.** within-chunk corr of `gain_4to8` with gripper r=+0.002 (gripper-change is *below* avg at the top-gain step, 0.52×), jerk r=+0.053 (1.22×), delta r=+0.051 (1.34×). → hard-to-reconstruct steps are **fast-motion, NOT grasp/contact**. Reconstruction-hardness ≠ task-importance (likely anti-correlated: grasp is task-critical but *easy* to tokenize). ⇒ allocating tokens by reconstruction-residual risks fixing the wrong steps → reconstruction gain may not transfer to SR.
+
+**Chosen scheme — Generation-aware Sparse Residual H-OAT + adaptive R** (concretizes Closed-loop Adaptive OAT with a real mechanism):
+```
+obs → OAT coarse prefix (k=4) → decode A4
+→ generation-aware router reads the COARSE PLAN (not obs): decode_k2-vs-k4 instability,
+  curvature, AR hidden/logits → picks sparse refinement patches
+→ patch decoder applies residuals: A_final[t:t+L] = A4[t:t+L] + ΔA_patch  (targets decode8−decode4)
+→ patch activity (count/strength/position) → adaptive R: unstable→short R, stable→long R
+→ execute first R actions, replan
+```
+- #1 SparsePatch = architecture (coarse OAT4 backbone + sparse residual patches; cheap residual targets, no full variable-segment tokenizer). #2 generation-aware router = WHERE to patch, reading the generated plan **not obs** — dodges the obs-wall that sank the K-predictor (K-gate tested obs-only, so its null does NOT apply here). One shared uncertainty signal (patch activity) drives both K (refinement) and R (horizon).
+- **Where it wins (honest):** the K/patch part alone is the *cheap* axis (small latency) + threatened by the Step-0 semantic finding. **The adaptive-R coupling gives it teeth** — R cuts the dominant vision-CNN cost and has a real signal (R=8 > OAT8 SR). Win shifts from "fewer tokens" to "fewer replans / better SR-vs-cost Pareto". Cannot beat OAT8 SR (frozen policy); target = match SR at lower total inference cost.
+
+**Gates (cheapest/most-decisive first — do NOT build the full scheme before these):**
+1. **GATE 1 — R-heterogeneity (prerequisite).** Does *any* adaptive R beat fixed R at matched mean replan cost? R-sweep shows SR monotone-decreasing in R (8>16>24>32), so "confident→long R" helps only if some chunks tolerate long R. Test with variable-R execution + a simple signal (action-convergence `Δ(a_k,a_{k-1})` or oracle) **before** building patches. If no headroom → the whole patch→R coupling is moot.
+2. **GATE 2 — patch-signal vs simpler R signals** (action-entropy / AAC-style): does the generation-aware patch signal beat them? Else it reinvents AAC.
+3. **GATE 3 — SR-translation + semantics.** Patches target fast-motion (Step 0); does the scheme maintain SR, and does "patch activity → R" align with task needs?
+
+**Immediate cheap step:** GATE 1 — variable-R execution in the runner + a simple R signal, compare adaptive-R vs fixed-R on SR-vs-replan-cost. Decides the fate of the whole joint idea before any patch machinery.
+
 ### TODO next
 
-1. ~~**Analyze `collect_min_k_dataset.py` output**~~ — done; min_k distribution at ε=0.10 checked, looks good.
-2. ~~**Build token-count predictor**~~ — model + training script written (`oat/oat/model/token_count_predictor.py`, `oat/scripts/train_token_count_predictor.py`). **Next: train on cluster and check `safe_rate`/`under_rate`/`mean_pred_k`.**
-3. ~~**Wire predictor into `predict_action_adaptive`**~~ — done: `predict_action_predictor` + `set_token_predictor` + `eval_policy_sim.py --token_predictor` + `detokenize(eval_keep_k=...)`. Compiles; **not yet run in sim.**
-4. **Add `--entropy_threshold` flag to `eval_policy_sim.py`** — for threshold sweep experiments.
-5. ~~**End-to-end validation**~~ — done for full / entropy-2.75 / predictor-w2.0 (see "End-to-end results" above). Result: learned ≈ entropy in SR, both ~8–10pp below full budget; cost looks method-independent (compounding error).
-6. **GATE (reframed — pow2 finding).** fixed k=5/6 are invalid (untrained budgets). Valid fixed points = **{1,2,4,8}**: run fixed k∈{1,2,4} (`--entropy_threshold 0 --use_k_tokens k`; have k=8≈0.58). Then the real test: compare predictor (w2.0 5.31→0.497, w4.0 6.29→0.559) against the best **obs-agnostic mixture** of {1,2,4,8} at the same mean cost. Adaptivity wins only if obs-conditioning beats the mixing rate. If predictor ≈ agnostic mix → no adaptivity value → pivot to tokenizer (uniform-dropout / FASTer) or analysis paper.
-7. **Better heuristic baseline:** action-space stopping — `Δ(a_k, a_{k−1})` convergence (or action entropy, AAC-style) instead of token entropy. Cheap, generation-aware; test on the same frontier.
-8. **Method (if gate passes):** learned **per-step refine-or-stop** head conditioned on partial generation, trained on task-grounded labels. Start with **offline logged-bandit** `P(success | features, k)` from fixed-k rollouts (reuse `SR(k)` data); DAgger iterations only if needed. Avoid online RL as the starting point.
-9. **Map the knee: run predictor `w=4.0`** (~6 tokens) to complete the current MSE-predictor frontier.
-10. **Latency reality check:** `measure_latency_adaptive.py` at `batch_size=1` for true per-sample ms (batched runner latency is bound by `max(k_pred)`, not the mean).
-11. **For the paper:** multi-suite LIBERO (spatial/object/goal/long), not just libero10; baselines = fixed-k, token-entropy, action-entropy, learned controller; Pareto SR-vs-tokens + latency.
+**Status:** K-axis (token count) adaptivity — **fully explored, NEGATIVE & CLOSED** (predictor w1/2/4, 4-class {1,2,4,8}, entropy, agnostic-mix all ≈ fixed-k frontier; fixed k=4 dominates; obs-conditioning ≈ agnostic mix). R-axis — **promising** (R=8 0.635 > OAT8 0.58). Step 0 — done (intra-chunk concentration real but semantically ungrounded). Current focus = **R / joint (K,R) via generation-aware SparsePatch**, gated.
+
+1. **GATE 1 (do next, decisive):** variable-R execution in the runner (policy returns an R-length chunk; runner/multistep_wrapper executes R then replans) + a simple R signal (action-convergence `Δ(a_k,a_{k-1})` or oracle). Test **adaptive-R vs fixed-R at matched mean replan cost** (SR-vs-cost Pareto). Decides whether the whole joint/H-OAT idea has headroom.
+2. **(cheap) Add R=4 to the fixed-R sweep** — find the SR(R) peak / where reactivity saturates.
+3. **GATE 2 (if 1 passes):** does a generation-aware patch/instability R-signal beat a simple action-entropy (AAC-style) R-signal? Else it reinvents AAC.
+4. **Build (if 1–2 pass): Generation-aware Sparse Residual H-OAT + adaptive R** — coarse OAT4 + generation-aware sparse residual patches + patch-activity→R. GATE 3 = maintain SR (semantic risk: patches target fast-motion, not grasp).
+5. **Latency reality check:** `measure_latency_adaptive.py` at `batch_size=1` — confirm R (replan/vision-CNN) is the dominant cost and K (AR tokens) is cheap (motivates focusing on R).
+6. **For the paper:** multi-suite LIBERO (spatial/object/goal/long); baselines = fixed-k, fixed-R, token-entropy, action-entropy/AAC, agnostic mixtures, learned controller; Pareto SR-vs-(tokens AND replans/latency). The K-axis negative + pow2 + cost-axis analysis is itself a publishable diagnosis.

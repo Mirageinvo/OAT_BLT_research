@@ -107,6 +107,10 @@ class MultiStepWrapper(gymnasium.Wrapper):
         actions: (n_action_steps,) + action_shape
         """
         for act in action:
+            if np.isnan(act).all():
+                # variable-R sentinel: rows past this env's executed length R are
+                # all-NaN padding -> stop here (this env replans early)
+                break
             if len(self.done) > 0 and self.done[-1]:
                 # termination
                 break

@@ -52,6 +52,17 @@ from typing import List, Optional
 @click.option('--n_action_steps', default=None, type=int,
               help="override executed chunk length R (steps executed open-loop before replanning; "
                    "default 16, max = decode horizon 32). For the fixed-R sweep.")
+@click.option('--adaptive_r', default=None, type=str,
+              help="variable-R execution mode (GATE 1): 'convergence' | 'random' | 'fixed'. "
+                   "Holds K at use_k_tokens (default full) and adapts the executed chunk length "
+                   "R per observation. Forces n_action_steps = r_max.")
+@click.option('--r_coarse_k', default=4, type=int,
+              help="coarse token budget for the convergence R-signal (decode_k vs decode_K)")
+@click.option('--r_min', default=8, type=int, help="min executed chunk length R")
+@click.option('--r_max', default=32, type=int, help="max executed chunk length R (<= horizon 32)")
+@click.option('--r_threshold', default=0.5, type=float,
+              help="convergence divergence threshold (normalizer-space L2); execute the leading "
+                   "prefix where coarse and full plans agree below this")
 def eval_policy_sim(
     checkpoint: str,
     output_dir: str,
@@ -65,6 +76,11 @@ def eval_policy_sim(
     entropy_threshold: Optional[float] = None,
     agnostic_mix: Optional[str] = None,
     n_action_steps: Optional[int] = None,
+    adaptive_r: Optional[str] = None,
+    r_coarse_k: int = 4,
+    r_min: int = 8,
+    r_max: int = 32,
+    r_threshold: float = 0.5,
 ):
     if os.path.exists(output_dir):
         click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
@@ -114,6 +130,13 @@ def eval_policy_sim(
             policy.set_agnostic_mix(k_probs)
             print(f"Attached obs-agnostic budget mixture: {k_probs}")
 
+        # variable-R mode needs the wrapper action_space to span the full r_max chunk
+        # (each env then NaN-pads down to its own R), so force n_action_steps = r_max
+        if adaptive_r is not None:
+            n_action_steps = r_max
+            print(f"Variable-R mode '{adaptive_r}': r in [{r_min},{r_max}], "
+                  f"coarse_k={r_coarse_k}, threshold={r_threshold}")
+
         # optionally override executed chunk length R (fixed-R sweep): the policy slices
         # action_pred[:, :n_action_steps], so set it on the policy too (not just the runner)
         if n_action_steps is not None:
@@ -140,6 +163,12 @@ def eval_policy_sim(
             kwargs['use_k_tokens'] = use_k_tokens
         if entropy_threshold is not None:
             kwargs['entropy_threshold'] = entropy_threshold
+        if adaptive_r is not None:
+            kwargs['adaptive_r'] = adaptive_r
+            kwargs['r_coarse_k'] = r_coarse_k
+            kwargs['r_min'] = r_min
+            kwargs['r_max'] = r_max
+            kwargs['r_threshold'] = r_threshold
         runner_log = env_runner.run(
             policy,
             **kwargs
@@ -151,7 +180,7 @@ def eval_policy_sim(
             if isinstance(value, wandb.sdk.data_types.video.Video):
                 runner_log[key] = [value]
         all_runs.append({k: v for k, v in runner_log.items() if not isinstance(v, list)})
-        print(f"Exp 1: success rate = {runner_log['mean_success_rate']}, mean tokens used = {runner_log.get('mean_tokens_used', 'N/A')}")
+        print(f"Exp 1: success rate = {runner_log['mean_success_rate']}, mean tokens used = {runner_log.get('mean_tokens_used', 'N/A')}, mean R = {runner_log.get('mean_r_exec', 'N/A')}")
 
         for i in range(num_exp - 1):
             this_log = env_runner.run(policy, **kwargs)
