@@ -224,7 +224,8 @@ cd oat && uv run python my_scripts/measure_latency_adaptive.py \
 - `oat/oat/model/token_count_predictor.py` — `TokenCountPredictor` MLP (features → min_k); `class_values` for 4-class {1,2,4,8}
 - `oat/scripts/train_token_count_predictor.py` — trains the predictor; `--valid_budgets`, realized-error + safe-rate metrics
 - `oat/scripts/per_timestep_recon_error.py` — Step 0: intra-chunk gain/excess concentration + gripper/jerk semantics (H-OAT premise check)
-- `oat/oat/policy/oatpolicy.py` — also `predict_action_agnostic` + `set_agnostic_mix` (gate baseline); `predict_action_variable_r` (GATE 1 variable-R: convergence/random/fixed R-signal, dispatched by `adaptive_r` kwarg)
+- `oat/oat/policy/oatpolicy.py` — also `predict_action_agnostic` + `set_agnostic_mix` (gate baseline); `predict_action_variable_r` (GATE 1 variable-R: convergence/random/fixed R-signal, dispatched by `adaptive_r` kwarg; R horizon resolved from decoded `action_pred.shape[1]`=32, NOT latent_horizon=8 — see horizon bug fix)
+- `oat/scripts/diag_convergence_div.py` — offline (no-sim) convergence R-signal diagnostic: per-timestep `d_t` percentiles + threshold→R-distribution sweep (decides R-heterogeneity before sim)
 - `oat/oat/gymnasium_util/multistep_wrapper.py` — `step` breaks on all-NaN action row (variable-R sentinel)
 - `oat/oat/env_runner/libero_runner.py` — logs in-sim `k_pred` histogram; variable-R: NaN-pad per-env R, `mean_r_exec` + R-hist, `episode_done` desync fix
 - `oat/scripts/eval_policy_sim.py` — flags `--token_predictor`, `--entropy_threshold`, `--agnostic_mix`, `--n_action_steps` (fixed-R sweep), `--adaptive_r`/`--r_coarse_k`/`--r_min`/`--r_max`/`--r_threshold` (variable-R)
@@ -353,6 +354,37 @@ cd oat && MUJOCO_GL=egl uv run scripts/eval_policy_sim.py \
 ```
 **Gate read:** `convergence` passes only if SR(adaptive @ mean R̄) is **above** the fixed-R sweep interpolation at R̄ **and** above `random` at the same mean. If convergence ≈ random ≈ fixed-curve → no R-heterogeneity from this signal (K-axis déjà vu) → the whole patch→R coupling is moot. **Likely need to sweep `--r_threshold`** (0.5 in norm-L2 over 7 dims may rarely trigger → mean R → r_max). **Possible v2 signal: an oracle R** (offline teacher-consistency) to answer "is there ANY R-heterogeneity" before blaming the cheap signal.
 
+### GATE 1 — progress (2026-06-04): horizon bug fixed, offline divergence diagnosed, sim pending
+
+**BUG FOUND & FIXED (was silently breaking variable-R):** `predict_action_variable_r` resolved `r_max` against `action_tokenizer.latent_horizon`, but that is **8 = the token-register count (num_registers)**, NOT the action horizon. The decoded chunk is **32 steps** (`tokenizer.py:97` asserts `eval_keep_k ≤ latent_horizon`, i.e. latent_horizon caps the *token budget* k∈[1,8], not time). So `--r_max 32` silently clamped to 8 → `r_min=r_max=8` → `r_exec=8` for every sample regardless of the signal. The first convergence sim run (`hist(R=8..8)`, SR≈0.605 = fixed-R=8) was this artifact, **not** a property of the signal — it must be re-run.
+- Fix: resolve `H = action_pred.shape[1]` (decoded action length, =32) AFTER detokenize, in both `oat/policy/oatpolicy.py:predict_action_variable_r` and the new diagnostic `oat/scripts/diag_convergence_div.py`.
+
+**Offline divergence diagnostic** (`oat/scripts/diag_convergence_div.py`, NO sim): decodes coarse(k=4) vs full(k=8) on real dataset obs, dumps per-timestep `d_t = ||norm(A8)_t − norm(A4)_t||` percentiles + a threshold→R-distribution sweep. Run:
+```bash
+cd oat && uv run python scripts/diag_convergence_div.py \
+  -c my_models/policy_ep-0250_sr-0.596.ckpt --max_samples 4096 --r_max 32 [--r_coarse_k 2]
+```
+Result (N=8800, coarse_k=4):
+- **`d_t` is TINY and FLAT across all 32 steps** (p50 ~0.05–0.11, p90 ~0.12–0.20, p99 ~0.13–0.33); far-horizon steps 24–27 are even the *lowest* (p50≈0.05), not higher. coarse k=4 ≈ full k=8 **everywhere** (consistent with offline err k4=.129≈k8=.124).
+- **Two consequences:** (a) no within-chunk localization structure → the "first threshold crossing" mechanism mostly picks up each sample's *overall* divergence magnitude + noise → the signal collapses to a **per-sample scalar**, not "where to refine"; (b) it directly undercuts the **sparse-patch leg of H-OAT**: residual targets `decode8−decode4` are ~0.05 → almost nothing to patch.
+- **Threshold→R sweep DOES produce a spread** (not degenerate): thr 0.10→meanR 13.7 std 8.99 (60%@8, 12%@32); thr **0.12 ≈ meanR 16** target; thr 0.15→meanR 22.3 std 10.75. Both ends populated → bimodal. So heterogeneity *in the signal* exists; whether it's *useful* (vs noise) needs sim.
+
+**Decisive sim pair queued (READY, not yet run):** convergence @ thr 0.12 (mean R~16) vs random control @ mean 16, n=3 each:
+```bash
+# convergence
+MUJOCO_GL=egl uv run scripts/eval_policy_sim.py -c my_models/policy_ep-0250_sr-0.596.ckpt \
+  -o eval_out/varR_conv012 -n 3 --use_k_tokens 8 --adaptive_r convergence \
+  --r_min 8 --r_max 32 --r_coarse_k 4 --r_threshold 0.12
+# random @ mean 16
+MUJOCO_GL=egl uv run scripts/eval_policy_sim.py -c my_models/policy_ep-0250_sr-0.596.ckpt \
+  -o eval_out/varR_rand16 -n 3 --use_k_tokens 8 --adaptive_r random --r_min 8 --r_max 24
+```
+- **Anchor / bar:** fixed R=16 = **0.577**. SR(R) is monotone-decreasing & mildly **concave** (0.635/0.577/0.510/0.440 @ R=8/16/24/32) → by Jensen a constant beats a random spread, so the real bar is **convergence > fixed-16 (0.577)**; random is the secondary obs-agnostic-spread control.
+- **Read:** convergence >0.577 & >random → R-adaptivity real, build on. convergence ≈ random ≈ ≤0.577 → spread is noise (expected from flat `d_t`) → this signal dead.
+- **On submitting results:** report the in-sim `mean R` from the convergence log; if it drifts off 16 (rollout≠demo states), retune `--r_threshold` + random range to re-match the mean (else the cost is not matched).
+
+**Honest prior (H-OAT overall): LOW.** K-axis closed-negative; the sparse-patch leg inherits that null PLUS tiny residuals (~0.05) PLUS Step-0 wrong-semantics. The only live bet is **adaptive R**, and its one cheap signal (convergence) looks like noise (flat `d_t`). Every adaptive variant tried so far (all K-axis) lands on the fixed frontier → structural read: this frozen OAT+LIBERO has little *readable* per-obs heterogeneity. **Next decisive test if convergence-vs-random fails = ORACLE R** (offline teacher-consistency: smallest R whose continuation matches a fresh full-OAT8 replan): if even oracle R can't beat fixed R at matched mean, no signal will → R-adaptivity (and H-OAT) is dead → pivot to the negative-result/diagnosis paper (already the stated fallback). Oracle-R is **not yet implemented** — build it only if the convergence sim fails.
+
 ### Step 0 (intra-chunk reconstruction) + H-OAT direction
 
 **Step 0 premise check** (`scripts/per_timestep_recon_error.py`): is the *marginal value of tokens* uneven WITHIN a chunk? Autoencode GT chunks through the frozen tokenizer at k∈{1,2,4,8}; measure per-timestep error e_t(k) and the **gain** `gain_t(a→b)=max(e_t(a)−e_t(b),0)` / **excess** of extra tokens (raw error is misleading — a step can be hard at every k); per-chunk concentration (CV/peak2mean/topN), full + executed windows; + within-chunk correlation of gain with gripper-change/jerk/action-delta. (NB measure within-chunk unevenness, not the avg profile, which smears peaks across arbitrary window starts.)
@@ -382,7 +414,7 @@ obs → OAT coarse prefix (k=4) → decode A4
 
 **Status:** K-axis (token count) adaptivity — **fully explored, NEGATIVE & CLOSED** (predictor w1/2/4, 4-class {1,2,4,8}, entropy, agnostic-mix all ≈ fixed-k frontier; fixed k=4 dominates; obs-conditioning ≈ agnostic mix). R-axis — **promising** (R=8 0.635 > OAT8 0.58). Step 0 — done (intra-chunk concentration real but semantically ungrounded). Current focus = **R / joint (K,R) via generation-aware SparsePatch**, gated.
 
-1. **GATE 1 — infrastructure DONE, RUN it next (decisive):** variable-R execution is implemented (see "GATE 1 implementation" above: `predict_action_variable_r` + sentinel-padding runner + `episode_done` desync fix + eval flags). **Remaining = run the experiment:** sanity (`--adaptive_r fixed --r_min/max 16` ≈ 0.577) → `convergence` (sweep `--r_threshold` to land mean R ~16) vs `random` control, compare against the fixed-R sweep at matched mean R. Decides whether the whole joint/H-OAT idea has headroom.
+1. **GATE 1 — infra DONE + horizon bug FIXED + offline diagnosed; RUN the decisive sim pair (see "GATE 1 — progress (2026-06-04)" above).** Sanity ✓ (fixed R=8 ≈ 0.60). Convergence signal: offline shows a real R-spread but `d_t` flat/tiny → likely noise. **Remaining = run convergence @ thr 0.12 (mean R~16) vs random @ mean 16, n=3; bar = fixed-16 (0.577).** If it fails → build & run ORACLE R (ceiling test) before declaring R-adaptivity dead.
 2. **(cheap) Add R=4 to the fixed-R sweep** — find the SR(R) peak / where reactivity saturates.
 3. **GATE 2 (if 1 passes):** does a generation-aware patch/instability R-signal beat a simple action-entropy (AAC-style) R-signal? Else it reinvents AAC.
 4. **Build (if 1–2 pass): Generation-aware Sparse Residual H-OAT + adaptive R** — coarse OAT4 + generation-aware sparse residual patches + patch-activity→R. GATE 3 = maintain SR (semantic risk: patches target fast-motion, not grasp).
