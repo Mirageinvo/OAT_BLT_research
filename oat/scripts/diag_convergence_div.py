@@ -60,6 +60,7 @@ def main(checkpoint, device, batch_size, num_workers, max_samples,
     assert isinstance(policy, OATPolicy), f"Expected OATPolicy, got {type(policy)}"
     policy.to(device).eval()
 
+    cfg.task.policy.dataset.zarr_path = "data/libero/libero10_N500.zarr"
     dataset = hydra.utils.instantiate(cfg.task.policy.dataset)
     print(f"Dataset size: {len(dataset)}")
 
