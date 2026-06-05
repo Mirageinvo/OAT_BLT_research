@@ -85,6 +85,14 @@ def restore(env, ctrl, snap, snap_step):
     raw = ctrl.regenerate_obs_from_state(snap)   # set_state + forward + re-render
     env.cur_step = int(snap_step)
     env.done = False
+    # robosuite base-env internal episode flags are NOT in the mujoco state; without
+    # resetting them, accumulated timestep across many continuations hits horizon=1000
+    # and the next step raises "executing action in terminated episode".
+    try:
+        ctrl.env.timestep = 0
+        ctrl.env.done = False
+    except Exception:
+        pass
     return env._extract_obs(raw)
 
 
@@ -176,6 +184,12 @@ def main(checkpoint, output, device, n_branch, M, R, k_coarse, n_tasks, free_fra
         if len(rows) >= n_branch:
             break
         env = LiberoEnv(task_name=task, **ekw)
+        # never auto-terminate on robosuite horizon — we control termination via
+        # LiberoEnv.done (success / max_episode_steps); branching re-steps the env a lot.
+        try:
+            env.env.env.ignore_done = True
+        except Exception:
+            pass
         try:
             while len(rows) < n_branch:
                 obs, _ = env.reset()
