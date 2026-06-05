@@ -369,12 +369,14 @@ Result (N=8800, coarse_k=4):
 - **Two consequences:** (a) no within-chunk localization structure → the "first threshold crossing" mechanism mostly picks up each sample's *overall* divergence magnitude + noise → the signal collapses to a **per-sample scalar**, not "where to refine"; (b) it directly undercuts the **sparse-patch leg of H-OAT**: residual targets `decode8−decode4` are ~0.05 → almost nothing to patch.
 - **Threshold→R sweep DOES produce a spread** (not degenerate): thr 0.10→meanR 13.7 std 8.99 (60%@8, 12%@32); thr **0.12 ≈ meanR 16** target; thr 0.15→meanR 22.3 std 10.75. Both ends populated → bimodal. So heterogeneity *in the signal* exists; whether it's *useful* (vs noise) needs sim.
 
+**coarse_k=2 is a BETTER signal than coarse_k=4 (N=15008) → use k=2 for the sim.** Two gains: (a) `d_t` is **no longer flat** — a real within-chunk trend appears (early steps lower: t0–7 p50≈0.12–0.13; far horizon higher: t24–31 p50≈0.15–0.17, p99≈0.5–0.6), so "first crossing" picks up genuine early-confident→late-uncertain structure, not pure noise; (b) ~1.5× more dynamic range (p50 0.12–0.17 vs 0.05–0.11). Spread is nicely bimodal (thr 0.2: hist [5956,1334,1698,6020], 30%@8/30%@32). For mean R≈16 use **thr≈0.17** (offline meanR 14.0@0.15, 19.9@0.2). Caveat: the early-low/late-high trend is **generic** across samples (reflects "k=2 reconstructs the far future worse" — a tokenizer property), so the per-obs-useful part is still mostly the per-sample divergence *magnitude*; sim decides if that's useful. → **queued sim switched to `--r_coarse_k 2 --r_threshold 0.17`.**
+
 **Decisive sim pair queued (READY, not yet run):** convergence @ thr 0.12 (mean R~16) vs random control @ mean 16, n=3 each:
 ```bash
-# convergence
+# convergence (coarse_k=2 — better-conditioned signal than k=4)
 MUJOCO_GL=egl uv run scripts/eval_policy_sim.py -c my_models/policy_ep-0250_sr-0.596.ckpt \
-  -o eval_out/varR_conv012 -n 3 --use_k_tokens 8 --adaptive_r convergence \
-  --r_min 8 --r_max 32 --r_coarse_k 4 --r_threshold 0.12
+  -o eval_out/varR_conv_k2 -n 3 --use_k_tokens 8 --adaptive_r convergence \
+  --r_min 8 --r_max 32 --r_coarse_k 2 --r_threshold 0.17
 # random @ mean 16
 MUJOCO_GL=egl uv run scripts/eval_policy_sim.py -c my_models/policy_ep-0250_sr-0.596.ckpt \
   -o eval_out/varR_rand16 -n 3 --use_k_tokens 8 --adaptive_r random --r_min 8 --r_max 24
@@ -384,6 +386,23 @@ MUJOCO_GL=egl uv run scripts/eval_policy_sim.py -c my_models/policy_ep-0250_sr-0
 - **On submitting results:** report the in-sim `mean R` from the convergence log; if it drifts off 16 (rollout≠demo states), retune `--r_threshold` + random range to re-match the mean (else the cost is not matched).
 
 **Honest prior (H-OAT overall): LOW.** K-axis closed-negative; the sparse-patch leg inherits that null PLUS tiny residuals (~0.05) PLUS Step-0 wrong-semantics. The only live bet is **adaptive R**, and its one cheap signal (convergence) looks like noise (flat `d_t`). Every adaptive variant tried so far (all K-axis) lands on the fixed frontier → structural read: this frozen OAT+LIBERO has little *readable* per-obs heterogeneity. **Next decisive test if convergence-vs-random fails = ORACLE R** (offline teacher-consistency: smallest R whose continuation matches a fresh full-OAT8 replan): if even oracle R can't beat fixed R at matched mean, no signal will → R-adaptivity (and H-OAT) is dead → pivot to the negative-result/diagnosis paper (already the stated fallback). Oracle-R is **not yet implemented** — build it only if the convergence sim fails.
+
+### GATE 1 RESULT (2026-06-05): convergence-R is DEAD — worse than random. R-axis (this signal) CLOSED-NEGATIVE.
+
+Decisive sim done (n=3, coarse_k=2, thr 0.17, matched mean R≈14):
+| mode | SR (mean ± std) | mean R |
+|------|-----------------|--------|
+| **convergence** | **0.553 ± 0.036** (.578/.512/.568) | 14.1 |
+| **random** (control) | **0.595 ± 0.019** (.616/.592/.578) | 14.0 |
+| fixed-R interp @14 | ~0.592 | 14 |
+
+- **convergence LOSES to random by +0.042 at matched mean** (~1.8σ; combined stderr ≈0.024) AND loses to the fixed-R curve. The obs/plan-conditioned signal is **anti-informative**, not just neutral — conditioning R on convergence is *worse* than a dumb uniform spread.
+- **random ≈ fixed** @ mean14 (0.595 ≈ 0.592) → SR(R) is ~linear in [8,16] → **no Jensen room**; spreading R is neutral, so any adaptive win must come from genuine positive obs↔R-tolerance correlation. convergence's is ≤0.
+- **Per-exp noise is ~0.05** (same config gave 0.528 then 0.578) → never trust 1 exp here; needs n≥3.
+- Caveat (doesn't rescue it): convergence range [8,32] (bimodal 52%@8/12%@32) vs random [8,20] (uniform) — convergence's 12% mass at R=32 (worst fixed, 0.440) drags it, but if those R=32 picks were the *right* states it'd still win. Cleanest control (if ever needed) = **permutation**: shuffle convergence's own r_exec across episodes (same histogram, kills obs-correlation).
+- **Ties to the central insight:** convergence = decode-k2-vs-k8 = a **reconstruction** signal → 3rd reconstruction-based negative (after min-k, entropy). `reconstruction ≠ value` confirmed again.
+
+**Verdict:** convergence-R signal dead. R-adaptivity not *formally* closed (oracle-R = ceiling test still unbuilt), BUT given (a) convergence < random, (b) random ≈ fixed (no Jensen room), (c) the reconstruction-signal pattern → prior on R-adaptivity is now LOW. **Decision: stop chasing reconstruction R-signals; PIVOT to Value-Guided OAT** (see backlog). Build the counterfactual-sim harness once → use for oracle value(k|phase) (headline C1) + oracle-BoN (gate #7/#9) + oracle-R as a quick add-on to formally close R for the negative-results section.
 
 ### Step 0 (intra-chunk reconstruction) + H-OAT direction
 
@@ -410,13 +429,107 @@ obs → OAT coarse prefix (k=4) → decode A4
 
 **Immediate cheap step:** GATE 1 — variable-R execution in the runner + a simple R signal, compare adaptive-R vs fixed-R on SR-vs-replan-cost. Decides the fate of the whole joint idea before any patch machinery.
 
+### Idea backlog — if R-axis fails: Test-time scaling for OAT (best-of-N over ordered tokens)
+
+**Pivot target if GATE 1 (R) closes negative.** Stronger bet than adaptivity: adaptivity is *capped by the policy's own SR* (best case = approach full-OAT8 cheaper); test-time selection can **exceed** it. Grounded in our own measurements + a hot, *positive*-result literature (vs the thin adaptivity literature).
+
+**Measurement grounding (all ours):** (1) tokens are redundant — k=2≈k=4≈k=8 (err .129/.124) → generation is cheap & the "anytime fidelity" range is near-empty (this is WHY K-adaptivity died); (2) AR is cheap, **vision-CNN dominates** (obs_encoder 22.4M ≫ policy 5M), cost ≈ `(C_vision + C_AR·K)/R`; (3) adaptivity (K and R) is capped by the frozen policy's SR. ⇒ redirect the cheap, redundant generation budget from "spend less" (adaptivity, no headroom) to "spend the same on **selection**" (best-of-N), which can beat the base policy.
+
+**Method — shared-perception best-of-N + prefix token-tree search.** Per replan: encode vision **once** → sample **N** candidate token-chunks from the cheap AR head (all conditioned on the same features) → score → execute the best. Optional tree-search: branch on the **first 1–2 tokens** (carry ~95% of the chunk per k=2≈k=8), decode the rest cheaply, prune with the scorer.
+- **Why OAT is the ideal substrate (architectural win, measurement-backed):** the dominant cost (vision) is computed **once and amortized across all N candidates** → best-of-N is nearly free on the expensive axis. RoboMonkey/diffusion VLAs lack this clean perception↔generation split (their sampling is the expensive part). Plus redundant/ordered tokens → cheap sampling + efficient prefix tree-search.
+- **Anti-compounding:** best-of-N lowers per-chunk error → less compounding over the open-loop horizon (the very thing the R-sweep exposed).
+- **Refinement — EXHAUSTIVE prefix enumeration (not random best-of-N).** Since the first ~2 tokens set the bulk of the chunk (k2 within ~0.05/dim of k8; refinement from tokens 3–8 is marginal) and `topk` restricts each token to ~10 options, the *meaningful* candidate space is only **top-M(token1) × top-M(token2) ≈ 100 chunks**. So **enumerate** that low-dim, high-value prefix grid, decode each (k=2 decode ≈ k=8), greedy-fill the near-irrelevant tail 3–8, score all ~100, execute best — strictly better coverage than random sampling N, still cheap (vision shared, AR trivial, scorer = small MLP ×100). "Spend more compute on the first 2 tokens" on a *frozen* model can only mean **search/selection over their output** (can't make the frozen generator smarter) → it collapses to this prefix enumeration, NOT a smarter generator.
+  - Caveat: this is an *allocation/efficiency* win on top of best-of-N — it does **not** bypass GATE A (headroom) or the scorer. If oracle-best-of-prefix doesn't beat greedy, no compute allocation rescues it. Accuracy note: "2 tokens ≈ 95%" is loose — precisely A2 differs from A8 by ~0.05/dim (`d_t`≈0.13 over 7 dims), err .138→.124 k2→k8; 2 tokens set the *shape*, 3–8 refine.
+  - **Cheap diagnostic to fix the search shape (do BEFORE building, like `diag_convergence_div`):** sample N token-seqs on shared features, decode, measure what fraction of the chunk's **action-space variance** is explained by token positions 1–2 vs 3–8. Variance dominated by 1–2 → prefix enumeration covers the whole meaningful space (BoN becomes near-oracle on coverage; only the scorer is left). Variance spread across positions → staged beam (expand+select per 2-token block) regains value. NB reconstruction-redundancy (k2≈k8, decoder property) ≠ sampling-diversity (policy property) — this diagnostic separates them.
+  - **Heavy-prefix retrain variant (separate, non-frozen branch):** "more compute on 2 tokens" could instead mean an asymmetric **heavy-prefix / light-tail** architecture (a stronger head distilled to predict the first 1–2 tokens better) or a tokenizer fork (uniform nested dropout so all 8 tokens carry info). Requires retraining → distinct contribution from the frozen inference-time story.
+
+**Scoring, escalating (cheapest first):**
+- (free) **verifier-free**: rank N by intrinsic confidence — likelihood / low token-entropy (already computed) / action-space majority-vote. MG-Select-style.
+- (trained) **learned action-value verifier** on rollouts we already generate (success-labeled, MC returns for credit assignment). RoboMonkey/RoVer-style.
+
+**Cheap gates (same oracle discipline as oracle-R — test EXISTENCE before building):**
+- **GATE A (oracle best-of-N, decisive, ~an evening):** sample N, pick the candidate that *actually* succeeds (counterfactual sim) or best-tracks the demo. oracle-BoN ≫ single → diversity + headroom exist → build the verifier. oracle ≈ single → policy samples too similar → raise temperature / Gaussian-perturb the FSQ codes (RoboMonkey trick adapted to discrete latents), else dead.
+- **GATE B (verifier-free, free):** does intrinsic-confidence ranking already beat single-sample? If yes, paper without training a verifier.
+
+**Novelty positioning:** *first test-time scaling for ordered / prefix-decodable discrete action tokenizers.* Wedges vs the field: (1) ordered discrete tokens (vs continuous/diffusion in RoboMonkey/MG-Select/RoVer); (2) **prefix token-tree search** with early-token branching (unique to OAT, justified by k=2≈k=8); (3) **perception amortized once across N** (architectural efficiency RoboMonkey lacks); (4) motivated by our K/R-adaptivity negative diagnosis.
+
+**Related work:** RoboMonkey ([2506.17811](https://arxiv.org/abs/2506.17811), sample+Gaussian+VLM-verifier, inference scaling law, OpenVLA 49.8→56.5); MG-Select / verifier-free ([2510.05681](https://arxiv.org/pdf/2510.05681), ICLR 2026, intrinsic-confidence BoN); RoVer ([2510.10975](https://arxiv.org/pdf/2510.10975), reward-model verifier). Cheap-replan fallback (recovers but can't exceed SR): VLA-Cache ([2502.02175](https://arxiv.org/abs/2502.02175), NeurIPS 2025), LAC ([2602.00686](https://arxiv.org/pdf/2602.00686)). Real-time chunking: RTC ([2506.07339](https://arxiv.org/abs/2506.07339)).
+
+**Risks:** (a) OAT sample diversity may be low (temp=1/topk=10) → GATE A tests this first, cheaply; fix via temperature / FSQ-latent perturbation. (b) verifier credit assignment (recurring trap) → verifier-free start + MC returns; field has positive results, lower risk than adaptivity.
+
+**Paper structure:** §diagnosis (anytime tokens ≠ anytime inference; K dead via redundancy; R [gate]; vision-dominated cost — mostly DONE) → §insight (redirect cheap generation to selection; perception amortized) → §method (shared-perception BoN + prefix tree-search + verifier free→learned) → §results (SR vs N scaling law; SR vs latency; vs base policy; vs all adaptivity baselines).
+
+### Idea backlog — Prefix-Guided Visual OAT (attack the VISION axis, NOT another action-token method)
+
+**Strongest-targeted idea: hit perception, the actual bottleneck.** Our diagnosis says: K-axis dead (action tokens redundant), AR cheap, **vision-CNN dominates** (22.4M ≫ 5M), reconstruction-adaptivity ≠ SR. ⇒ real leverage is *what the model sees*, not the action-token budget. Use the cheap **coarse OAT prefix as a query into vision**: generate `z1,z2` → decode `A2` coarse intent → build action-queries from `A2` (+ proprio + token hidden + uncertainty) → select visual tokens/regions/cameras for the precise action → either (A) regenerate `z3..z8` from the action-relevant visual context, or (B) reselect visual context for full `z1..z8`. The two LIBERO cameras give a clean gating substrate: **agent-view** (approach / global goal) vs **eye-in-hand** (contact / local gripper-object detail). `gate=σ(MLP(q)); ctx = gate·eye + (1-gate)·agent`.
+
+**This is NOT frozen-inference — it RETRAINS, and that is a PLUS, not a minus** (corrected stance, user pushback accepted): a co-trained action-prefix-conditioned visual selector is a genuine *architectural* contribution (more novelty than a frozen inference trick); baseline becomes "vanilla OAT, same training budget" vs this (fair, even cleaner than the frozen anchor); retraining *opens* the design space (Variant A no longer has to preserve the frozen AR head's input dist; can co-train tokenizer / nested-dropout too). The earlier "scope jump = con" is **retracted**.
+
+**Generation-aware → dodges the obs-wall:** conditioning visual selection on the *decoded coarse plan* `A2` (not raw obs) means the K-predictor's obs-only null does NOT apply here.
+
+**Two genuine residual cautions (NOT anti-retrain — orthogonal):**
+1. **Gate the PREMISE before the (expensive) retrain.** Cheap insurance, not an argument against training. **`phase × camera masking` on the FROZEN policy (~an evening):** mask one camera as a function of plan phase (gripper-open/approach vs close/contact from `A2`), measure SR. Mask agent-view during contact → SR holds, eye-in-hand during contact → SR drops (and vice versa for approach) ⇒ phase-dependent camera importance is REAL → headroom → build the selector. SR insensitive to which-camera-when ⇒ premise dead, skip the retrain. This is the oracle-style existence gate (analog of oracle-R / oracle-BoN), and it's independently publishable as a diagnosis ("camera importance is/ isn't phase-dependent in OAT-LIBERO").
+2. **Decide Cost vs Quality (retrain doesn't resolve this — orthogonal design choice).** SR↑ → dense cross-attention selector (LightVLA-style regularization); latency↓ → **conditional encoding** (skip the 2nd camera / fine-resolution unless the coarse plan flags imminent contact) — this is the version that actually cuts the dominant vision cost (post-hoc attention over already-encoded tokens does NOT save encoder FLOPs); or Pareto (both). Picking this sets the mechanism AND the baselines.
+
+**Semantic risk (Step 0):** reconstruction-hardness ≈ fast-motion, NOT grasp/contact → plan-derived queries may pick visual regions by *motion* not *task-criticality* (same trap as the patch idea). The gripper channel of `A2` (dim 7, flags imminent close) is the concrete testable cue to ground selection in task-semantics.
+
+**Sharpened cost-version (recommended if premise-gate passes):** "**coarse-action-plan-gated conditional perception invocation**" — mostly run cheap/single-camera perception, invoke the expensive 2nd camera / fine-resolution only when `A2` flags imminent contact. Cuts the dominant cost (grounded in our bottleneck finding), cleaner than a dense selector, gated by the same phase×camera masking, novelty = plan-gated conditional perception on a prefix-decodable tokenizer.
+
+**Related work (live, supportive, but CROWDED → wedge must be sharp):** VLA-Pruner (dual-level visual importance: semantic attention + action-decode attention — already "action-aware"; our wedge = explicit *coarse-prefix-as-plan* pre-selection, two-stage, vs their during-decode attention — must show better/cheaper, else "VLA-Pruner on OAT"); LightVLA (learnable visual pruning ↓FLOPs AND ↑SR — pruning as regularizer); Compressor-VLA (holistic task ctx + fine-grained spatial via two modules ≈ our coarse-plan + local-refinement split). Connects to BLT/H-Net: content/context-dependent allocation, moved into the *visual* axis instead of the action chunk.
+
+**Priority vs test-time BoN:** BoN is cheaper, frozen, has a clean oracle gate, and can exceed the SR ceiling → keep it FIRST. But the `phase×camera masking` gate here is so cheap it's worth running in parallel — independently valuable as a diagnosis regardless of whether the full selector gets built.
+
+### Idea backlog — Value-Guided OAT (the CENTRAL insight: stop measuring reconstruction, measure VALUE)
+
+**THE unifying lesson from a ~30-paper survey (2025–26).** Every one of OUR negatives used a **reconstruction / heuristic** signal; every POSITIVE result in the field uses a **value / reward** signal:
+| our NEGATIVES | signal | | field POSITIVES | signal |
+|---|---|---|---|---|
+| min-k predictor | MSE-to-demo (reconstruction) | | V-GPS, VGAS | offline-RL value |
+| convergence-R | decode-k4-vs-k8 (reconstruction) | | Adaptive Q-Chunking | RL advantage |
+| entropy-stop | token entropy (heuristic) | | RoboMonkey / TACO | reward / pseudo-count verifier |
+We kept measuring "how close is the chunk to the demo"; we should measure "how much does this chunk lead to success." **Reconstruction-fidelity ≠ task-value** (Step-0 confirmed: hard-to-reconstruct = fast-motion, not grasp). This single reframe likely explains ALL the K/R negatives — the *mechanisms* may be fine, the *label* was wrong.
+
+**Method.** Train a value/Q function `V(features, chunk)` (or token-level `Q`) via offline RL on rollout data (Q-chunking recipe [2507.07969](https://arxiv.org/abs/2507.07969) / V-GPS [2410.13816](https://arxiv.org/html/2410.13816v2)). Use it two ways:
+1. **Test-time re-ranking → SR↑ ABOVE BC.** Generate N candidates (vision amortized, cheap), rank by value, execute the best. V-GPS/VGAS show this *exceeds* the base policy (RL-value improves over demos) — adaptivity never could (capped at BC).
+2. **Value-grounded adaptive depth/horizon → REVIVE K/R.** Re-run the K-budget and R-horizon choice driven by value-advantage (à la AQC) instead of reconstruction. K/R adaptivity may not be dead — the reconstruction *label* was.
+
+**Why OAT is the unique substrate (wedge vs V-GPS/VGAS/RoboMonkey, which re-rank only WHOLE actions):**
+- **Prefix-decodable → token/prefix-level value (process reward).** Any prefix decodes to a full chunk → evaluate value on a *partial* generation and **steer generation token-by-token** (value-guided decoding, reasoning-LLM style). No other action substrate allows this (continuous/diffusion have no ordered tokens). NB our k2≈k8 redundancy means useful steering concentrates on the first 1–2 tokens → in practice = value-ranked **exhaustive prefix enumeration** (ties to the BoN refinement above).
+- **Discrete tokens → stable LLM-style RL** (GRPO), whereas flow/diffusion VLAs fight RL instability (FPO [2510.09976](https://arxiv.org/pdf/2510.09976), π_RL [2510.25889](https://arxiv.org/html/2510.25889v1)). Discreteness is an advantage the field is trying to recover.
+- **Amortized vision** → cheap candidate generation.
+
+**Optional stronger scorer — latent world-model lookahead:** "imagine candidate chunk → predict outcome → score" (AtomVLA [2603.08519](https://arxiv.org/pdf/2603.08519), AHEAD, "Planning in 8 Tokens" [2603.05438](https://arxiv.org/pdf/2603.05438)). More principled than a value-classifier but world-model error compounds.
+
+**Cheap gate — UNIFIED with BoN #7's GATE A.** oracle-BoN = oracle-value: sample N, pick the truly-successful candidate (counterfactual sim) = the "perfect value function". oracle-selection ≫ single → value has headroom → build the Q-function. oracle ≈ single → policy samples not diverse → value has nothing to rank. **One evening, frozen policy; gates #7 AND this at once.**
+
+**Novelty positioning (field is crowded — be narrow & honest):** pure "RL fine-tune VLA" / "value re-rank" is taken (TGRPO [2506.08440](https://arxiv.org/html/2506.08440), V-GPS, VGAS [2602.07399](https://arxiv.org/html/2602.07399v2), AQC). The field scores a **flat whole action**; what NOBODY has is **value over the fidelity/depth axis of an anytime action code** — the unique thing OAT's prefix-decodability exposes. The novelty lives on that axis, not in "value-guided selection".
+
+**Using prefix-decodability (3 mechanisms, honest about which collapses):**
+- (M1, weak — DON'T sell) value-guided beam over tokens: branch per token, score decoded prefix, keep top-b. **Undercut by k2≈k8** — A_2≈A_8 in action space → prefix value barely moves after token 2 → beam degenerates. Avoid.
+- (M2, strong — value PROBE) decode the cheap prefix `A_2`, score `V(state,A_2)`: high → easy state, execute / long R / don't refine; low → value-critical → refine to `A_8` / replan sooner / best-of-N. A **free criticality detector** before paying for full generation. Value-grounded version of adaptive K/R.
+- (M3, strongest — value-of-FIDELITY) prefix-decodability gives the family `{A_1,A_2,A_4,A_8}` = SAME intent at rising fidelity → score `V(state,A_k)` across k → learn the **marginal value of tokens**. Impossible for V-GPS/VGAS/Q-chunking (one flat action, no fidelity axis).
+
+**SCIENTIFIC CONTRIBUTIONS (build the paper on C1, not on SR):**
+- **C1 — HEADLINE empirical finding: `reconstruction(k) ≠ value(k)`.** Measured: `k2≈k8` in *reconstruction* (err .138→.124, ~flat). Hypothesis: `value(k)` is **NOT** flat — the marginal value of token-fidelity concentrates at *task-critical* (contact) states, invisible to RMS. Worked example: free-space approach → A_2≈A_8, both succeed, value(k) flat → k=2 suffices; grasp → A_2 vs A_8 differ ~0.05/dim, but that 0.05 = grip-vs-miss → value(k=8)≫value(k=2), while RMS can't see 0.05. So **token fidelity matters where task-VALUE is high (contact), NOT where reconstruction is hard (fast-motion, per Step-0)** — a publishable property of anytime action codes that also explains why every prior reconstruction-based adaptive-depth (ours included) failed. Not preempted (FAST/OmniSAT/VQ-VLA = reconstruction; RL works = fixed representation).
+- **C2 — METHOD: value-grounded anytime control.** Allocate tokens (K) and replan horizon (R) by *value-of-fidelity* (M2 probe + M3 family), not reconstruction → revives the dead K/R axes on the correct signal.
+- **C3 — POSITIONING: first value / process-reward over a prefix-decodable action code** — "process value" for actions (reasoning-LLM analog), only possible on OAT's ordered anytime code; vs the field's flat whole-action value.
+
+**Gate = headline (one experiment does both):** measure **oracle `value(k)` across states** by counterfactual sim — execute `A_k`, k∈{1,2,4,8}, at states of different phases, record success → `success(k | phase)`. value(k) rises & concentrates at contact states → **C1 confirmed** → headline + method motivation → build the value fn. value(k) flat everywhere → still a publishable *negative* finding ("anytime action fidelity is value-irrelevant on LIBERO") → closes adaptive-depth honestly. Both outcomes ⇒ a paper; experiment is cheap (counterfactual sim on a state sample, like oracle-R / oracle-BoN).
+
+**Risks:** offline-RL value training (credit assignment, distribution shift) is the real work — but it's the field's *proven* path (unlike our reconstruction proxies). De-risk: oracle gate first; then verifier-free / V-GPS-style value before full Q-chunking.
+
+**Preempted-by-survey note (avoid reinventing):** patch-H-OAT ≈ CF-VLA ([2604.24622](https://arxiv.org/abs/2604.24622)); adaptive-replan ≈ StreamVLA ([2602.01100](https://arxiv.org/pdf/2602.01100)) / AQC; tokenizer-fork ≈ FASTer ([2512.04952](https://arxiv.org/html/2512.04952v2)) / OmniSAT ([2510.09667](https://arxiv.org/pdf/2510.09667)). Tokenizer-fork is also LOW-VALUE per our cost analysis (cheapens already-cheap AR, doesn't move SR or the vision-dominated cost).
+
 ### TODO next
 
-**Status:** K-axis (token count) adaptivity — **fully explored, NEGATIVE & CLOSED** (predictor w1/2/4, 4-class {1,2,4,8}, entropy, agnostic-mix all ≈ fixed-k frontier; fixed k=4 dominates; obs-conditioning ≈ agnostic mix). R-axis — **promising** (R=8 0.635 > OAT8 0.58). Step 0 — done (intra-chunk concentration real but semantically ungrounded). Current focus = **R / joint (K,R) via generation-aware SparsePatch**, gated.
+**Status:** K-axis (token count) adaptivity — **NEGATIVE & CLOSED** (predictor/entropy/agnostic-mix ≈ fixed-k; fixed k=4 dominates). R-axis convergence signal — **NEGATIVE & CLOSED** (2026-06-05: convergence 0.553 < random 0.595 at matched mean R≈14; random ≈ fixed → no Jensen room; see "GATE 1 RESULT"). Reconstruction-based adaptivity (min-k, entropy, convergence) all dead → `reconstruction ≠ value`. Step 0 — done. **Current focus = PIVOT to Value-Guided OAT** (value not reconstruction); gate = counterfactual-sim oracle harness (oracle value(k|phase) headline + oracle-BoN + oracle-R add-on).
 
-1. **GATE 1 — infra DONE + horizon bug FIXED + offline diagnosed; RUN the decisive sim pair (see "GATE 1 — progress (2026-06-04)" above).** Sanity ✓ (fixed R=8 ≈ 0.60). Convergence signal: offline shows a real R-spread but `d_t` flat/tiny → likely noise. **Remaining = run convergence @ thr 0.12 (mean R~16) vs random @ mean 16, n=3; bar = fixed-16 (0.577).** If it fails → build & run ORACLE R (ceiling test) before declaring R-adaptivity dead.
+1. **GATE 1 — DONE, NEGATIVE (see "GATE 1 RESULT (2026-06-05)" above).** convergence-R < random < fixed at matched mean → convergence signal anti-informative & dead. R-adaptivity prior now LOW (not formally closed — oracle-R unbuilt, but reconstruction-signal pattern + random≈fixed make it unlikely). → pivot to Value-Guided OAT (#9).
 2. **(cheap) Add R=4 to the fixed-R sweep** — find the SR(R) peak / where reactivity saturates.
 3. **GATE 2 (if 1 passes):** does a generation-aware patch/instability R-signal beat a simple action-entropy (AAC-style) R-signal? Else it reinvents AAC.
 4. **Build (if 1–2 pass): Generation-aware Sparse Residual H-OAT + adaptive R** — coarse OAT4 + generation-aware sparse residual patches + patch-activity→R. GATE 3 = maintain SR (semantic risk: patches target fast-motion, not grasp).
 5. **Latency reality check:** `measure_latency_adaptive.py` at `batch_size=1` — confirm R (replan/vision-CNN) is the dominant cost and K (AR tokens) is cheap (motivates focusing on R).
 6. **For the paper:** multi-suite LIBERO (spatial/object/goal/long); baselines = fixed-k, fixed-R, token-entropy, action-entropy/AAC, agnostic mixtures, learned controller; Pareto SR-vs-(tokens AND replans/latency). The K-axis negative + pow2 + cost-axis analysis is itself a publishable diagnosis.
+7. **PIVOT if R fails — Test-time scaling for OAT (best-of-N over ordered tokens).** See "Idea backlog — Test-time scaling" above. First action = **GATE A (oracle best-of-N)**: sample N candidate chunks/replan (vision shared), pick the truly-successful one in sim; oracle-BoN ≫ single → headroom exists → build verifier (free→learned). Can *exceed* the policy SR (unlike adaptivity). Stronger bet than R: positive-result literature (RoboMonkey/MG-Select/RoVer) + unique OAT fit (amortized perception, prefix tree-search).
+8. **PIVOT candidate (vision axis) — Prefix-Guided Visual OAT.** See "Idea backlog — Prefix-Guided Visual OAT" above. Attacks the actual bottleneck (vision), generation-aware (dodges obs-wall), RETRAIN-based (a novelty plus, not a con). First action (cheap, frozen, parallelizable with #7) = **`phase × camera masking` premise gate**: does which-camera-matters vary by plan phase (approach vs contact)? Yes → build the (cost-version) plan-gated conditional perception selector; no → premise dead. Caution: crowded field (VLA-Pruner/LightVLA/Compressor-VLA) → sharpen the coarse-prefix-as-plan wedge; decide Cost↓ vs SR↑ up front.
+9. **PIVOT candidate (the central reframe) — Value-Guided OAT.** See "Idea backlog — Value-Guided OAT" above. **Survey lesson: all our negatives used reconstruction signals; all field positives use VALUE/reward.** Novelty lives on the **fidelity axis** (value over the anytime prefix), not in value-selection (taken). **Headline contribution C1 = empirical finding `reconstruction(k) ≠ value(k)`** (token fidelity matters at contact/high-value states, invisible to RMS). C2 = value-grounded anytime K/R control; C3 = first process-value over a prefix-decodable action code. **Gate = headline:** measure oracle `value(k | phase)` by counterfactual sim — concentrated at contact → C1 confirmed; flat → publishable negative. Cheap (state-sample sim, like oracle-R/oracle-BoN). Can exceed SR (best-of-N bonus), retrain-friendly, reframes our negatives as motivation.
