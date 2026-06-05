@@ -250,8 +250,8 @@ def _worker(payload):
 @click.option('-d', '--device', default='cuda:0')
 @click.option('--n_branch', default=80, type=int, help='target number of branch states')
 @click.option('--M', 'M', default=5, type=int, help='continuations per (state,k)')
-@click.option('--R_small', default=8, type=int, help='short open-loop horizon (replan sooner)')
-@click.option('--R_large', default=32, type=int, help='long open-loop horizon (commit longer)')
+@click.option('--R_small', 'R_small', default=8, type=int, help='short open-loop horizon (replan sooner)')
+@click.option('--R_large', 'R_large', default=32, type=int, help='long open-loop horizon (commit longer)')
 @click.option('--k_coarse', default=1, type=int, help='coarse budget (vs full k=8)')
 @click.option('--n_tasks', default=2, type=int, help='how many libero10 tasks to sweep')
 @click.option('--free_frac', default=0.35, type=float,
