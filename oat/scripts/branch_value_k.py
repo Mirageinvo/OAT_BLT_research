@@ -153,7 +153,9 @@ def env_kwargs_from_cfg(cfg):
 @click.option('-d', '--device', default='cuda:0')
 @click.option('--n_branch', default=80, type=int, help='target number of branch states')
 @click.option('--M', 'M', default=5, type=int, help='continuations per (state,k)')
-@click.option('--R', 'R', default=32, type=int, help='open-loop steps the k-chunk is executed')
+@click.option('--R', 'R', default=16, type=int,
+              help='open-loop steps the k-chunk is executed (16 keeps p_full off the floor; '
+                   'R=32 over-floors success at grasp states and masks the gap)')
 @click.option('--k_coarse', default=1, type=int, help='coarse budget (vs full k=8)')
 @click.option('--n_tasks', default=2, type=int, help='how many libero10 tasks to sweep')
 @click.option('--free_frac', default=0.35, type=float,
@@ -210,9 +212,12 @@ def main(checkpoint, output, device, n_branch, M, R, k_coarse, n_tasks, free_fra
                     A8 = decode_k(policy, tokens, K)
                     Ac = decode_k(policy, tokens, k_coarse)
 
-                    grip_traj = np.sign(A8[:R, grip_dim])
-                    grip_will_change = bool(grip_traj[0] != grip_traj[-1]) or \
-                        bool(np.any(np.diff(grip_traj) != 0))
+                    # SUSTAINED gripper-command transition (open<->close) = grasp/release
+                    # imminent. (naive sign-flip-anywhere fires on gripper-channel noise.)
+                    g0 = float(np.mean(A8[:4, grip_dim]))
+                    g1 = float(np.mean(A8[max(0, R - 4):R, grip_dim]))
+                    grip_will_change = bool(np.sign(g0) != np.sign(g1) and abs(g0) > 0.5 and abs(g1) > 0.5)
+                    ncon = int(getattr(ctrl.env.sim.data, 'ncon', 0))  # active MuJoCo contacts
 
                     branch_deque = deque(copy.deepcopy(list(obs_deque)), maxlen=n_obs + 1)
 
@@ -231,7 +236,7 @@ def main(checkpoint, output, device, n_branch, M, R, k_coarse, n_tasks, free_fra
                         rows.append(dict(
                             task=task, step=int(snap_step),
                             p_full=p8, p_coarse=pc, gap=p8 - pc,
-                            grip_will_change=int(grip_will_change),
+                            grip_will_change=int(grip_will_change), ncon=ncon,
                             eef_vel=eef_vel, gripper_open=gripper_open,
                             recon_gap=recon_gap,
                         ))
@@ -285,6 +290,13 @@ def main(checkpoint, output, device, n_branch, M, R, k_coarse, n_tasks, free_fra
     vmed = np.median(vel)
     stratum(vel < vmed, 'slow_eef')      # contact-ish (low velocity)
     stratum(vel >= vmed, 'fast_eef')     # fast motion (where reconstruction is hard)
+    if 'ncon' in arrs:
+        nc = arrs['ncon']; nmed = np.median(nc)
+        stratum(nc > nmed, 'high_contact')   # more active MuJoCo contacts
+        stratum(nc <= nmed, 'low_contact')
+    print(f"\nphase coverage: grip_change={int(gwc.sum())}/{len(gwc)}  "
+          f"p_full range=[{arrs['p_full'].min():.2f},{arrs['p_full'].max():.2f}] "
+          f"(want p_full off the floor so a gap can show)")
 
     # killer check: does value-gap line up with reconstruction-gap?
     if len(gap) > 2 and rec.std() > 0:
