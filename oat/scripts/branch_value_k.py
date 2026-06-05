@@ -4,28 +4,29 @@ fidelity concentrate at CONTACT/critical states (value), NOT at fast-motion (whe
 reconstruction-hardness lives)?  Counterfactual branching: hold the sim state fixed,
 vary only the token budget k, roll the episode to the end, measure success.
 
-Per branch state s (visited by the full k=8 policy):
-  - generate ONE set of 8 tokens at s
-  - decode the SAME tokens at k=1 (coarse) and k=8 (full)  -> A1, A8   (prefixes)
-  - for each: restore s, execute the chunk open-loop for R steps, then CONTINUE with
-    the full k=8 policy to episode end; repeat M times -> success rate p1, p8
-  - gap(s) = p8 - p1                     (marginal value of fidelity AT s)
-  - phase tags: grip_will_change (grasp/release imminent), eef_vel, gripper openness
-  - recon proxy:  ||norm(A8) - norm(A1)|| over the executed R steps (reconstruction gap)
+Per branch state s (visited by the full k=8 policy), measure a 2x2 grid p(k,R) by
+counterfactual branching (restore s -> exec chunk[:R] open-loop -> continue k=8 -> success,
+averaged over M), for k in {1, 8} and R in {R_small, R_large}:
+  - value_R(s) = p(R_small) - p(R_large)   replan-sooner benefit; USER hypothesis: LARGE at
+                                           contact (committing a grasp open-loop is brittle)
+  - value_k(s) = p(k=8) - p(k=1)           token-fidelity benefit; C1: LARGE at contact
+  - phase tags: grip_will_change (grasp/release imminent), eef_vel, ncon, gripper openness
+  - recon proxy: ||norm(A8) - norm(A1)|| over R_large (does reconstruction predict value_k?)
+Tests BOTH axes (R is likely the live one — global R-sweep: smaller R -> higher SR) and
+whether either benefit CONCENTRATES at contact (the prereq for adaptive R/k to beat fixed).
 
-PILOT design = maximize signal: k in {1,8}, large R (open-loop compounds the k=1 error),
-contact-focused sampling, M continuations.  Answers "is there ANY gap, and is it at
-contact?" + calibrates the confirmatory run.
-
-Run on the sim machine:
+Run on the sim machine (parallel):
   cd oat && MUJOCO_GL=egl uv run python scripts/branch_value_k.py \
-      -c my_models/policy_ep-0250_sr-0.596.ckpt -o my_datasets/branch_value_k_pilot.npz \
-      --n_branch 80 --M 5 --R 32 --k_coarse 1
+      -c my_models/policy_ep-0250_sr-0.596.ckpt -o my_datasets/branch_value_kR_pilot.npz \
+      --n_branch 80 --M 5 --R_small 8 --R_large 32 --k_coarse 1 --n_tasks 5 --n_workers 8
 """
-if __name__ == "__main__":
-    import sys, os, pathlib
-    ROOT_DIR = str(pathlib.Path(__file__).parent.parent)
+import sys, os, pathlib
+# add repo root to sys.path at MODULE level (not just under __main__) so spawned
+# multiprocessing workers — which re-import this module — can import oat.*
+ROOT_DIR = str(pathlib.Path(__file__).parent.parent)
+if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
+if __name__ == "__main__":
     os.chdir(ROOT_DIR)
 
 import copy
@@ -120,7 +121,7 @@ def estimate_success(env, ctrl, snap, snap_step, branch_deque, chunk, R, M,
         restore(env, ctrl, snap, snap_step)
         dq = deque(copy.deepcopy(list(branch_deque)), maxlen=n_obs + 1)
         succ = False
-        for t in range(R):                      # open-loop execute the k-chunk
+        for t in range(min(R, len(chunk))):     # open-loop execute the k-chunk (clamp to horizon)
             if env.done:
                 break
             obs, r, done, _, _ = env.step(chunk[t])
@@ -147,24 +148,16 @@ def env_kwargs_from_cfg(cfg):
     )
 
 
-@click.command()
-@click.option('-c', '--checkpoint', required=True)
-@click.option('-o', '--output', required=True, help='output .npz of per-state rows')
-@click.option('-d', '--device', default='cuda:0')
-@click.option('--n_branch', default=80, type=int, help='target number of branch states')
-@click.option('--M', 'M', default=5, type=int, help='continuations per (state,k)')
-@click.option('--R', 'R', default=16, type=int,
-              help='open-loop steps the k-chunk is executed (16 keeps p_full off the floor; '
-                   'R=32 over-floors success at grasp states and masks the gap)')
-@click.option('--k_coarse', default=1, type=int, help='coarse budget (vs full k=8)')
-@click.option('--n_tasks', default=2, type=int, help='how many libero10 tasks to sweep')
-@click.option('--free_frac', default=0.35, type=float,
-              help='prob of branching at a non-contact (free-motion) state, for the control stratum')
-@click.option('--seed', default=0, type=int)
-def main(checkpoint, output, device, n_branch, M, R, k_coarse, n_tasks, free_frac, seed):
+def collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coarse, free_frac,
+                 seed, env_seed, show_pbar=True):
+    """Collect up to n_branch branch-state rows on `tasks` (one sequential env).
+    Per state, measures the 2x2 grid p(k,R) for k in {k_coarse, 8}, R in {R_small, R_large}:
+      value_R = p(R_small)-p(R_large)  (replan-sooner value; user hypothesis: large at contact)
+      value_k = p(k=8)-p(k=1)          (token-fidelity value; C1)
+    Self-contained (loads its own policy) so it can run in a multiprocessing worker."""
+    torch.set_num_threads(1)   # avoid BLAS thread contention across workers (bottleneck is MuJoCo physics)
     device = torch.device(device)
     rng = np.random.RandomState(seed)
-
     policy, cfg = BasePolicy.from_checkpoint(checkpoint, return_configuration=True)
     assert isinstance(policy, OATPolicy)
     policy.to(device).eval()
@@ -174,29 +167,23 @@ def main(checkpoint, output, device, n_branch, M, R, k_coarse, n_tasks, free_fra
     n_act = policy.n_action_steps
     K = policy.max_seq_len
     norm = policy.action_tokenizer.normalizer['action']
-    grip_dim = -1  # last action dim = gripper
+    grip_dim = -1
     ekw = env_kwargs_from_cfg(cfg)
-    print(f"ports={ports} n_obs={n_obs} n_act={n_act} K={K} R={R} M={M} k_coarse={k_coarse}")
 
-    tasks = get_subtasks('libero10')[:n_tasks]
-    rows = []  # each: dict of scalars
-
-    pbar = tqdm.tqdm(total=n_branch, desc='branch states')
+    rows = []
+    pbar = tqdm.tqdm(total=n_branch, desc=f'branch[s{env_seed}]', disable=not show_pbar)
     for task in tasks:
         if len(rows) >= n_branch:
             break
-        env = LiberoEnv(task_name=task, **ekw)
-        # never auto-terminate on robosuite horizon — we control termination via
-        # LiberoEnv.done (success / max_episode_steps); branching re-steps the env a lot.
+        env = LiberoEnv(task_name=task, seed=env_seed, **ekw)
         try:
-            env.env.env.ignore_done = True
+            env.env.env.ignore_done = True   # we control termination, not robosuite horizon
         except Exception:
             pass
         try:
             while len(rows) < n_branch:
                 obs, _ = env.reset()
                 obs_deque = deque([obs], maxlen=n_obs + 1)
-                ref_succ = False
                 while not env.done and env.cur_step < env.max_episode_steps and len(rows) < n_branch:
                     ctrl = env.env
                     snap = ctrl.get_sim_state().copy()
@@ -212,49 +199,89 @@ def main(checkpoint, output, device, n_branch, M, R, k_coarse, n_tasks, free_fra
                     A8 = decode_k(policy, tokens, K)
                     Ac = decode_k(policy, tokens, k_coarse)
 
-                    # SUSTAINED gripper-command transition (open<->close) = grasp/release
-                    # imminent. (naive sign-flip-anywhere fires on gripper-channel noise.)
                     g0 = float(np.mean(A8[:4, grip_dim]))
-                    g1 = float(np.mean(A8[max(0, R - 4):R, grip_dim]))
+                    g1 = float(np.mean(A8[max(0, R_large - 4):R_large, grip_dim]))
                     grip_will_change = bool(np.sign(g0) != np.sign(g1) and abs(g0) > 0.5 and abs(g1) > 0.5)
-                    ncon = int(getattr(ctrl.env.sim.data, 'ncon', 0))  # active MuJoCo contacts
+                    ncon = int(getattr(ctrl.env.sim.data, 'ncon', 0))
 
                     branch_deque = deque(copy.deepcopy(list(obs_deque)), maxlen=n_obs + 1)
 
                     take = grip_will_change or (rng.rand() < free_frac)
                     if take:
-                        # recon proxy: ||norm(A8)-norm(Ac)|| over executed R steps
                         with torch.inference_mode():
-                            a8n = norm.normalize(torch.from_numpy(A8[:R]).to(device, dtype))
-                            acn = norm.normalize(torch.from_numpy(Ac[:R]).to(device, dtype))
+                            a8n = norm.normalize(torch.from_numpy(A8[:R_large]).to(device, dtype))
+                            acn = norm.normalize(torch.from_numpy(Ac[:R_large]).to(device, dtype))
                             recon_gap = float((a8n - acn).norm(dim=-1).mean().item())
-
-                        p8 = estimate_success(env, ctrl, snap, snap_step, branch_deque,
-                                              A8, R, M, policy, ports, n_obs, n_act, device, dtype)
-                        pc = estimate_success(env, ctrl, snap, snap_step, branch_deque,
-                                              Ac, R, M, policy, ports, n_obs, n_act, device, dtype)
+                        # 2x2 grid: k in {coarse, full} x R in {small, large}
+                        cells = {}
+                        for kname, chunk in [('kc', Ac), ('kf', A8)]:
+                            for rname, RR in [('rs', R_small), ('rl', R_large)]:
+                                cells[f'p_{kname}_{rname}'] = estimate_success(
+                                    env, ctrl, snap, snap_step, branch_deque, chunk, RR, M,
+                                    policy, ports, n_obs, n_act, device, dtype)
                         rows.append(dict(
                             task=task, step=int(snap_step),
-                            p_full=p8, p_coarse=pc, gap=p8 - pc,
                             grip_will_change=int(grip_will_change), ncon=ncon,
-                            eef_vel=eef_vel, gripper_open=gripper_open,
-                            recon_gap=recon_gap,
+                            eef_vel=eef_vel, gripper_open=gripper_open, recon_gap=recon_gap,
+                            **cells,
                         ))
                         pbar.update(1)
-                        # restore to the reference state to continue the reference rollout
                         obs = restore(env, ctrl, snap, snap_step)
                         obs_deque = deque(copy.deepcopy(list(branch_deque)), maxlen=n_obs + 1)
 
-                    # advance the reference rollout with the full k=8 chunk
                     for t in range(n_act):
                         if env.done:
                             break
                         obs, r, done, _, _ = env.step(A8[t])
                         obs_deque.append(obs)
-                        ref_succ = ref_succ or (r >= 1)
         finally:
             env.close()
     pbar.close()
+    return rows
+
+
+def _worker(payload):
+    return collect_rows(**payload)
+
+
+@click.command()
+@click.option('-c', '--checkpoint', required=True)
+@click.option('-o', '--output', required=True, help='output .npz of per-state rows')
+@click.option('-d', '--device', default='cuda:0')
+@click.option('--n_branch', default=80, type=int, help='target number of branch states')
+@click.option('--M', 'M', default=5, type=int, help='continuations per (state,k)')
+@click.option('--R_small', default=8, type=int, help='short open-loop horizon (replan sooner)')
+@click.option('--R_large', default=32, type=int, help='long open-loop horizon (commit longer)')
+@click.option('--k_coarse', default=1, type=int, help='coarse budget (vs full k=8)')
+@click.option('--n_tasks', default=2, type=int, help='how many libero10 tasks to sweep')
+@click.option('--free_frac', default=0.35, type=float,
+              help='prob of branching at a non-contact (free-motion) state, for the control stratum')
+@click.option('--seed', default=0, type=int)
+@click.option('--n_workers', default=1, type=int,
+              help='parallel worker processes (each = own env+policy, distinct seed). '
+                   'Branching is embarrassingly parallel; bottleneck is single-threaded '
+                   'MuJoCo physics, so N workers ~= N x speedup until CPU cores saturate. '
+                   'Each worker holds a CUDA context — watch GPU mem.')
+def main(checkpoint, output, device, n_branch, M, R_small, R_large, k_coarse, n_tasks,
+         free_frac, seed, n_workers):
+    tasks = get_subtasks('libero10')[:n_tasks]
+    print(f"R={{{R_small},{R_large}}} M={M} k_coarse={k_coarse} n_branch={n_branch} "
+          f"n_workers={n_workers} tasks={len(tasks)}")
+
+    if n_workers <= 1:
+        rows = collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coarse,
+                            free_frac, seed=seed, env_seed=seed, show_pbar=True)
+    else:
+        import multiprocessing as mp
+        share = (n_branch + n_workers - 1) // n_workers   # ceil
+        payloads = [dict(checkpoint=checkpoint, device=device, tasks=tasks, n_branch=share,
+                         M=M, R_small=R_small, R_large=R_large, k_coarse=k_coarse, free_frac=free_frac,
+                         seed=seed + w, env_seed=seed + 1 + w, show_pbar=(w == 0))
+                    for w in range(n_workers)]
+        ctx = mp.get_context('spawn')
+        with ctx.Pool(n_workers) as pool:
+            results = pool.map(_worker, payloads)
+        rows = [r for sub in results for r in sub][:n_branch]
 
     if not rows:
         print("NO branch states collected!")
@@ -270,38 +297,43 @@ def main(checkpoint, output, device, n_branch, M, R, k_coarse, n_tasks, free_fra
     print(f"\nsaved {len(rows)} branch states -> {output}")
 
     # ---- analyze ----
-    gap = arrs['gap']; gwc = arrs['grip_will_change'].astype(bool)
+    gwc = arrs['grip_will_change'].astype(bool)
     rec = arrs['recon_gap']; vel = arrs['eef_vel']
-    print(f"\n=== PILOT RESULT (n={len(rows)}, M={M}, R={R}, k {k_coarse} vs {K}) ===")
-    print(f"overall: p_full={arrs['p_full'].mean():.3f}  p_coarse={arrs['p_coarse'].mean():.3f}  "
-          f"gap={gap.mean():.3f} +/- {gap.std(ddof=1)/np.sqrt(len(gap)):.3f}")
+    pkc_rs, pkc_rl = arrs['p_kc_rs'], arrs['p_kc_rl']   # coarse k=1, R small/large
+    pkf_rs, pkf_rl = arrs['p_kf_rs'], arrs['p_kf_rl']   # full   k=8, R small/large
+    # value_R = replan-sooner benefit (R_small vs R_large); value_k = token benefit (k8 vs k1)
+    value_R_kf = pkf_rs - pkf_rl    # at full k (USER hypothesis: large at contact)
+    value_R_kc = pkc_rs - pkc_rl    # at coarse k
+    value_k_rl = pkf_rl - pkc_rl    # token value at long R (C1)
+    value_k_rs = pkf_rs - pkc_rs    # token value at short R
+    print(f"\n=== PILOT RESULT (n={len(rows)}, M={M}, R={{{R_small},{R_large}}}, k {k_coarse} vs 8) ===")
+    print(f"overall p(k,R): kc_rs={pkc_rs.mean():.3f} kc_rl={pkc_rl.mean():.3f} "
+          f"kf_rs={pkf_rs.mean():.3f} kf_rl={pkf_rl.mean():.3f}")
+    print(f"overall value_R(kf)={value_R_kf.mean():+.3f}  value_k(rl)={value_k_rl.mean():+.3f}")
 
-    def stratum(mask, name):
-        if mask.sum() == 0:
-            print(f"  [{name}] n=0"); return
-        g = gap[mask]
-        se = g.std(ddof=1) / np.sqrt(len(g)) if len(g) > 1 else float('nan')
-        print(f"  [{name:<14}] n={mask.sum():>3}  gap={g.mean():+.3f} +/- {se:.3f}  "
-              f"(p_full={arrs['p_full'][mask].mean():.3f} p_coarse={arrs['p_coarse'][mask].mean():.3f})")
+    def by_phase(q, title):
+        print(f"\n{title}:")
+        def st(mask, name):
+            if mask.sum() == 0:
+                print(f"  [{name:<14}] n=0"); return
+            v = q[mask]; se = v.std(ddof=1)/np.sqrt(len(v)) if len(v) > 1 else float('nan')
+            print(f"  [{name:<14}] n={int(mask.sum()):>3}  {v.mean():+.3f} +/- {se:.3f}")
+        st(gwc, 'grip_change'); st(~gwc, 'no_grip_change')
+        vmed = np.median(vel); st(vel < vmed, 'slow_eef'); st(vel >= vmed, 'fast_eef')
+        if 'ncon' in arrs:
+            nc = arrs['ncon']; nmed = np.median(nc)
+            st(nc > nmed, 'high_contact'); st(nc <= nmed, 'low_contact')
 
-    print("\nby phase (C1: gap should be LARGER where grip changes / contact):")
-    stratum(gwc, 'grip_change')
-    stratum(~gwc, 'no_grip_change')
-    vmed = np.median(vel)
-    stratum(vel < vmed, 'slow_eef')      # contact-ish (low velocity)
-    stratum(vel >= vmed, 'fast_eef')     # fast motion (where reconstruction is hard)
-    if 'ncon' in arrs:
-        nc = arrs['ncon']; nmed = np.median(nc)
-        stratum(nc > nmed, 'high_contact')   # more active MuJoCo contacts
-        stratum(nc <= nmed, 'low_contact')
+    by_phase(value_R_kf, "value_R = p(R_small)-p(R_large) at k=8  (USER: should be LARGER at contact)")
+    by_phase(value_k_rl, "value_k = p(k=8)-p(k=1) at R_large  (C1: should be LARGER at contact)")
     print(f"\nphase coverage: grip_change={int(gwc.sum())}/{len(gwc)}  "
-          f"p_full range=[{arrs['p_full'].min():.2f},{arrs['p_full'].max():.2f}] "
-          f"(want p_full off the floor so a gap can show)")
+          f"p(kf_rs) range=[{pkf_rs.min():.2f},{pkf_rs.max():.2f}] (want off the floor)")
 
-    # killer check: does value-gap line up with reconstruction-gap?
-    if len(gap) > 2 and rec.std() > 0:
+    # killer check: does token value-gap line up with reconstruction-gap?
+    gap = value_k_rl
+    if len(gap) > 2 and rec.std() > 0 and gap.std() > 0:
         r = np.corrcoef(gap, rec)[0, 1]
-        print(f"\nkiller check  corr(value_gap, recon_gap) = {r:+.3f}  "
+        print(f"\nkiller check  corr(value_k, recon_gap) = {r:+.3f}  "
               f"(near 0 / negative => reconstruction does NOT predict value => C1 headline)")
     print("\nDONE")
 
