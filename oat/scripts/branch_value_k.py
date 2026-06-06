@@ -31,6 +31,7 @@ if __name__ == "__main__":
 
 import copy
 import json
+import math
 import pathlib
 from collections import deque
 
@@ -149,7 +150,7 @@ def env_kwargs_from_cfg(cfg):
 
 
 def collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coarse, free_frac,
-                 seed, env_seed, show_pbar=True):
+                 seed, env_seed, bon_n=0, temperature=None, topk=None, show_pbar=True):
     """Collect up to n_branch branch-state rows on `tasks` (one sequential env).
     Per state, measures the 2x2 grid p(k,R) for k in {k_coarse, 8}, R in {R_small, R_large}:
       value_R = p(R_small)-p(R_large)  (replan-sooner value; user hypothesis: large at contact)
@@ -161,6 +162,10 @@ def collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coa
     policy, cfg = BasePolicy.from_checkpoint(checkpoint, return_configuration=True)
     assert isinstance(policy, OATPolicy)
     policy.to(device).eval()
+    if temperature is not None:   # inject sampling diversity for the BoN gate
+        policy.temperature = temperature
+    if topk is not None:
+        policy.topk = topk
     dtype = policy.dtype
     ports = policy.get_observation_ports()
     n_obs = policy.n_obs_steps
@@ -196,8 +201,8 @@ def collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coa
 
                     obs_dict = build_obs(obs_deque, n_obs, ports, device, dtype)
                     tokens = gen_tokens(policy, obs_dict)
-                    A8 = decode_k(policy, tokens, K)
-                    Ac = decode_k(policy, tokens, k_coarse)
+                    A8 = decode_k(policy, tokens, K)              # needed for grip flag + reference rollout
+                    Ac = None if bon_n > 0 else decode_k(policy, tokens, k_coarse)  # grid-only
 
                     g0 = float(np.mean(A8[:4, grip_dim]))
                     g1 = float(np.mean(A8[max(0, R_large - 4):R_large, grip_dim]))
@@ -208,23 +213,33 @@ def collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coa
 
                     take = grip_will_change or (rng.rand() < free_frac)
                     if take:
-                        with torch.inference_mode():
-                            a8n = norm.normalize(torch.from_numpy(A8[:R_large]).to(device, dtype))
-                            acn = norm.normalize(torch.from_numpy(Ac[:R_large]).to(device, dtype))
-                            recon_gap = float((a8n - acn).norm(dim=-1).mean().item())
-                        # 2x2 grid: k in {coarse, full} x R in {small, large}
-                        cells = {}
-                        for kname, chunk in [('kc', Ac), ('kf', A8)]:
-                            for rname, RR in [('rs', R_small), ('rl', R_large)]:
-                                cells[f'p_{kname}_{rname}'] = estimate_success(
-                                    env, ctrl, snap, snap_step, branch_deque, chunk, RR, M,
-                                    policy, ports, n_obs, n_act, device, dtype)
-                        rows.append(dict(
-                            task=task, step=int(snap_step),
-                            grip_will_change=int(grip_will_change), ncon=ncon,
-                            eef_vel=eef_vel, gripper_open=gripper_open, recon_gap=recon_gap,
-                            **cells,
-                        ))
+                        phase = dict(task=task, step=int(snap_step),
+                                     grip_will_change=int(grip_will_change), ncon=ncon,
+                                     eef_vel=eef_vel, gripper_open=gripper_open)
+                        if bon_n > 0:
+                            # oracle best-of-N: sample bon_n full rollouts from s (each =
+                            # restore + continue_to_end, which samples a fresh k=8 plan every
+                            # n_act steps). c = #successes -> pass@k curve in analysis.
+                            c = 0
+                            for _ in range(bon_n):
+                                restore(env, ctrl, snap, snap_step)
+                                dq = deque(copy.deepcopy(list(branch_deque)), maxlen=n_obs + 1)
+                                c += int(continue_to_end(env, policy, dq, ports, n_obs,
+                                                         n_act, device, dtype, False))
+                            rows.append(dict(**phase, n_succ=int(c), bon_n=int(bon_n)))
+                        else:
+                            with torch.inference_mode():
+                                a8n = norm.normalize(torch.from_numpy(A8[:R_large]).to(device, dtype))
+                                acn = norm.normalize(torch.from_numpy(Ac[:R_large]).to(device, dtype))
+                                recon_gap = float((a8n - acn).norm(dim=-1).mean().item())
+                            # 2x2 grid: k in {coarse, full} x R in {small, large}
+                            cells = {}
+                            for kname, chunk in [('kc', Ac), ('kf', A8)]:
+                                for rname, RR in [('rs', R_small), ('rl', R_large)]:
+                                    cells[f'p_{kname}_{rname}'] = estimate_success(
+                                        env, ctrl, snap, snap_step, branch_deque, chunk, RR, M,
+                                        policy, ports, n_obs, n_act, device, dtype)
+                            rows.append(dict(**phase, recon_gap=recon_gap, **cells))
                         pbar.update(1)
                         obs = restore(env, ctrl, snap, snap_step)
                         obs_deque = deque(copy.deepcopy(list(branch_deque)), maxlen=n_obs + 1)
@@ -257,26 +272,38 @@ def _worker(payload):
 @click.option('--free_frac', default=0.35, type=float,
               help='prob of branching at a non-contact (free-motion) state, for the control stratum')
 @click.option('--seed', default=0, type=int)
+@click.option('--bon_n', default=0, type=int,
+              help='oracle best-of-N gate (#7): if >0, sample N full rollouts per state, '
+                   'count successes -> pass@k curve. pass@N >> pass@1 => selection has headroom '
+                   '(verifier worth building). pass@N ~= pass@1 => selection washed by replanning '
+                   '(strengthens the compounding negative). Overrides the 2x2 grid.')
+@click.option('--temperature', default=None, type=float,
+              help='override sampling temperature (inject diversity for the BoN gate; sweep '
+                   '1.0/1.5/2.0 — if headroom grows with temp, low diversity was the bottleneck)')
+@click.option('--topk', default=None, type=int, help='override sampling top-k')
 @click.option('--n_workers', default=1, type=int,
               help='parallel worker processes (each = own env+policy, distinct seed). '
                    'Branching is embarrassingly parallel; bottleneck is single-threaded '
                    'MuJoCo physics, so N workers ~= N x speedup until CPU cores saturate. '
                    'Each worker holds a CUDA context — watch GPU mem.')
 def main(checkpoint, output, device, n_branch, M, R_small, R_large, k_coarse, n_tasks,
-         free_frac, seed, n_workers):
+         free_frac, seed, bon_n, temperature, topk, n_workers):
     tasks = get_subtasks('libero10')[:n_tasks]
-    print(f"R={{{R_small},{R_large}}} M={M} k_coarse={k_coarse} n_branch={n_branch} "
+    mode = f"BoN(N={bon_n})" if bon_n > 0 else f"grid R={{{R_small},{R_large}}} k {k_coarse}vs8"
+    print(f"mode={mode} M={M} n_branch={n_branch} temp={temperature} topk={topk} "
           f"n_workers={n_workers} tasks={len(tasks)}")
 
     if n_workers <= 1:
         rows = collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coarse,
-                            free_frac, seed=seed, env_seed=seed, show_pbar=True)
+                            free_frac, seed=seed, env_seed=seed, bon_n=bon_n,
+                            temperature=temperature, topk=topk, show_pbar=True)
     else:
         import multiprocessing as mp
         share = (n_branch + n_workers - 1) // n_workers   # ceil
         payloads = [dict(checkpoint=checkpoint, device=device, tasks=tasks, n_branch=share,
                          M=M, R_small=R_small, R_large=R_large, k_coarse=k_coarse, free_frac=free_frac,
-                         seed=seed + w, env_seed=seed + 1 + w, show_pbar=(w == 0))
+                         seed=seed + w, env_seed=seed + 1 + w, bon_n=bon_n,
+                         temperature=temperature, topk=topk, show_pbar=(w == 0))
                     for w in range(n_workers)]
         ctx = mp.get_context('spawn')
         with ctx.Pool(n_workers) as pool:
@@ -297,8 +324,37 @@ def main(checkpoint, output, device, n_branch, M, R_small, R_large, k_coarse, n_
     print(f"\nsaved {len(rows)} branch states -> {output}")
 
     # ---- analyze ----
-    gwc = arrs['grip_will_change'].astype(bool)
-    rec = arrs['recon_gap']; vel = arrs['eef_vel']
+    gwc = arrs['grip_will_change'].astype(bool); vel = arrs['eef_vel']
+
+    # ---- BoN mode: pass@k curve (oracle best-of-N) ----
+    if 'n_succ' in arrs:
+        N = int(arrs['bon_n'][0]); c = arrs['n_succ'].astype(int)
+        def passk(c_arr, k):
+            cn = math.comb(N, k)
+            return float(np.mean([1.0 - math.comb(N - int(ci), k) / cn for ci in c_arr]))
+        print(f"\n=== ORACLE BoN (n={len(rows)} states, N={N} rollouts/state) ===")
+        ks = sorted(set([1, 2, 4, N]))
+        print("pass@k (overall):  " + "  ".join(f"@{k}={passk(c, k):.3f}" for k in ks))
+        print(f"HEADROOM pass@{N}-pass@1 = {passk(c, N) - passk(c, 1):+.3f}  "
+              f"(>>0 => selection has headroom; ~0 => washed by replanning)")
+
+        def bon_phase(mask, name):
+            if mask.sum() == 0:
+                print(f"  [{name:<14}] n=0"); return
+            cc = c[mask]
+            print(f"  [{name:<14}] n={int(mask.sum()):>3}  "
+                  + "  ".join(f"@{k}={passk(cc, k):.3f}" for k in [1, N])
+                  + f"  head={passk(cc, N) - passk(cc, 1):+.3f}")
+        print("\npass@1 / pass@N / headroom by phase:")
+        bon_phase(gwc, 'grip_change'); bon_phase(~gwc, 'no_grip_change')
+        vmed = np.median(vel); bon_phase(vel < vmed, 'slow_eef'); bon_phase(vel >= vmed, 'fast_eef')
+        if 'ncon' in arrs:
+            nc = arrs['ncon']; nmed = np.median(nc)
+            bon_phase(nc > nmed, 'high_contact'); bon_phase(nc <= nmed, 'low_contact')
+        print("\nDONE")
+        return
+
+    rec = arrs['recon_gap']
     pkc_rs, pkc_rl = arrs['p_kc_rs'], arrs['p_kc_rl']   # coarse k=1, R small/large
     pkf_rs, pkf_rl = arrs['p_kf_rs'], arrs['p_kf_rl']   # full   k=8, R small/large
     # value_R = replan-sooner benefit (R_small vs R_large); value_k = token benefit (k8 vs k1)

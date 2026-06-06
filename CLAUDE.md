@@ -541,6 +541,20 @@ We kept measuring "how close is the chunk to the demo"; we should measure "how m
 3. **R=32 over-floors success** (p_full=0.125 ≪ policy 0.58): R=32 open-loop THROUGH grasp states tanks SR for both k → gap masked (floor effect). Large R amplifies *difficulty*, not the k-signal. Fix: default **R=16** (keep p_full off the floor so a k-gap can show); the analysis now prints `p_full range` + phase coverage to watch this.
 - gap/corr from smoke = pure noise (n=8/M=2), ignored. NEXT: re-smoke `--n_branch 16 --M 3 --R 16` to confirm both phase strata present & p_full off-floor, then pilot `--n_branch 80 --M 5 --R 16 --k_coarse 1 --n_tasks 5`.
 
+**Experiment extended to 2x2 (k,R) grid + parallelized (`--n_workers`, spawn, distinct env seeds).** `branch_value_k.py` now measures per state `p(k,R)` for k∈{k_coarse,8}×R∈{R_small,R_large} → `value_R=p(R_small)−p(R_large)` (replan-sooner) AND `value_k=p(8)−p(1)` (C1), stratified by phase (grip_change / eef_vel / ncon). Motivated by the smoke hint that R (not k) might be the live axis at contact.
+
+**PILOT RESULT (2026-06-06, n=100, M=5, R∈{8,32}, k 2 vs 8, parallel): NULL — decisive.** Both effects ≈0, NO contact concentration:
+| | overall | grip_change | no_grip | slow_eef | fast_eef |
+|---|---|---|---|---|---|
+| value_R (k=8) | +0.006 | −0.022 | +0.057 | +0.064 | −0.052 |
+| value_k (R=32) | +0.030 | +0.043 | +0.006 | +0.020 | +0.040 |
+- value_R ≈0, NOT concentrated at contact (grip_change slightly NEGATIVE; the two contact proxies grip_change vs slow_eef DISAGREE; all ≤0.06, within ~1.5σ). **User's "small R wins at contact" hypothesis NOT supported per-chunk.**
+- value_k ≈0 everywhere (~0.02–0.045), no concentration. C1 NOT supported. corr(value_k,recon_gap)=−0.143.
+- strat-SE ~0.03–0.05 at n=100/M=5 → would resolve a large concentration (Δ≥0.15 ≈3σ); none exists. Solid null for adaptivity.
+- **INTERPRETATION (now ORACLE-backed): per-chunk value of BOTH k and R ≈ 0 because closed-loop replanning corrects any single-chunk decision.** The fixed-sweep gains (SR k4=.496→k8=.58; R8=.635→R32=.44) are **COMPOUNDING over ~30 chunks, NOT localizable per-state.** This UNIFIES every negative (K-predictor, convergence-R, oracle k/R) with one mechanism: closed-loop washes out single-chunk choices → no readable per-state heterogeneity → per-observation adaptive depth/horizon CANNOT beat fixed. Confirmed by counterfactual oracle (ceiling), not heuristics.
+- Caveats: ran k_coarse=2 (smaller fidelity contrast than 1) — re-run k_coarse=1 + M=10 for paper-grade rigor (won't change verdict). Overall p~0.29 (grasp-heavy selection) but not floored (range [0,1]).
+- **VERDICT: per-observation adaptive K/R program CLOSED-NEGATIVE (oracle-backed).** Paper headline shifts from C1 to the **compounding diagnosis**: "apparent fidelity/horizon value is compounding, not per-state; adaptive depth/horizon can't beat fixed — shown by counterfactual oracle." Live pivots (orthogonal — they SELECT among candidates, can EXCEED SR): #7 best-of-N value-selection, #8 Prefix-Guided Visual.
+
 ### TODO next
 
 **Status:** K-axis (token count) adaptivity — **NEGATIVE & CLOSED** (predictor/entropy/agnostic-mix ≈ fixed-k; fixed k=4 dominates). R-axis convergence signal — **NEGATIVE & CLOSED** (2026-06-05: convergence 0.553 < random 0.595 at matched mean R≈14; random ≈ fixed → no Jensen room; see "GATE 1 RESULT"). Reconstruction-based adaptivity (min-k, entropy, convergence) all dead → `reconstruction ≠ value`. Step 0 — done. **Current focus = PIVOT to Value-Guided OAT** (value not reconstruction); gate = counterfactual-sim oracle harness (oracle value(k|phase) headline + oracle-BoN + oracle-R add-on).
