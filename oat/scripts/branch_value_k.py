@@ -333,7 +333,7 @@ def main(checkpoint, output, device, n_branch, M, R_small, R_large, k_coarse, n_
             cn = math.comb(N, k)
             return float(np.mean([1.0 - math.comb(N - int(ci), k) / cn for ci in c_arr]))
         print(f"\n=== ORACLE BoN (n={len(rows)} states, N={N} rollouts/state) ===")
-        ks = sorted(set([1, 2, 4, N]))
+        ks = sorted(set(k for k in [1, 2, 4, N] if k <= N))   # k>N => comb(N,k)=0 (div-by-zero)
         print("pass@k (overall):  " + "  ".join(f"@{k}={passk(c, k):.3f}" for k in ks))
         print(f"HEADROOM pass@{N}-pass@1 = {passk(c, N) - passk(c, 1):+.3f}  "
               f"(>>0 => selection has headroom; ~0 => washed by replanning)")
