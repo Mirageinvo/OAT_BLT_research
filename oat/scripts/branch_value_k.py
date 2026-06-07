@@ -98,10 +98,11 @@ def restore(env, ctrl, snap, snap_step):
     return env._extract_obs(raw)
 
 
-def continue_to_end(env, policy, obs_deque, ports, n_obs, n_act, device, dtype, already_success):
-    """Replan with the full k=8 policy until the episode ends. Returns success bool."""
+def continue_to_end(env, policy, obs_deque, ports, n_obs, n_act, device, dtype,
+                    already_success, step_limit):
+    """Replan with the full k=8 policy until the episode ends (or step_limit). Returns success."""
     succ = already_success
-    while not env.done and env.cur_step < env.max_episode_steps:
+    while not env.done and env.cur_step < step_limit:
         obs_dict = build_obs(obs_deque, n_obs, ports, device, dtype)
         tokens = gen_tokens(policy, obs_dict)
         a = decode_k(policy, tokens, policy.max_seq_len)  # k=8
@@ -114,23 +115,35 @@ def continue_to_end(env, policy, obs_deque, ports, n_obs, n_act, device, dtype, 
     return succ
 
 
-def estimate_success(env, ctrl, snap, snap_step, branch_deque, chunk, R, M,
-                     policy, ports, n_obs, n_act, device, dtype):
-    """Mean success over M continuations of: restore -> exec chunk[:R] open-loop -> continue k=8."""
-    succs = []
+def rollout_outcomes(env, ctrl, snap, snap_step, branch_deque, chunk, R, M,
+                     policy, ports, n_obs, n_act, device, dtype, cont_cap=0):
+    """M binary outcomes of: restore -> exec chunk[:R] open-loop -> continue k=8 to end.
+    cont_cap>0 caps each continuation at snap_step+cont_cap steps (speedup; deflates absolute
+    success equally across plans, so SELECTION gaps are ~unbiased)."""
+    outs = []
     for _ in range(M):
         restore(env, ctrl, snap, snap_step)
+        step_limit = env.max_episode_steps if cont_cap <= 0 \
+            else min(env.max_episode_steps, snap_step + cont_cap)
         dq = deque(copy.deepcopy(list(branch_deque)), maxlen=n_obs + 1)
         succ = False
-        for t in range(min(R, len(chunk))):     # open-loop execute the k-chunk (clamp to horizon)
-            if env.done:
+        for t in range(min(R, len(chunk))):     # open-loop execute the chunk (clamp to horizon)
+            if env.done or env.cur_step >= step_limit:
                 break
             obs, r, done, _, _ = env.step(chunk[t])
             dq.append(obs)
             succ = succ or (r >= 1)
-        succ = continue_to_end(env, policy, dq, ports, n_obs, n_act, device, dtype, succ)
-        succs.append(float(succ))
-    return float(np.mean(succs))
+        succ = continue_to_end(env, policy, dq, ports, n_obs, n_act, device, dtype, succ, step_limit)
+        outs.append(float(succ))
+    return outs
+
+
+def estimate_success(env, ctrl, snap, snap_step, branch_deque, chunk, R, M,
+                     policy, ports, n_obs, n_act, device, dtype, cont_cap=0):
+    """Mean success over M continuations (wraps rollout_outcomes)."""
+    return float(np.mean(rollout_outcomes(
+        env, ctrl, snap, snap_step, branch_deque, chunk, R, M,
+        policy, ports, n_obs, n_act, device, dtype, cont_cap=cont_cap)))
 
 
 def env_kwargs_from_cfg(cfg):
@@ -150,7 +163,8 @@ def env_kwargs_from_cfg(cfg):
 
 
 def collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coarse, free_frac,
-                 seed, env_seed, bon_n=0, temperature=None, topk=None, show_pbar=True):
+                 seed, env_seed, bon_n=0, bon_isolate=False, bon_cap=0,
+                 temperature=None, topk=None, show_pbar=True):
     """Collect up to n_branch branch-state rows on `tasks` (one sequential env).
     Per state, measures the 2x2 grid p(k,R) for k in {k_coarse, 8}, R in {R_small, R_large}:
       value_R = p(R_small)-p(R_large)  (replan-sooner value; user hypothesis: large at contact)
@@ -216,16 +230,38 @@ def collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coa
                         phase = dict(task=task, step=int(snap_step),
                                      grip_will_change=int(grip_will_change), ncon=ncon,
                                      eef_vel=eef_vel, gripper_open=gripper_open)
-                        if bon_n > 0:
-                            # oracle best-of-N: sample bon_n full rollouts from s (each =
-                            # restore + continue_to_end, which samples a fresh k=8 plan every
-                            # n_act steps). c = #successes -> pass@k curve in analysis.
+                        if bon_isolate:
+                            # plan-isolated: N candidate plans, each scored by M continuations
+                            # (averages out continuation luck) -> realizable verifier ceiling.
+                            obs_branch = build_obs(branch_deque, n_obs, ports, device, dtype)
+                            Msel = max(1, M // 2)
+                            p_all, p_sel, p_eval = [], [], []
+                            for _ in range(bon_n):
+                                toki = gen_tokens(policy, obs_branch)       # fresh sampled plan
+                                chunk_i = decode_k(policy, toki, K)
+                                outs = rollout_outcomes(env, ctrl, snap, snap_step, branch_deque,
+                                                        chunk_i, n_act, M, policy, ports, n_obs,
+                                                        n_act, device, dtype, cont_cap=bon_cap)
+                                p_all.append(float(np.mean(outs)))
+                                p_sel.append(float(np.mean(outs[:Msel])))
+                                p_eval.append(float(np.mean(outs[Msel:])) if Msel < M
+                                              else float(np.mean(outs)))
+                            best = int(np.argmax(p_sel))                    # pick by sel half
+                            rows.append(dict(**phase, bon_n=int(bon_n),
+                                             baseline=float(np.mean(p_all)),       # random plan, all M (low-var, slightly biased up)
+                                             baseline_eval=float(np.mean(p_eval)),  # random plan on eval half (clean split-baseline)
+                                             oracle=float(np.max(p_all)),          # best plan (biased up — upper bound)
+                                             heldout=float(p_eval[best])))         # selected plan scored on eval half (unbiased)
+                        elif bon_n > 0:
+                            # oracle best-of-N (pass@k): N full rollouts from s, count successes.
                             c = 0
                             for _ in range(bon_n):
                                 restore(env, ctrl, snap, snap_step)
                                 dq = deque(copy.deepcopy(list(branch_deque)), maxlen=n_obs + 1)
+                                step_limit = env.max_episode_steps if bon_cap <= 0 \
+                                    else min(env.max_episode_steps, snap_step + bon_cap)
                                 c += int(continue_to_end(env, policy, dq, ports, n_obs,
-                                                         n_act, device, dtype, False))
+                                                         n_act, device, dtype, False, step_limit))
                             rows.append(dict(**phase, n_succ=int(c), bon_n=int(bon_n)))
                         else:
                             with torch.inference_mode():
@@ -277,6 +313,14 @@ def _worker(payload):
                    'count successes -> pass@k curve. pass@N >> pass@1 => selection has headroom '
                    '(verifier worth building). pass@N ~= pass@1 => selection washed by replanning '
                    '(strengthens the compounding negative). Overrides the 2x2 grid.')
+@click.option('--bon_isolate', is_flag=True, default=False,
+              help='plan-isolated BoN: score each of N plans by M continuations (averages out '
+                   'continuation luck) -> REALIZABLE verifier ceiling (held-out). '
+                   'baseline=mean plan, oracle=best plan (biased), heldout=unbiased selection.')
+@click.option('--bon_cap', default=0, type=int,
+              help='cap each BoN continuation at branch_step+bon_cap steps (0=to episode end). '
+                   '~200 speeds up; deflates absolute success equally across plans so selection '
+                   'gaps stay ~unbiased.')
 @click.option('--temperature', default=None, type=float,
               help='override sampling temperature (inject diversity for the BoN gate; sweep '
                    '1.0/1.5/2.0 — if headroom grows with temp, low diversity was the bottleneck)')
@@ -287,23 +331,24 @@ def _worker(payload):
                    'MuJoCo physics, so N workers ~= N x speedup until CPU cores saturate. '
                    'Each worker holds a CUDA context — watch GPU mem.')
 def main(checkpoint, output, device, n_branch, M, R_small, R_large, k_coarse, n_tasks,
-         free_frac, seed, bon_n, temperature, topk, n_workers):
+         free_frac, seed, bon_n, bon_isolate, bon_cap, temperature, topk, n_workers):
     tasks = get_subtasks('libero10')[:n_tasks]
-    mode = f"BoN(N={bon_n})" if bon_n > 0 else f"grid R={{{R_small},{R_large}}} k {k_coarse}vs8"
-    print(f"mode={mode} M={M} n_branch={n_branch} temp={temperature} topk={topk} "
+    mode = (f"BoN-isolate(N={bon_n},M={M})" if bon_isolate else
+            f"BoN(N={bon_n})" if bon_n > 0 else f"grid R={{{R_small},{R_large}}} k {k_coarse}vs8")
+    print(f"mode={mode} cap={bon_cap} n_branch={n_branch} temp={temperature} topk={topk} "
           f"n_workers={n_workers} tasks={len(tasks)}")
 
     if n_workers <= 1:
         rows = collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coarse,
-                            free_frac, seed=seed, env_seed=seed, bon_n=bon_n,
-                            temperature=temperature, topk=topk, show_pbar=True)
+                            free_frac, seed=seed, env_seed=seed, bon_n=bon_n, bon_isolate=bon_isolate,
+                            bon_cap=bon_cap, temperature=temperature, topk=topk, show_pbar=True)
     else:
         import multiprocessing as mp
         share = (n_branch + n_workers - 1) // n_workers   # ceil
         payloads = [dict(checkpoint=checkpoint, device=device, tasks=tasks, n_branch=share,
                          M=M, R_small=R_small, R_large=R_large, k_coarse=k_coarse, free_frac=free_frac,
-                         seed=seed + w, env_seed=seed + 1 + w, bon_n=bon_n,
-                         temperature=temperature, topk=topk, show_pbar=(w == 0))
+                         seed=seed + w, env_seed=seed + 1 + w, bon_n=bon_n, bon_isolate=bon_isolate,
+                         bon_cap=bon_cap, temperature=temperature, topk=topk, show_pbar=(w == 0))
                     for w in range(n_workers)]
         ctx = mp.get_context('spawn')
         with ctx.Pool(n_workers) as pool:
@@ -325,6 +370,38 @@ def main(checkpoint, output, device, n_branch, M, R_small, R_large, k_coarse, n_
 
     # ---- analyze ----
     gwc = arrs['grip_will_change'].astype(bool); vel = arrs['eef_vel']
+
+    def phase_masks():
+        masks = [(gwc, 'grip_change'), (~gwc, 'no_grip_change')]
+        vmed = np.median(vel)
+        masks += [(vel < vmed, 'slow_eef'), (vel >= vmed, 'fast_eef')]
+        if 'ncon' in arrs:
+            nc = arrs['ncon']; nmed = np.median(nc)
+            masks += [(nc > nmed, 'high_contact'), (nc <= nmed, 'low_contact')]
+        return masks
+
+    # ---- plan-isolated BoN: realizable verifier ceiling ----
+    if 'heldout' in arrs:
+        N = int(arrs['bon_n'][0]); base = arrs['baseline']; orac = arrs['oracle']; held = arrs['heldout']
+        base_e = arrs['baseline_eval'] if 'baseline_eval' in arrs else base  # clean split-baseline
+        print(f"\n=== PLAN-ISOLATED BoN (n={len(rows)} states, N={N} plans x M continuations) ===")
+        print(f"baseline_eval(random plan, eval half)={base_e.mean():.3f}  "
+              f"heldout(selected plan, eval half)={held.mean():.3f}  "
+              f"oracle(best plan, biased)={orac.mean():.3f}")
+        print(f"REALIZABLE headroom (heldout - baseline_eval) = {held.mean()-base_e.mean():+.3f}  "
+              f"(>>0 => a verifier picking plans can really gain; ~0 => apparent BoN gain was "
+              f"continuation luck, verifier can't capture it)")
+        print(f"  (secondary: heldout-baseline_allM = {held.mean()-base.mean():+.3f};  "
+              f"biased-oracle headroom = {orac.mean()-base.mean():+.3f} — upper bound)")
+        print("\nrealizable headroom (heldout - baseline_eval) by phase:")
+        for mask, name in phase_masks():
+            if mask.sum() == 0:
+                print(f"  [{name:<14}] n=0"); continue
+            h = (held - base_e)[mask]; se = h.std(ddof=1)/np.sqrt(len(h)) if len(h) > 1 else float('nan')
+            print(f"  [{name:<14}] n={int(mask.sum()):>3}  {h.mean():+.3f} +/- {se:.3f}  "
+                  f"(base_e={base_e[mask].mean():.3f} held={held[mask].mean():.3f})")
+        print("\nDONE")
+        return
 
     # ---- BoN mode: pass@k curve (oracle best-of-N) ----
     if 'n_succ' in arrs:
