@@ -332,6 +332,8 @@ def _worker(payload):
                    'Each worker holds a CUDA context — watch GPU mem.')
 def main(checkpoint, output, device, n_branch, M, R_small, R_large, k_coarse, n_tasks,
          free_frac, seed, bon_n, bon_isolate, bon_cap, temperature, topk, n_workers):
+    if bon_isolate and bon_n <= 0:
+        bon_n = 4   # isolate needs N>=1 plans; default to 4 if not given
     tasks = get_subtasks('libero10')[:n_tasks]
     mode = (f"BoN-isolate(N={bon_n},M={M})" if bon_isolate else
             f"BoN(N={bon_n})" if bon_n > 0 else f"grid R={{{R_small},{R_large}}} k {k_coarse}vs8")
