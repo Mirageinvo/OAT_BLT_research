@@ -249,6 +249,64 @@ class OATPolicy(BasePolicy):
         }
         return result
 
+    @torch.inference_mode()
+    def predict_action_bon_free(self,
+        obs_dict: Dict[str, torch.Tensor],
+        bon_n: int = 8,
+        use_k_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        topk: Optional[int] = None,
+        bon_signal: str = 'vote',
+    ) -> Dict[str, torch.Tensor]:
+        """Verifier-free best-of-N. Per env: encode vision ONCE (amortized), sample bon_n
+        candidate plans from the cheap AR head, pick by a FREE signal:
+          'vote'  : mode-seeking consensus — pick the candidate in the densest region of
+                    action space (KDE over the executed prefix). NOT centroid-averaging
+                    (averaging across multimodal plans = invalid action).
+          'medoid': min sum of distances to the others (classic consensus).
+        No trained verifier, no oracle -> ranks by confidence/consensus, a PROXY for quality.
+        """
+        if use_k_tokens is None:
+            use_k_tokens = self.max_seq_len
+        else:
+            use_k_tokens = min(use_k_tokens, self.max_seq_len)
+        if temperature is None:
+            temperature = self.temperature
+        if topk is None:
+            topk = self.topk
+
+        features = self.obs_encoder(obs_dict)        # [B, To, d]  (vision computed once)
+        B = features.shape[0]
+        feat_rep = features.repeat_interleave(bon_n, dim=0)   # [B*N, To, d]
+        bos = torch.full((B * bon_n, 1), self.bos_id, dtype=torch.long, device=self.device)
+        tokens = self.model.generate(
+            bos, cond=feat_rep, max_new_tokens=use_k_tokens,
+            temperature=temperature, top_k=topk,
+        )[:, 1:]                                      # [B*N, K]
+        cand = self.action_tokenizer.detokenize(tokens, eval_keep_k=[use_k_tokens] * (B * bon_n))
+        H, Dd = cand.shape[1], cand.shape[2]
+        cand = cand.reshape(B, bon_n, H, Dd)          # [B, N, H, D] (repeat_interleave layout)
+
+        norm = self.action_tokenizer.normalizer['action']
+        R = min(self.n_action_steps, H)               # rank over the executed prefix only
+        chosen = torch.empty((B, H, Dd), device=self.device, dtype=cand.dtype)
+        for b in range(B):
+            a = norm.normalize(cand[b, :, :R])        # [N, R, D]
+            flat = a.reshape(bon_n, -1)               # [N, R*D]
+            dist = torch.cdist(flat, flat)            # [N, N]
+            if bon_signal == 'medoid':
+                best = int(dist.sum(dim=1).argmin())
+            else:                                     # 'vote' = mode-seeking KDE density
+                off = dist[dist > 0]
+                sigma = (off.median() if off.numel() > 0 else dist.new_tensor(1.0)) + 1e-6
+                dens = torch.exp(-(dist ** 2) / (2 * sigma ** 2)).sum(dim=1)
+                best = int(dens.argmax())
+            chosen[b] = cand[b, best]
+
+        action = chosen[:, :self.n_action_steps]
+        return {'action': action, 'action_pred': chosen,
+                'n_tokens': float(use_k_tokens), 'bon_n': float(bon_n)}
+
     def predict_action_adaptive(self,
         obs_dict: Dict[str, torch.Tensor],
         use_k_tokens: Optional[int] = None,
@@ -260,7 +318,17 @@ class OATPolicy(BasePolicy):
         r_min: int = 8,
         r_max: Optional[int] = None,
         r_threshold: float = 0.5,
+        bon_free: int = 0,
+        bon_signal: str = 'vote',
     ) -> Dict[str, torch.Tensor]:
+        # verifier-free best-of-N: sample bon_free candidate plans (vision encoded ONCE,
+        # amortized), pick by a free intrinsic signal (mode-seeking consensus / likelihood).
+        # No trained verifier, no oracle. Takes precedence (it's an inference-time wrapper).
+        if bon_free and bon_free > 1:
+            return self.predict_action_bon_free(
+                obs_dict, bon_n=bon_free, use_k_tokens=use_k_tokens,
+                temperature=temperature, topk=topk, bon_signal=bon_signal,
+            )
         # variable-R execution (GATE 1): hold K fixed (= use_k_tokens, default full
         # budget) and adapt the executed chunk length R per observation. Distinct axis
         # from the K-budget modes below, so it takes precedence when requested.

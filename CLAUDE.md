@@ -636,6 +636,48 @@ MUJOCO_GL=egl uv run python scripts/branch_value_k.py -c my_models/policy_ep-025
   2. **COST:** clean labels need counterfactual sim (~6h / 160 states per the user). Edge pairs are ~12% of states → getting enough for DPO (~thousands) = very expensive sim. Cheap logged labels are continuation-luck-noisy (our finding) → can't substitute. **This is the real bottleneck.** RL/ReST use cheap task-reward labels (no counterfactual) and target base competence (the dominant factor) → may be more cost-effective than Branch-DPO despite Branch-DPO's cleaner motivation.
 - **NET:** edge-concentration is a solid SCIENTIFIC finding (paper diagnosis: most states non-critical, rare edge band carries headroom). For the positive METHOD, the choice is Branch-DPO (clean, no inference detector, but EXPENSIVE counterfactual labels) vs RL/ReST (cheap labels, base competence, weak per-chunk gradient). Given cost, **ReST-first → RL** may beat Branch-DPO in practice; Branch-DPO stays the cleanest-motivated but label-expensive option.
 
+#### ⛔⛔ SESSION RESUME (2026-06-09) — full state to continue in a new chat
+
+**ONE-LINE STATE:** per-obs adaptive K/R = oracle-NULL (washed by replan); plan-selection headroom is small on AVERAGE (+0.024) but CONCENTRATED at rare "edge" states (recoverability≈0.5: +0.15, replicated 3×) which are NOT detectable from simple features (look like doomed). Just implemented **verifier-free best-of-N** to cheaply test if deployed selection helps SR. Paper = characterization/diagnosis (~5-6/10), ~7/10 if an edge-method wins SR.
+
+**CONFIRMED FINDINGS (oracle-backed):**
+- adaptive K (predictor/entropy/agnostic-mix ≈ fixed; fixed k=4 dominates) — NULL.
+- adaptive R (convergence < random ≈ fixed at matched mean) — NULL.
+- oracle value(k,R) per-state ≈0 (counterfactual, n=100) — NULL. → benefits are COMPOUNDING not per-state; closed-loop washes single decisions.
+- plan-selection: oracle pass@N +0.18 → plan-isolate realizable **+0.024** (held-out, luck removed), temp-invariant (temp1=temp2). MOST of the +0.18 was continuation luck.
+- **EDGE-CONCENTRATION (the live positive lead):** criticality (heldout−baseline) PEAKS at mid-recoverability — **+0.15–0.20 at p≈0.5** (clean `--xkey baseline` axis), ~0 at doomed(p≈0)/safe(p≈1). Replicated on iso_gate(temp1), iso_t20(temp2), iso_big(n160). ~12% of states. So the +0.024 average was DILUTED by ~72% doomed + safe.
+- **`reconstruction(k) ≠ value(k)`** (k2≈k8 reconstruction but SR(k4→k8)=+0.08) AND **decision-value ≠ semantic phase** (criticality FLAT across grip_change/contact/velocity; edge states physically indistinguishable from doomed — only `step` separates safe=early from doomed/edge=late). → decision-criticality is a LATENT value property, invisible to physics/phase. Strong counterintuitive headline.
+
+**WALLS:**
+- edge DETECTION from obs is hard (edge≈doomed physically → need rich V(obs)→recoverability, obs-wall risk like the K-predictor). → gated-selection & compute-saving-on-doomed need this; **selection-EVERYWHERE (ungated) and Branch-DPO SIDESTEP detection.**
+- counterfactual labels are EXPENSIVE (~6h/160 states) → Branch-DPO / learned-verifier datasets are the cost bottleneck.
+
+**POSITIVE OPTIONS (all bounded by the modest/edge-concentrated headroom):**
+1. **verifier-free BoN (JUST IMPLEMENTED, cheapest, NO dataset)** — sample N plans/replan (vision amortized), pick by free signal. **← RUN THIS NEXT.**
+2. learned verifier — needs per-candidate dataset (expensive); 1 collection serves verifier + Branch-DPO + recoverability-head.
+3. Branch-DPO (significance-gated edge pairs, expensive labels, sidesteps detection, compounds).
+4. RL / ReST (cheap labels, base competence — the dominant factor; ReST reuses `train_policy.py`). Fallback if selection is weak.
+
+**JUST IMPLEMENTED (this session):**
+- `OATPolicy.predict_action_bon_free` (verifier-free BoN: amortized vision → N candidates → mode-seeking KDE-density `vote` / `medoid` ranking). Dispatched in `predict_action_adaptive` via `bon_free` kwarg.
+- `scripts/eval_policy_sim.py` flags `--bon_free N` `--bon_signal {vote,medoid}`.
+- `scripts/analyze_criticality.py` (inverted-U test, `--xkey baseline/baseline_eval`).
+- `scripts/characterize_edge.py` (where are edge states — found: no physical signature).
+- (earlier) `scripts/branch_value_k.py`: modes grid / `--bon_n` / `--bon_isolate`; flags `--n_workers --temperature --topk --bon_cap`(DON'T use on LIBERO-LONG).
+
+**⛔ RUN NEXT (Step 1 — verifier-free BoN, decides cheaply if selection helps deployed):**
+```
+# baseline single-sample (if not already have a clean 3-exp number)
+MUJOCO_GL=egl uv run scripts/eval_policy_sim.py -c my_models/policy_ep-0250_sr-0.596.ckpt -o eval_out/base -n 3
+# verifier-free BoN N=8, mode-seeking
+MUJOCO_GL=egl uv run scripts/eval_policy_sim.py -c my_models/policy_ep-0250_sr-0.596.ckpt -o eval_out/bonfree8 -n 3 --bon_free 8 --bon_signal vote
+```
+- SR(bon_free) >> SR(base) → deployed free-selection helps → invest in learned verifier (Step 2). ≈ base → free signal doesn't capture quality (likely, per our nulls) → either learned verifier (expensive dataset) or pivot to RL/ReST.
+- NB verifier-free `vote` ranks by CONSENSUS (proxy for quality, not quality); may pick the frequent-but-not-best mode at edge states. Low expectation; it's the cheapest probe.
+
+**Datasets:** `bon_t10.npz`(pass@k +0.18), `iso_gate.npz`(realizable +0.024 @temp1), `iso_t20.npz`(temp2), `iso_big.npz`(n=160).
+**Paper:** lead with "WHERE do decisions matter in closed-loop action-token policies?" (counterfactual study). C2=oracle-null (adaptive inference washed). C3=decision-value concentrated at rare fate-deciding states, value≠phase (latent, not contact). Method = demonstration (selection at edge / Branch-DPO / RL). Needs **multi-suite** generalization to be "phenomenon not our policy". Rating ~5-6 (diagnosis only) → ~7 with a working edge-SR-win + multi-suite. Ceiling ~8 (method not novel, sim-only, single policy).
+
 ### TODO next
 
 **Status:** K-axis (token count) adaptivity — **NEGATIVE & CLOSED** (predictor/entropy/agnostic-mix ≈ fixed-k; fixed k=4 dominates). R-axis convergence signal — **NEGATIVE & CLOSED** (2026-06-05: convergence 0.553 < random 0.595 at matched mean R≈14; random ≈ fixed → no Jensen room; see "GATE 1 RESULT"). Reconstruction-based adaptivity (min-k, entropy, convergence) all dead → `reconstruction ≠ value`. Step 0 — done. **Current focus = PIVOT to Value-Guided OAT** (value not reconstruction); gate = counterfactual-sim oracle harness (oracle value(k|phase) headline + oracle-BoN + oracle-R add-on).
@@ -648,4 +690,4 @@ MUJOCO_GL=egl uv run python scripts/branch_value_k.py -c my_models/policy_ep-025
 6. **For the paper:** multi-suite LIBERO (spatial/object/goal/long); baselines = fixed-k, fixed-R, token-entropy, action-entropy/AAC, agnostic mixtures, learned controller; Pareto SR-vs-(tokens AND replans/latency). The K-axis negative + pow2 + cost-axis analysis is itself a publishable diagnosis.
 7. **PIVOT if R fails — Test-time scaling for OAT (best-of-N over ordered tokens).** See "Idea backlog — Test-time scaling" above. First action = **GATE A (oracle best-of-N)**: sample N candidate chunks/replan (vision shared), pick the truly-successful one in sim; oracle-BoN ≫ single → headroom exists → build verifier (free→learned). Can *exceed* the policy SR (unlike adaptivity). Stronger bet than R: positive-result literature (RoboMonkey/MG-Select/RoVer) + unique OAT fit (amortized perception, prefix tree-search).
 8. **PIVOT candidate (vision axis) — Prefix-Guided Visual OAT.** See "Idea backlog — Prefix-Guided Visual OAT" above. Attacks the actual bottleneck (vision), generation-aware (dodges obs-wall), RETRAIN-based (a novelty plus, not a con). First action (cheap, frozen, parallelizable with #7) = **`phase × camera masking` premise gate**: does which-camera-matters vary by plan phase (approach vs contact)? Yes → build the (cost-version) plan-gated conditional perception selector; no → premise dead. Caution: crowded field (VLA-Pruner/LightVLA/Compressor-VLA) → sharpen the coarse-prefix-as-plan wedge; decide Cost↓ vs SR↑ up front.
-9. **ACTIVE — Value-Guided OAT. ⛔ RESUME: see "⭐ TURNING POINT (2026-06-08)" in the Value-Guided backlog.** Story: per-obs adaptive K/R = NULL; oracle-BoN pass@N +0.18 → plan-isolate realizable +0.024 (temp1 AND temp2 — temperature didn't grow the AVERAGE). **BUT inverted-U re-analysis (free): criticality is CONCENTRATED at edge states (recoverability≈0.5) → +0.20 (temp1) / +0.13 (temp2), replicated; the +0.024 average was diluted by ~56 doomed + safe states.** → selection/value NOT dead, it's edge-concentrated. **LEADING POSITIVE = edge-focused prefix-selection / Branch-DPO + recoverability head V(s)** (prefix-decodability = cheap candidate gen exactly where it matters). **NEXT: robustness check `analyze_criticality.py --xkey baseline` on both npz** (peak must persist), then more edge samples, then build. Fallback: RL #1.
+9. **ACTIVE — Value-Guided OAT. ⛔⛔ RESUME: see "SESSION RESUME (2026-06-09)" in the Value-Guided backlog** (full state + RUN-NEXT commands). TL;DR: per-obs adaptive K/R = oracle-NULL; plan-selection headroom small on average (+0.024) but CONCENTRATED at rare edge states (recoverability≈0.5: +0.15, 3× replicated) which are NOT physically detectable (look like doomed). **verifier-free best-of-N JUST IMPLEMENTED** (`--bon_free N` in eval_policy_sim.py) → RUN it (base vs N=8) to cheaply test if deployed selection helps SR. Then: learned verifier (expensive per-candidate dataset) / Branch-DPO / RL-ReST fallback. Paper = counterfactual characterization "where do decisions matter" (value≠phase, latent), ~5-6/10 diagnosis → ~7 with edge-SR-win + multi-suite.

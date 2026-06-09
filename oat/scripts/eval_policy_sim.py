@@ -63,6 +63,11 @@ from typing import List, Optional
 @click.option('--r_threshold', default=0.5, type=float,
               help="convergence divergence threshold (normalizer-space L2); execute the leading "
                    "prefix where coarse and full plans agree below this")
+@click.option('--bon_free', default=0, type=int,
+              help="verifier-free best-of-N: sample N candidate plans per replan (vision "
+                   "amortized), pick by a FREE signal (no trained verifier). 0=off.")
+@click.option('--bon_signal', default='vote', type=click.Choice(['vote', 'medoid']),
+              help="free ranking signal: 'vote'=mode-seeking KDE density, 'medoid'=min sum dist")
 def eval_policy_sim(
     checkpoint: str,
     output_dir: str,
@@ -81,6 +86,8 @@ def eval_policy_sim(
     r_min: int = 8,
     r_max: int = 32,
     r_threshold: float = 0.5,
+    bon_free: int = 0,
+    bon_signal: str = 'vote',
 ):
     if os.path.exists(output_dir):
         click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
@@ -169,6 +176,10 @@ def eval_policy_sim(
             kwargs['r_min'] = r_min
             kwargs['r_max'] = r_max
             kwargs['r_threshold'] = r_threshold
+        if bon_free and bon_free > 1:
+            kwargs['bon_free'] = bon_free
+            kwargs['bon_signal'] = bon_signal
+            print(f"verifier-free BoN: N={bon_free}, signal={bon_signal}")
         runner_log = env_runner.run(
             policy,
             **kwargs
