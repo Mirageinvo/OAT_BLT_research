@@ -636,9 +636,54 @@ MUJOCO_GL=egl uv run python scripts/branch_value_k.py -c my_models/policy_ep-025
   2. **COST:** clean labels need counterfactual sim (~6h / 160 states per the user). Edge pairs are ~12% of states → getting enough for DPO (~thousands) = very expensive sim. Cheap logged labels are continuation-luck-noisy (our finding) → can't substitute. **This is the real bottleneck.** RL/ReST use cheap task-reward labels (no counterfactual) and target base competence (the dominant factor) → may be more cost-effective than Branch-DPO despite Branch-DPO's cleaner motivation.
 - **NET:** edge-concentration is a solid SCIENTIFIC finding (paper diagnosis: most states non-critical, rare edge band carries headroom). For the positive METHOD, the choice is Branch-DPO (clean, no inference detector, but EXPENSIVE counterfactual labels) vs RL/ReST (cheap labels, base competence, weak per-chunk gradient). Given cost, **ReST-first → RL** may beat Branch-DPO in practice; Branch-DPO stays the cleanest-motivated but label-expensive option.
 
+#### 🎉🎉 BREAKTHROUGH (2026-06-10): verifier-free BoN BEATS baseline by +0.11 SR — FIRST POSITIVE
+
+**Result (full budget K=8, same n_test):**
+| mode | SR | n_exp |
+|------|-----|-------|
+| baseline (single sample, `--entropy_threshold 0 --use_k_tokens 8`) | **0.581 ± 0.012** (.592/.568/.584) | 3 |
+| **verifier-free BoN N=8 `vote`** (mode-seeking KDE consensus) | **0.690 ± 0.008** (.684/.696) | 2 |
+
+- **Δ = +0.109 SR (~9σ), FREE** (no training, no labels, no oracle — just mode-seeking consensus over 8 samples). baseline 0.581 ≈ paper 0.58 → control is correct → gap is real.
+- **N-SWEEP (clean inference scaling law, 3 exp each unless noted):**
+
+  | N | 1 (base) | 4 | 8 (n=2) | 16 |
+  |---|---|---|---|---|
+  | SR | 0.581 ± 0.012 | 0.662 ± 0.025 | 0.690 ± 0.008 | **0.712 ± 0.012** |
+  | Δ vs base | — | +0.081 | +0.109 | **+0.131** |
+
+  Monotone, decelerating (per-doubling +0.081→+0.028→+0.022 ≈ `SR ≈ base + a·log N`) — textbook test-time scaling curve (RoboMonkey-style). N=16 still rising (+0.131, not saturated). All `vote` signal. `medoid` ablation + N=32 pending.
+- **Selection EXCEEDS the base policy** (adaptivity never could — it's capped at policy SR). Qualitatively stronger result.
+- **WHY it works (reconciles with the null, via COMPOUNDING):** per-chunk plan-selection is small (isolate held-out +0.024) BUT applied at EVERY replan (~34/episode) it COMPOUNDS → +0.11. The same compounding that made fixed-K/R gaps large, now working FOR us. The per-state null (oracle value≈0) is NOT contradicted — isolate measured ONE selection w/ single-sample continuation; deployed BoN selects at every step → continuation is also BoN → compounds. So "+0.024 realizable" was the per-CHUNK bound, NOT the deployed/episode bound.
+- **Mechanism of `vote`:** mode-seeking = variance reduction — reject the occasional catastrophic outlier sample each replan, execute the robust consensus mode. Avoiding rare fatal errors over 34 steps compounds to big SR.
+- **OAT-substrate fit:** vision amortized (encoded once) → best-of-N cheap on the dominant cost axis. The architectural win RoboMonkey lacks.
+- **Earlier "verifier-free ≈0" expectation was WRONG** — conflated per-chunk headroom (+0.024) with deployed compounding headroom (+0.11). Lesson: deployed selection compounds; don't bound it by the single-chunk isolate number.
+
+**⛔ NEXT (confirm + characterize the positive):**
+1. **Confirm:** +1-2 more bon exp (currently n=2) for tighter mean±std. Cheap (no training).
+2. **N-sweep 4/8/16** → inference scaling-law figure (RoboMonkey-style).
+3. **`medoid` vs `vote`** ablation.
+4. **Multi-suite** — does the +0.11 generalize (now a POSITIVE to generalize, not just the null).
+5. (later) learned verifier — may push above +0.11.
+- Commands: baseline `--entropy_threshold 0 --use_k_tokens 8`; bon `--bon_free N --bon_signal {vote,medoid} --use_k_tokens 8`. Both K=8 → apples-to-apples (single vs best-of-N).
+
+**Paper impact:** flips from diagnosis-only (~5-6) → **diagnosis + working positive that EXCEEDS base policy** (~7+). Wedges: (a) selection exceeds BC (adaptivity can't); (b) OAT amortized-vision makes BoN cheap; (c) the compounding explanation ties it to our diagnosis; (d) verifier-free (no training). Novelty still characterization-led but now with a concrete SR win.
+
+#### "Mode-decomposed test-time scaling" — sharpen the BoN wedge vs RoboMonkey (2026-06-13, TO TEST iteratively)
+
+**Framing (the differentiator):** RoboMonkey treats the action as a black box → bolts on *Gaussian perturbation* for diversity + a heavy VLM verifier. OAT's **ordered discrete prefix-decodable** code lets us decompose the action into **mode** (first ~1-2 tokens = *which strategy*) vs **refinement** (tail tokens = *how precise*), and spend the sample budget on the **mode axis** specifically — where the decision lives (k2≈k8 → meaning is in the prefix). Continuous/diffusion VLAs can't decompose mode-vs-refinement (no ordered structure) → can only add undifferentiated noise. Turns "BoN on OAT" (sounds like "RoboMonkey on OAT") into "structured/decomposed selection, only possible on an anytime code".
+
+**Three ideas to test iteratively (ranked; START WITH #2):**
+1. **Structured prefix-branching — "diversity by construction".** Instead of N *independent* samples (may mode-collapse at temp=1 → why RoboMonkey adds Gaussian noise), deterministically **branch over top-M of the first token** → M *guaranteed-distinct* plan families → `detokenize(eval_keep_k=k)` decodes each prefix to the full 32-step chunk → select. Global mode coverage for free from the discrete tree, vs RoboMonkey's local jitter around one mode.
+2. **⭐ Coarse-to-fine / hierarchical BoN (START HERE — different *structure*, not just signal).** Generate + score candidates on **cheap 2-token prefixes** (each prefix-decodes to a full chunk), pick the best mode, **autoregress the tail only for the winner**. RoboMonkey is *flat* (N full samples, score all); ours is coarse(explore modes)→fine(refine winner) — straight out of the anytime code. NB user's concrete variant: BoN on first 2 tokens → finish chosen seq AR to 4 tokens → optionally last 4 tokens in *parallel* (mentee's task, justified by err k4≈k8; needs retrain/parallel head, quality unverified).
+3. **Targeted exploration — temperature on the FIRST token only.** High temp on token 1 (explore modes), greedy tail (clean refinement): "explore where the decision is, exploit the routine". Continuous actions have no "first token" → RoboMonkey perturbs uniformly, can't do this.
+
+**🔴 PREREQUISITE GATE (cheap, no-sim, before building any of the 3 — same discipline as `diag_convergence_div`):** where does *sampling diversity* live — tokens 1-2 or the tail? `k2≈k8` is a *decoder* property (reconstruction); diversity is a *policy* property. Sample N on shared features, decode, measure (a) fraction of action-space variance from positions 1-2 vs 3-8, (b) how many *distinct* first-tokens top-k actually yields at temp=1. Diversity in prefix → mode-decomposed angle alive. Diversity in tail → prefix-branching misses candidates → scheme collapses.
+- **Honest caveats:** (i) all 3 optimize the **AR axis = the CHEAP axis** (vision dominates, already amortized once) → wall-clock win is small in absolute; sell as "cheaper/more-scalable BoN" + the *structural* novelty, NOT as the main latency win (that's vision). (ii) Our +0.11 came from `vote` = variance reduction (reject outliers); *increasing* diversity changes the consensus signal's behaviour → diversity and selection-signal must be tuned **jointly**. (iii) None of these raise the SR ceiling beyond what selection already gives — they make selection cheaper/cleaner, not stronger.
+
 #### ⛔⛔ SESSION RESUME (2026-06-09) — full state to continue in a new chat
 
-**ONE-LINE STATE:** per-obs adaptive K/R = oracle-NULL (washed by replan); plan-selection headroom is small on AVERAGE (+0.024) but CONCENTRATED at rare "edge" states (recoverability≈0.5: +0.15, replicated 3×) which are NOT detectable from simple features (look like doomed). Just implemented **verifier-free best-of-N** to cheaply test if deployed selection helps SR. Paper = characterization/diagnosis (~5-6/10), ~7/10 if an edge-method wins SR.
+**ONE-LINE STATE:** per-obs adaptive K/R = oracle-NULL (washed by replan); plan-selection headroom is small on AVERAGE (+0.024) but CONCENTRATED at rare "edge" states (recoverability≈0.5: +0.15, replicated 3×) which are NOT detectable from simple features (look like doomed). **UPDATE 2026-06-10: deployed verifier-free BoN N=8 BEATS baseline +0.11 SR (0.581→0.690) — see BREAKTHROUGH block above. The per-chunk null stands; deployed selection COMPOUNDS over replans.** Paper now diagnosis + working positive (~7/10).
 
 **CONFIRMED FINDINGS (oracle-backed):**
 - adaptive K (predictor/entropy/agnostic-mix ≈ fixed; fixed k=4 dominates) — NULL.
