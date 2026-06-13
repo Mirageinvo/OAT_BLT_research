@@ -68,6 +68,10 @@ from typing import List, Optional
                    "amortized), pick by a FREE signal (no trained verifier). 0=off.")
 @click.option('--bon_signal', default='vote', type=click.Choice(['vote', 'medoid']),
               help="free ranking signal: 'vote'=mode-seeking KDE density, 'medoid'=min sum dist")
+@click.option('--bon_prefix_k', default=0, type=int,
+              help="coarse-to-fine BoN (idea #2): sample+select on the first bon_prefix_k "
+                   "tokens (prefix-decoded to full chunk), then AR-refine the winner's tail "
+                   "to use_k_tokens. 0=off (flat BoN over full budget).")
 def eval_policy_sim(
     checkpoint: str,
     output_dir: str,
@@ -88,6 +92,7 @@ def eval_policy_sim(
     r_threshold: float = 0.5,
     bon_free: int = 0,
     bon_signal: str = 'vote',
+    bon_prefix_k: int = 0,
 ):
     if os.path.exists(output_dir):
         click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
@@ -179,7 +184,9 @@ def eval_policy_sim(
         if bon_free and bon_free > 1:
             kwargs['bon_free'] = bon_free
             kwargs['bon_signal'] = bon_signal
-            print(f"verifier-free BoN: N={bon_free}, signal={bon_signal}")
+            kwargs['bon_prefix_k'] = bon_prefix_k
+            mode = f"coarse-to-fine prefix_k={bon_prefix_k}" if 0 < bon_prefix_k else "flat"
+            print(f"verifier-free BoN: N={bon_free}, signal={bon_signal}, {mode}")
         runner_log = env_runner.run(
             policy,
             **kwargs

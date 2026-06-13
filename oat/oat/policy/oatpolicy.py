@@ -250,6 +250,22 @@ class OATPolicy(BasePolicy):
         return result
 
     @torch.inference_mode()
+    def _bon_select(self, cand_b: torch.Tensor, R: int, bon_signal: str) -> int:
+        """Pick the best candidate index from [N, H, D] by a FREE consensus signal over the
+        executed prefix R (normalizer space). 'vote' = mode-seeking KDE density (pick the
+        candidate in the densest region — NOT centroid-averaging, which across multimodal
+        plans gives an invalid action); 'medoid' = min sum of distances to the others."""
+        norm = self.action_tokenizer.normalizer['action']
+        a = norm.normalize(cand_b[:, :R])             # [N, R, D]
+        flat = a.reshape(cand_b.shape[0], -1)         # [N, R*D]
+        dist = torch.cdist(flat, flat)                # [N, N]
+        if bon_signal == 'medoid':
+            return int(dist.sum(dim=1).argmin())
+        off = dist[dist > 0]                          # 'vote' = mode-seeking KDE density
+        sigma = (off.median() if off.numel() > 0 else dist.new_tensor(1.0)) + 1e-6
+        dens = torch.exp(-(dist ** 2) / (2 * sigma ** 2)).sum(dim=1)
+        return int(dens.argmax())
+
     def predict_action_bon_free(self,
         obs_dict: Dict[str, torch.Tensor],
         bon_n: int = 8,
@@ -257,14 +273,19 @@ class OATPolicy(BasePolicy):
         temperature: Optional[float] = None,
         topk: Optional[int] = None,
         bon_signal: str = 'vote',
+        bon_prefix_k: int = 0,
     ) -> Dict[str, torch.Tensor]:
         """Verifier-free best-of-N. Per env: encode vision ONCE (amortized), sample bon_n
-        candidate plans from the cheap AR head, pick by a FREE signal:
-          'vote'  : mode-seeking consensus — pick the candidate in the densest region of
-                    action space (KDE over the executed prefix). NOT centroid-averaging
-                    (averaging across multimodal plans = invalid action).
-          'medoid': min sum of distances to the others (classic consensus).
-        No trained verifier, no oracle -> ranks by confidence/consensus, a PROXY for quality.
+        candidate plans from the cheap AR head, pick by a FREE consensus signal (see
+        `_bon_select`). No trained verifier, no oracle -> ranks by consensus, a PROXY for
+        quality.
+
+        Coarse-to-fine (idea #2): if 0 < bon_prefix_k < use_k_tokens, sample + select on the
+        cheap `bon_prefix_k`-token PREFIX (each prefix-decodes to the full chunk via
+        prefix-decodability), then AR-refine the WINNER's tail up to use_k_tokens (one
+        continuation, not N). Exploits k2~=k8: the mode lives in the first tokens, so spend
+        the N-sample budget there and refine only the chosen mode. bon_prefix_k=0 -> flat BoN
+        (sample full use_k_tokens for all N, original behaviour).
         """
         if use_k_tokens is None:
             use_k_tokens = self.max_seq_len
@@ -275,37 +296,44 @@ class OATPolicy(BasePolicy):
         if topk is None:
             topk = self.topk
 
+        coarse_to_fine = 0 < bon_prefix_k < use_k_tokens
+        gen_k = bon_prefix_k if coarse_to_fine else use_k_tokens
+
         features = self.obs_encoder(obs_dict)        # [B, To, d]  (vision computed once)
         B = features.shape[0]
         feat_rep = features.repeat_interleave(bon_n, dim=0)   # [B*N, To, d]
         bos = torch.full((B * bon_n, 1), self.bos_id, dtype=torch.long, device=self.device)
         tokens = self.model.generate(
-            bos, cond=feat_rep, max_new_tokens=use_k_tokens,
+            bos, cond=feat_rep, max_new_tokens=gen_k,
             temperature=temperature, top_k=topk,
-        )[:, 1:]                                      # [B*N, K]
-        cand = self.action_tokenizer.detokenize(tokens, eval_keep_k=[use_k_tokens] * (B * bon_n))
+        )[:, 1:]                                      # [B*N, gen_k]
+        cand = self.action_tokenizer.detokenize(tokens, eval_keep_k=[gen_k] * (B * bon_n))
         H, Dd = cand.shape[1], cand.shape[2]
         cand = cand.reshape(B, bon_n, H, Dd)          # [B, N, H, D] (repeat_interleave layout)
+        tokens = tokens.reshape(B, bon_n, gen_k)
 
-        norm = self.action_tokenizer.normalizer['action']
         R = min(self.n_action_steps, H)               # rank over the executed prefix only
-        chosen = torch.empty((B, H, Dd), device=self.device, dtype=cand.dtype)
-        for b in range(B):
-            a = norm.normalize(cand[b, :, :R])        # [N, R, D]
-            flat = a.reshape(bon_n, -1)               # [N, R*D]
-            dist = torch.cdist(flat, flat)            # [N, N]
-            if bon_signal == 'medoid':
-                best = int(dist.sum(dim=1).argmin())
-            else:                                     # 'vote' = mode-seeking KDE density
-                off = dist[dist > 0]
-                sigma = (off.median() if off.numel() > 0 else dist.new_tensor(1.0)) + 1e-6
-                dens = torch.exp(-(dist ** 2) / (2 * sigma ** 2)).sum(dim=1)
-                best = int(dens.argmax())
-            chosen[b] = cand[b, best]
+        best_idx = [self._bon_select(cand[b], R, bon_signal) for b in range(B)]
+        ar = torch.arange(B, device=self.device)
+        chosen_tokens = tokens[ar, best_idx]          # [B, gen_k]
+
+        if coarse_to_fine:
+            # refine the winner only: AR-continue its prefix to the full budget (KV-cache
+            # fills from the multi-token prefix), then decode at full fidelity
+            bos1 = torch.full((B, 1), self.bos_id, dtype=torch.long, device=self.device)
+            prefix = torch.cat([bos1, chosen_tokens], dim=1)            # [B, 1+gen_k]
+            full = self.model.generate(
+                prefix, cond=features, max_new_tokens=use_k_tokens - gen_k,
+                temperature=temperature, top_k=topk,
+            )[:, 1:]                                                    # [B, use_k_tokens]
+            chosen = self.action_tokenizer.detokenize(full, eval_keep_k=[use_k_tokens] * B)
+        else:
+            chosen = cand[ar, best_idx]                                 # [B, H, D]
 
         action = chosen[:, :self.n_action_steps]
         return {'action': action, 'action_pred': chosen,
-                'n_tokens': float(use_k_tokens), 'bon_n': float(bon_n)}
+                'n_tokens': float(use_k_tokens), 'bon_n': float(bon_n),
+                'bon_prefix_k': float(gen_k)}
 
     def predict_action_adaptive(self,
         obs_dict: Dict[str, torch.Tensor],
@@ -320,6 +348,7 @@ class OATPolicy(BasePolicy):
         r_threshold: float = 0.5,
         bon_free: int = 0,
         bon_signal: str = 'vote',
+        bon_prefix_k: int = 0,
     ) -> Dict[str, torch.Tensor]:
         # verifier-free best-of-N: sample bon_free candidate plans (vision encoded ONCE,
         # amortized), pick by a free intrinsic signal (mode-seeking consensus / likelihood).
@@ -328,6 +357,7 @@ class OATPolicy(BasePolicy):
             return self.predict_action_bon_free(
                 obs_dict, bon_n=bon_free, use_k_tokens=use_k_tokens,
                 temperature=temperature, topk=topk, bon_signal=bon_signal,
+                bon_prefix_k=bon_prefix_k,
             )
         # variable-R execution (GATE 1): hold K fixed (= use_k_tokens, default full
         # budget) and adapt the executed chunk length R per observation. Distinct axis
