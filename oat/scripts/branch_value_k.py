@@ -236,9 +236,11 @@ def collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coa
                             obs_branch = build_obs(branch_deque, n_obs, ports, device, dtype)
                             Msel = max(1, M // 2)
                             p_all, p_sel, p_eval = [], [], []
+                            cand_chunks = []                                # for disagreement (GATE A)
                             for _ in range(bon_n):
                                 toki = gen_tokens(policy, obs_branch)       # fresh sampled plan
                                 chunk_i = decode_k(policy, toki, K)
+                                cand_chunks.append(chunk_i)
                                 outs = rollout_outcomes(env, ctrl, snap, snap_step, branch_deque,
                                                         chunk_i, n_act, M, policy, ports, n_obs,
                                                         n_act, device, dtype, cont_cap=bon_cap)
@@ -247,11 +249,25 @@ def collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coa
                                 p_eval.append(float(np.mean(outs[Msel:])) if Msel < M
                                               else float(np.mean(outs)))
                             best = int(np.argmax(p_sel))                    # pick by sel half
+                            # GATE A: generation-aware disagreement among the N candidate plans
+                            # (action-space, NO sim) = mean pairwise L2 over the executed prefix in
+                            # normalizer space (the BoN 'vote' geometry). Tests whether this cheap
+                            # signal predicts criticality (heldout - baseline_eval) -> detects edge
+                            # states WITHOUT obs (dodges the obs-wall).
+                            disagreement = 0.0
+                            if bon_n > 1:
+                                with torch.inference_mode():
+                                    F = torch.stack([
+                                        norm.normalize(torch.from_numpy(ch[:n_act]).to(device, dtype)
+                                                       ).reshape(-1) for ch in cand_chunks], 0)  # [N,R*D]
+                                    dmat = torch.cdist(F, F)
+                                    disagreement = float(dmat.sum() / (bon_n * (bon_n - 1)))
                             rows.append(dict(**phase, bon_n=int(bon_n),
                                              baseline=float(np.mean(p_all)),       # random plan, all M (low-var, slightly biased up)
                                              baseline_eval=float(np.mean(p_eval)),  # random plan on eval half (clean split-baseline)
                                              oracle=float(np.max(p_all)),          # best plan (biased up — upper bound)
-                                             heldout=float(p_eval[best])))         # selected plan scored on eval half (unbiased)
+                                             heldout=float(p_eval[best]),          # selected plan scored on eval half (unbiased)
+                                             disagreement=disagreement))
                         elif bon_n > 0:
                             # oracle best-of-N (pass@k): N full rollouts from s, count successes.
                             c = 0

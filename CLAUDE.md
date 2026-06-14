@@ -687,6 +687,16 @@ MUJOCO_GL=egl uv run python scripts/branch_value_k.py -c my_models/policy_ep-025
 - **Partial positive:** c2f ≫ baseline (~4σ) → prefix-selection really works → decision/diversity is PARTLY in the first tokens. BUT flat ≫ c2f (~3.8σ) → prefix-selection loses ~HALF the gain → tail tokens 3-8 carry selection-relevant variation. **`k2≈k8` in *reconstruction* ≠ "tail irrelevant for *selection*"** (refutes the clean "select on 2 = select on 8" hypothesis).
 - **Cost verdict at prefix_k=2: BAD trade** — saves only AR steps (~3×, but AR = cheap axis, vision dominates → negligible wall-clock) while costing −0.05 SR. #2 only pays off if some prefix_k recovers SR≈flat. → NEXT: prefix_k=4 (err k4≈k8 even closer → should retain more); if k4≈flat there's a clean knee, else the gain needs full 8-token candidate diversity.
 
+**RESULT #2b (prefix_k=4, 2026-06-14, n=2): clean monotone KNEE.**
+| mode | SR | gain | % of flat gain | AR steps |
+|---|---|---|---|---|
+| baseline | 0.581 | — | — | 8 |
+| c2f prefix_k=2 | 0.639 | +0.058 | 53% | 22 |
+| **c2f prefix_k=4** | **0.674 ± 0.002** (.676/.674/.672, n=3) | +0.093 | **86%** | 36 |
+| flat BoN N=8 | 0.690 | +0.109 | 100% | 64 |
+- **Knee at k=4 (n=3 confirmed):** selecting on the 4-token prefix recovers **86%** of the BoN gain. Gap vs flat = 0.016, now **significant (~2.7σ)** — NOT noise (prefix_k=4 very tight, stderr ~0.001; flat stderr ~0.006). So the knee is real but does NOT reach flat: tokens 3-8 carry a real ~0.016-SR remainder that full selection captures. Selection-relevant diversity is mostly in tokens 1-4 (k2→k4 = 53%→86%). Knee at 4 (not 2) lines up with the trained pow2 budget k=4.
+- **Verdict:** #2 is a real, interpretable result ("4 tokens suffice for selection → 86% of the gain cheaper") but it's a **cost-trade on the CHEAP (AR) axis** — ~1.8× fewer AR steps but AR is dominated by vision, so negligible wall-clock, and it costs ~0.015 SR. Good analysis fact (partially supports mode-decomposition), NOT a headline/SR win. The SR/Pareto win remains the BoN×R coupling, not prefix truncation.
+
 **🔴 PREREQUISITE GATE (cheap, no-sim, before building any of the 3 — same discipline as `diag_convergence_div`):** where does *sampling diversity* live — tokens 1-2 or the tail? `k2≈k8` is a *decoder* property (reconstruction); diversity is a *policy* property. Sample N on shared features, decode, measure (a) fraction of action-space variance from positions 1-2 vs 3-8, (b) how many *distinct* first-tokens top-k actually yields at temp=1. Diversity in prefix → mode-decomposed angle alive. Diversity in tail → prefix-branching misses candidates → scheme collapses.
 - **Honest caveats:** (i) all 3 optimize the **AR axis = the CHEAP axis** (vision dominates, already amortized once) → wall-clock win is small in absolute; sell as "cheaper/more-scalable BoN" + the *structural* novelty, NOT as the main latency win (that's vision). (ii) Our +0.11 came from `vote` = variance reduction (reject outliers); *increasing* diversity changes the consensus signal's behaviour → diversity and selection-signal must be tuned **jointly**. (iii) None of these raise the SR ceiling beyond what selection already gives — they make selection cheaper/cleaner, not stronger.
 
