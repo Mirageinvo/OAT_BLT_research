@@ -266,6 +266,24 @@ class OATPolicy(BasePolicy):
         dens = torch.exp(-(dist ** 2) / (2 * sigma ** 2)).sum(dim=1)
         return int(dens.argmax())
 
+    def _bon_sample(self, cond, n_new, temperature, topk, first_temp):
+        """Sample n_new tokens for each row of cond. If first_temp>0 (idea #3), draw the
+        FIRST token (the 'mode' token) at first_temp to inject mode diversity, then continue
+        the tail at the base temperature (clean refinement). OAT-unique: only an ordered
+        token code has a 'first token' to target. Returns [B, n_new]."""
+        B = cond.shape[0]
+        bos = torch.full((B, 1), self.bos_id, dtype=torch.long, device=self.device)
+        if not (first_temp and first_temp > 0) or n_new < 1:
+            return self.model.generate(bos, cond=cond, max_new_tokens=n_new,
+                                       temperature=temperature, top_k=topk)[:, 1:]
+        t1 = self.model.generate(bos, cond=cond, max_new_tokens=1,
+                                 temperature=first_temp, top_k=topk)        # [B, 2]
+        if n_new == 1:
+            return t1[:, 1:]
+        out = self.model.generate(t1, cond=cond, max_new_tokens=n_new - 1,
+                                  temperature=temperature, top_k=topk)      # [B, 1+n_new]
+        return out[:, 1:]
+
     def predict_action_bon_free(self,
         obs_dict: Dict[str, torch.Tensor],
         bon_n: int = 8,
@@ -274,6 +292,7 @@ class OATPolicy(BasePolicy):
         topk: Optional[int] = None,
         bon_signal: str = 'vote',
         bon_prefix_k: int = 0,
+        bon_first_temp: float = 0.0,
     ) -> Dict[str, torch.Tensor]:
         """Verifier-free best-of-N. Per env: encode vision ONCE (amortized), sample bon_n
         candidate plans from the cheap AR head, pick by a FREE consensus signal (see
@@ -302,18 +321,16 @@ class OATPolicy(BasePolicy):
         features = self.obs_encoder(obs_dict)        # [B, To, d]  (vision computed once)
         B = features.shape[0]
         feat_rep = features.repeat_interleave(bon_n, dim=0)   # [B*N, To, d]
-        bos = torch.full((B * bon_n, 1), self.bos_id, dtype=torch.long, device=self.device)
-        tokens = self.model.generate(
-            bos, cond=feat_rep, max_new_tokens=gen_k,
-            temperature=temperature, top_k=topk,
-        )[:, 1:]                                      # [B*N, gen_k]
+        tokens = self._bon_sample(feat_rep, gen_k, temperature, topk, bon_first_temp)  # [B*N, gen_k]
         cand = self.action_tokenizer.detokenize(tokens, eval_keep_k=[gen_k] * (B * bon_n))
         H, Dd = cand.shape[1], cand.shape[2]
         cand = cand.reshape(B, bon_n, H, Dd)          # [B, N, H, D] (repeat_interleave layout)
         tokens = tokens.reshape(B, bon_n, gen_k)
 
         R = min(self.n_action_steps, H)               # rank over the executed prefix only
-        best_idx = [self._bon_select(cand[b], R, bon_signal) for b in range(B)]
+        best_idx = torch.tensor(
+            [self._bon_select(cand[b], R, bon_signal) for b in range(B)],
+            device=self.device, dtype=torch.long)
         ar = torch.arange(B, device=self.device)
         chosen_tokens = tokens[ar, best_idx]          # [B, gen_k]
 
@@ -349,6 +366,7 @@ class OATPolicy(BasePolicy):
         bon_free: int = 0,
         bon_signal: str = 'vote',
         bon_prefix_k: int = 0,
+        bon_first_temp: float = 0.0,
     ) -> Dict[str, torch.Tensor]:
         # verifier-free best-of-N: sample bon_free candidate plans (vision encoded ONCE,
         # amortized), pick by a free intrinsic signal (mode-seeking consensus / likelihood).
@@ -357,7 +375,7 @@ class OATPolicy(BasePolicy):
             return self.predict_action_bon_free(
                 obs_dict, bon_n=bon_free, use_k_tokens=use_k_tokens,
                 temperature=temperature, topk=topk, bon_signal=bon_signal,
-                bon_prefix_k=bon_prefix_k,
+                bon_prefix_k=bon_prefix_k, bon_first_temp=bon_first_temp,
             )
         # variable-R execution (GATE 1): hold K fixed (= use_k_tokens, default full
         # budget) and adapt the executed chunk length R per observation. Distinct axis

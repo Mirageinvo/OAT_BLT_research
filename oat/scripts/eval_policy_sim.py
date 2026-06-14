@@ -72,6 +72,10 @@ from typing import List, Optional
               help="coarse-to-fine BoN (idea #2): sample+select on the first bon_prefix_k "
                    "tokens (prefix-decoded to full chunk), then AR-refine the winner's tail "
                    "to use_k_tokens. 0=off (flat BoN over full budget).")
+@click.option('--bon_first_temp', default=0.0, type=float,
+              help="mode-injection BoN (idea #3): sample the FIRST token at this temperature "
+                   "(inject mode diversity), continue the tail at base temperature. "
+                   "0=off (uniform temperature). OAT-unique: targets the mode token.")
 def eval_policy_sim(
     checkpoint: str,
     output_dir: str,
@@ -93,6 +97,7 @@ def eval_policy_sim(
     bon_free: int = 0,
     bon_signal: str = 'vote',
     bon_prefix_k: int = 0,
+    bon_first_temp: float = 0.0,
 ):
     if os.path.exists(output_dir):
         click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
@@ -185,7 +190,10 @@ def eval_policy_sim(
             kwargs['bon_free'] = bon_free
             kwargs['bon_signal'] = bon_signal
             kwargs['bon_prefix_k'] = bon_prefix_k
+            kwargs['bon_first_temp'] = bon_first_temp
             mode = f"coarse-to-fine prefix_k={bon_prefix_k}" if 0 < bon_prefix_k else "flat"
+            if bon_first_temp > 0:
+                mode += f", first_token_temp={bon_first_temp}"
             print(f"verifier-free BoN: N={bon_free}, signal={bon_signal}, {mode}")
         runner_log = env_runner.run(
             policy,
