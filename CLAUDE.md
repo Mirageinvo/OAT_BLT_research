@@ -762,6 +762,24 @@ flat BoN (+0.11) remains the simple positive. Don't pursue #1. Novelty is NOT in
 
 **Verdict / direction:** STOP hunting new mechanisms (all preempted). Novelty = the DIAGNOSIS. The only live mechanism-sliver = **A (criticality-gated)**, decided by GATE A (running). If GATE A PASS → diagnosis + A (gate=our edge finding, the one component nobody else has). If FAIL → characterization paper (latent criticality, undetectable from obs/disagreement/energy-OOD/reconstruction) + RL/distillation for the SR number. Realistic target = ICRA/CoRL main or strong workshop, contingent on multi-dataset generalization (the user's LATER phase) + diagnosis-led framing. Top-ML unlikely without heavy RL.
 
+#### IDEA 1 (2026-06-15) — OAT as task-aware successive-refinement; is reconstruction the WRONG distortion?
+
+**Framing (adjacent-discipline, NOT preempted):** OAT = a **successive-refinement source code** (prefix-decodable); trained on **reconstruction distortion** (MSE). Our `reconstruction≠value` = "wrong distortion measure" in the rate-distortion / **semantic-communication** sense (semantic-RD is in comms/6G, NOT robotics → novel for action tokens). Mechanism = retrain the tokenizer on a **task/value-weighted distortion** → value-ordered tokens. Companion = idea 2 (Value-of-Information adaptive compute; VoI≠uncertainty → addresses GATE-A's criticality⊥uncertainty). These give the paper a THEORY spine (RD/VoI), formalizing the diagnosis.
+
+**Cheap offline gate (`per_timestep_recon_error.py` extended): d_task(k) vs d_rec(k) rate curves** — `d_task_w(k)=Σ_t w_t e_t(k)/Σ_t w_t` for task-weights. Steeper task-curve than d_rec → tokens carry differential task value → idea 1 alive.
+
+**RESULT (n=100k chunks, autoencode GT through frozen tokenizer):**
+| weight | k1 | k2 | k4 | k8 | drop | ratio vs d_rec |
+|---|---|---|---|---|---|---|
+| uniform (d_rec) | 0.124 | 0.083 | 0.060 | 0.047 | 62% | 1.00 |
+| gripper (SHARP change) | 0.244 | 0.122 | 0.075 | 0.057 | 77% | **1.23 (steeper)** |
+| delta/jerk (motion ctrl) | ~0.165 | — | — | ~0.054 | ~67% | ~1.07 |
+- **Directional positive:** gripper-weighted distortion is steeper + 2× higher at k=1 → grasp steps UNDER-served by the reconstruction tokenizer → a task-aware tokenizer has room to reallocate. First non-null architectural signal.
+- **IMPORTANT correction:** the tokenizer's reconstruction is NOT flat (d_rec drops 62%!). The old "k2≈k8 flat" was the **min-k dataset = POLICY-PREDICTION error** (dominated by the policy missing the demo), NOT the tokenizer's rate-distortion. OAT's tokenizer DOES use its rate.
+- **🔴 CONFOUND (why "alive" is over-optimistic):** gripper-CHANGE is a **discontinuity** → hard to reconstruct at low k **regardless of value** (sharpness, not task-importance). Conflated. PLUS `value(k)≈0` oracle warns per-chunk fidelity (even grasp) may not change SR (replan washes).
+- **DISAMBIGUATION ADDED (smooth grasp weights, offline, pending run):** `grip_smooth` (temporally-smoothed change = grasp REGION), `grip_adj` (smoothed minus the sharp peak = NON-discontinuity neighbor steps). Read: grip_smooth & grip_adj ALSO steeper → grasp REGION under-served = TASK-relevance → idea 1 REAL; only sharp `gripper` steep but grip_adj≈d_rec → SHARPNESS artifact → idea 1 dead. Final decisive (if smooth passes): critic `w=||∂V/∂a||²`.
+- **VERDICT so far: weak-positive-but-CONFOUNDED, not a clean PASS.** Run the smooth-weight disambiguation before any tokenizer retrain. Even a FAIL is publishable ("task-critical action info already in early tokens / reconstruction-gap is sharpness not value").
+
 #### ⛔⛔ SESSION RESUME (2026-06-09) — full state to continue in a new chat
 
 **ONE-LINE STATE:** per-obs adaptive K/R = oracle-NULL (washed by replan); plan-selection headroom is small on AVERAGE (+0.024) but CONCENTRATED at rare "edge" states (recoverability≈0.5: +0.15, replicated 3×) which are NOT detectable from simple features (look like doomed). **UPDATE 2026-06-10: deployed verifier-free BoN N=8 BEATS baseline +0.11 SR (0.581→0.690) — see BREAKTHROUGH block above. The per-chunk null stands; deployed selection COMPOUNDS over replans.** Paper now diagnosis + working positive (~7/10).

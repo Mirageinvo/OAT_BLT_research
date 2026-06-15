@@ -57,6 +57,12 @@ def per_chunk_corr(x, y):  # x,y: [B, H] -> per-chunk Pearson r [B]
     return num / den
 
 
+def temporal_smooth(x, width):  # x [B,H] -> box-smoothed over time [B,H]
+    k = torch.ones(1, 1, width, device=x.device, dtype=x.dtype) / width
+    xs = torch.nn.functional.conv1d(x.unsqueeze(1), k, padding=width // 2)
+    return xs.squeeze(1)[:, :x.shape[1]]
+
+
 @click.command()
 @click.option('-c', '--checkpoint', required=True)
 @click.option('-d', '--device', default='cuda:0')
@@ -95,7 +101,14 @@ def main(checkpoint, device, batch_size, num_workers, max_samples, budgets, exec
     # d_rec (steeper) -> task-important error needs more tokens -> tokens carry differential
     # task value -> idea 1 ALIVE. If FLATTER -> task-important steps reconstructed early ->
     # nothing to reallocate -> idea 1 (per-chunk) DEAD (SR(k) steepness is pure compounding).
-    wnames = ['uniform', 'gripper', 'delta', 'jerk']
+    # 'gripper' = SHARP gripper-change (a discontinuity → hard to reconstruct regardless of
+    # value → CONFOUNDED). Disambiguate with SMOOTH grasp-region weights:
+    #   'grip_smooth' = temporally-smoothed gripper-change (weights the grasp REGION, ~5 steps)
+    #   'grip_adj'    = smoothed MINUS the sharp peak (the NON-discontinuity neighbor steps only)
+    # If grip_smooth/grip_adj are ALSO steeper than uniform -> the grasp REGION is under-served
+    # = task-relevance (idea 1 real). If only the sharp 'gripper' step is steep -> sharpness
+    # artifact (idea 1 = reconstruction of discontinuities, not task value).
+    wnames = ['uniform', 'gripper', 'grip_smooth', 'grip_adj', 'delta', 'jerk']
     werr = {w: {k: 0.0 for k in budgets} for w in wnames}   # weighted error sums
     wtot = {w: 0.0 for w in wnames}                          # weight totals
 
@@ -150,8 +163,11 @@ def main(checkpoint, device, batch_size, num_workers, max_samples, budgets, exec
                 topratio[f] += (fv[ar, top_idx] / (fv.mean(1) + EPS)).sum().item()
 
             # d_task(k) accumulation: weighted error sums per task-weight
+            grip_smooth = temporal_smooth(grip, 5)              # grasp region (smooth)
+            grip_adj = (grip_smooth - grip).clamp(min=0)        # neighbor steps only (no peak)
             wfields = {'uniform': torch.ones_like(e[k_max]),
-                       'gripper': grip, 'delta': delta, 'jerk': jerk}
+                       'gripper': grip, 'grip_smooth': grip_smooth, 'grip_adj': grip_adj,
+                       'delta': delta, 'jerk': jerk}
             for wn, w in wfields.items():
                 wtot[wn] += w.sum().item()
                 for k in budgets:
@@ -221,9 +237,13 @@ def main(checkpoint, device, batch_size, num_workers, max_samples, budgets, exec
                        "FLATTER -> task-important captured early -> idea 1 (per-chunk) DEAD" if r < 0.85 else
                        "~same -> tokens task-neutral -> idea 1 weak/dead")
             print(f"  {wn:9s}: drop ratio vs d_rec = {r:.2f}  -> {verdict}")
-    print("  NB 'gripper' is the key task-weight (grasp/contact); 'delta'/'jerk' are MOTION")
-    print("  weights (expected ~= d_rec, since recon-hard = fast-motion per Step-0). The")
-    print("  decisive contrast is gripper-weighted vs uniform. (TODO: critic w_t=||dV/da||^2.)")
+    print("  DISAMBIGUATION (sharpness vs task-region):")
+    print("    'gripper' = SHARP change (confounded: discontinuity is hard to reconstruct).")
+    print("    'grip_smooth'/'grip_adj' = SMOOTH grasp region / neighbor steps (no discontinuity).")
+    print("    If grip_smooth & grip_adj ALSO steeper than d_rec -> grasp REGION under-served =")
+    print("    TASK-relevance -> idea 1 REAL. If only sharp 'gripper' steep but grip_adj ~= d_rec")
+    print("    -> SHARPNESS artifact (reconstructing discontinuities, not task value) -> idea 1 dead.")
+    print("    'delta'/'jerk' = MOTION controls (expected ~= d_rec). Final test: critic w=||dV/da||^2.")
 
 
 if __name__ == '__main__':
