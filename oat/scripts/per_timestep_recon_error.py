@@ -89,6 +89,16 @@ def main(checkpoint, device, batch_size, num_workers, max_samples, budgets, exec
     corr = {f: 0.0 for f in ('gripper', 'delta', 'jerk')}
     topratio = {f: 0.0 for f in ('gripper', 'delta', 'jerk')}
 
+    # d_task(k) RATE CURVES (idea 1): weighted-mean reconstruction error at budget k.
+    # d_task_w(k) = sum_t w_t e_t(k) / sum_t w_t, for task-importance weights w_t.
+    # 'uniform' = d_rec(k). Compare SHAPE: if a task-weighted curve drops MORE k1->kmax than
+    # d_rec (steeper) -> task-important error needs more tokens -> tokens carry differential
+    # task value -> idea 1 ALIVE. If FLATTER -> task-important steps reconstructed early ->
+    # nothing to reallocate -> idea 1 (per-chunk) DEAD (SR(k) steepness is pure compounding).
+    wnames = ['uniform', 'gripper', 'delta', 'jerk']
+    werr = {w: {k: 0.0 for k in budgets} for w in wnames}   # weighted error sums
+    wtot = {w: 0.0 for w in wnames}                          # weight totals
+
     def acc(name, ee, scope):
         c = [v.sum().item() for v in chunk_stats(ee)]
         key = (name, scope)
@@ -139,6 +149,14 @@ def main(checkpoint, device, batch_size, num_workers, max_samples, budgets, exec
                 corr[f] += per_chunk_corr(g48, fv).nan_to_num(0).sum().item()
                 topratio[f] += (fv[ar, top_idx] / (fv.mean(1) + EPS)).sum().item()
 
+            # d_task(k) accumulation: weighted error sums per task-weight
+            wfields = {'uniform': torch.ones_like(e[k_max]),
+                       'gripper': grip, 'delta': delta, 'jerk': jerk}
+            for wn, w in wfields.items():
+                wtot[wn] += w.sum().item()
+                for k in budgets:
+                    werr[wn][k] += (w * e[k]).sum().item()
+
             n += B
             if max_samples is not None and n >= max_samples:
                 break
@@ -177,6 +195,35 @@ def main(checkpoint, device, batch_size, num_workers, max_samples, budgets, exec
 
     print("\nRead: H-OAT premise strong if GAIN top2/top4 >> refs WITH high median (not just")
     print("mean), and gain correlates with gripper/jerk (semantic) — especially within window.")
+
+    # ---- d_task(k) RATE CURVES (idea 1: is reconstruction the WRONG distortion?) ----
+    print(f"\n--- d_task(k) RATE CURVES: weighted-mean error at budget k (idea 1) ---")
+    print(f"  'uniform' = d_rec(k). drop = (d(k1)-d(kmax))/d(k1) = fractional distortion reduction.")
+    hdr = "  ".join(f"k={k}" for k in budgets)
+    print(f"  {'weight':9s} | {hdr} |  drop  | normalized d(k)/d(k1)")
+    drop = {}
+    for wn in wnames:
+        if wtot[wn] <= 0:
+            print(f"  {wn:9s} | (no weight mass)"); continue
+        curve = [werr[wn][k] / wtot[wn] for k in budgets]
+        drop[wn] = (curve[0] - curve[-1]) / (curve[0] + EPS)
+        norm = "  ".join(f"{c / (curve[0] + EPS):.3f}" for c in curve)
+        vals = "  ".join(f"{c:.3f}" for c in curve)
+        print(f"  {wn:9s} | {vals} | {drop[wn]:+.3f} | {norm}")
+
+    print(f"\nDECISIVE (idea 1): compare task-weighted drop vs d_rec ('uniform') drop:")
+    if 'uniform' in drop:
+        for wn in wnames:
+            if wn == 'uniform' or wn not in drop:
+                continue
+            r = drop[wn] / (drop['uniform'] + EPS)
+            verdict = ("STEEPER -> task-error needs more tokens -> idea 1 ALIVE" if r > 1.15 else
+                       "FLATTER -> task-important captured early -> idea 1 (per-chunk) DEAD" if r < 0.85 else
+                       "~same -> tokens task-neutral -> idea 1 weak/dead")
+            print(f"  {wn:9s}: drop ratio vs d_rec = {r:.2f}  -> {verdict}")
+    print("  NB 'gripper' is the key task-weight (grasp/contact); 'delta'/'jerk' are MOTION")
+    print("  weights (expected ~= d_rec, since recon-hard = fast-motion per Step-0). The")
+    print("  decisive contrast is gripper-weighted vs uniform. (TODO: critic w_t=||dV/da||^2.)")
 
 
 if __name__ == '__main__':
