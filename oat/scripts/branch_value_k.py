@@ -190,17 +190,22 @@ def collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coa
     ekw = env_kwargs_from_cfg(cfg)
 
     rows = []
+    # spread the worker's budget evenly across its tasks (else the inner while exhausts the
+    # whole budget on tasks[0] -> single-task dataset). `target` is the cumulative cap per task.
+    per_task = (n_branch + len(tasks) - 1) // max(1, len(tasks))
+    target = 0
     pbar = tqdm.tqdm(total=n_branch, desc=f'branch[s{env_seed}]', disable=not show_pbar)
     for task in tasks:
         if len(rows) >= n_branch:
             break
+        target = min(n_branch, target + per_task)
         env = LiberoEnv(task_name=task, seed=env_seed, **ekw)
         try:
             env.env.env.ignore_done = True   # we control termination, not robosuite horizon
         except Exception:
             pass
         try:
-            while len(rows) < n_branch:
+            while len(rows) < target:
                 obs, _ = env.reset()
                 obs_deque = deque([obs], maxlen=n_obs + 1)
                 while not env.done and env.cur_step < env.max_episode_steps and len(rows) < n_branch:
