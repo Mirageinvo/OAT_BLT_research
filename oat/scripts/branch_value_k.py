@@ -190,22 +190,26 @@ def collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coa
     ekw = env_kwargs_from_cfg(cfg)
 
     rows = []
-    # spread the worker's budget evenly across its tasks (else the inner while exhausts the
-    # whole budget on tasks[0] -> single-task dataset). `target` is the cumulative cap per task.
-    per_task = (n_branch + len(tasks) - 1) // max(1, len(tasks))
-    target = 0
+    # round-robin over tasks: ONE full reference episode per task per rotation, so branch states
+    # spread evenly across ALL tasks (not exhausted on tasks[0]) while each episode keeps full
+    # phase coverage (early->late states). A per-row task quota can't work here: one episode yields
+    # many rows, so capping by rows would either overshoot onto tasks[0] or (if truncated mid-
+    # episode) bias every state to the early/safe phase -> wrecks the recoverability distribution.
+    # Rotating whole episodes avoids both. env (re)created per episode is cheap vs the per-row N*M
+    # counterfactual continuations.
+    ti = env_seed   # stagger each worker's starting task so the union covers all tasks even
+                    # when a worker collects < one full rotation (share may be < len(tasks) episodes)
     pbar = tqdm.tqdm(total=n_branch, desc=f'branch[s{env_seed}]', disable=not show_pbar)
-    for task in tasks:
-        if len(rows) >= n_branch:
-            break
-        target = min(n_branch, target + per_task)
-        env = LiberoEnv(task_name=task, seed=env_seed, **ekw)
+    while len(rows) < n_branch:
+        task = tasks[ti % len(tasks)]
+        ti += 1
+        env = LiberoEnv(task_name=task, seed=env_seed + ti, **ekw)
         try:
             env.env.env.ignore_done = True   # we control termination, not robosuite horizon
         except Exception:
             pass
         try:
-            while len(rows) < target:
+            for _ep in range(1):             # one reference episode, then rotate to the next task
                 obs, _ = env.reset()
                 obs_deque = deque([obs], maxlen=n_obs + 1)
                 while not env.done and env.cur_step < env.max_episode_steps and len(rows) < n_branch:
