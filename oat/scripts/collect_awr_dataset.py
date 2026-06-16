@@ -6,18 +6,19 @@ Per replan we log (features = obs_encoder(obs), executed action tokens); at epis
 broadcast the binary episode success to every chunk of that episode. AWR then does weighted
 SFT: weight = exp((success - baseline)/beta), so successful-episode chunks are up-weighted.
 
-  --bon_n N  : roll out WITH verifier-free BoN selection (vote) and log the SELECTED tokens
-               -> distills the +0.11 BoN policy into the AR head (BoN-distillation).
-               default 0/1 = base policy (plain ReST on the base policy's own successes).
+  --bon_n N   : roll out WITH verifier-free BoN selection (vote) and log the SELECTED tokens
+                -> distills the +0.11 BoN policy into the AR head (BoN-distillation).
+                default 0/1 = base policy (plain ReST on the base policy's own successes).
+  --n_workers : parallel sequential-env workers (spawn, distinct seeds). Bottleneck is the
+                MuJoCo/EGL render; ~6 optimal, more over-subscribes the GPU.
 
-Features (not raw obs) are stored: obs_encoder is frozen, so features are fixed, and obs
-(128x128 images) are huge. Output .npz: features [N,To,d], tokens [N,K], success [N],
-ep_id [N], step [N], task [N(object)].
+Features (not raw obs) are stored: obs_encoder is frozen, features are fixed, obs are huge.
+Output .npz: features [N,To,d], tokens [N,K], success [N], ep_id [N], step [N], task [N(obj)].
 
 Run (sim machine):
   cd oat && MUJOCO_GL=egl uv run python scripts/collect_awr_dataset.py \
       -c my_models/policy_ep-0250_sr-0.596.ckpt -o my_datasets/awr_bon.npz \
-      --n_chunks 20000 --bon_n 8 --n_tasks 10
+      --n_chunks 20000 --bon_n 8 --n_tasks 10 --n_workers 6
 """
 import sys, os, pathlib
 ROOT_DIR = str(pathlib.Path(__file__).parent.parent)
@@ -59,17 +60,11 @@ def gen_action_tokens(policy, features, bon_n, n_act):
     return toks[best:best + 1]                                               # [1, K]
 
 
-@click.command()
-@click.option('-c', '--checkpoint', required=True)
-@click.option('-o', '--output', required=True)
-@click.option('-d', '--device', default='cuda:0')
-@click.option('--n_chunks', default=20000, type=int, help='target number of logged chunks')
-@click.option('--n_tasks', default=10, type=int)
-@click.option('--bon_n', default=0, type=int, help='0/1=base policy; >1=BoN-distillation (log selected)')
-@click.option('--temperature', default=None, type=float)
-@click.option('--topk', default=None, type=int)
-@click.option('--seed', default=0, type=int)
-def main(checkpoint, output, device, n_chunks, n_tasks, bon_n, temperature, topk, seed):
+def collect_chunks(checkpoint, device, n_chunks, n_tasks, bon_n, temperature, topk, seed,
+                   show_pbar=True):
+    """Self-contained worker: load policy, roll out episodes, return logged chunks as a dict
+    of lists. ep_id is worker-local (0..); main offsets to make it globally unique."""
+    torch.set_num_threads(1)   # avoid BLAS contention across workers (bottleneck = MuJoCo)
     device = torch.device(device)
     policy, cfg = BasePolicy.from_checkpoint(checkpoint, return_configuration=True)
     assert isinstance(policy, OATPolicy)
@@ -88,13 +83,10 @@ def main(checkpoint, output, device, n_chunks, n_tasks, bon_n, temperature, topk
     except Exception:
         suite = 'libero10'
     tasks = get_subtasks(suite)[:n_tasks]
-    mode = f"BoN-distill(N={bon_n})" if bon_n > 1 else "base ReST"
-    print(f"mode={mode} | n_chunks={n_chunks} | tasks={len(tasks)} | n_act(R)={n_act}")
 
     feats, toks, succ, ep_ids, steps, task_ids = [], [], [], [], [], []
     ep_id = 0
-    n_ep_done = 0
-    pbar = tqdm.tqdm(total=n_chunks, desc='chunks')
+    pbar = tqdm.tqdm(total=n_chunks, desc=f'chunks[s{seed}]', disable=not show_pbar)
     for task in tasks:
         if len(feats) >= n_chunks:
             break
@@ -112,13 +104,13 @@ def main(checkpoint, output, device, n_chunks, n_tasks, bon_n, temperature, topk
                 while not env.done and env.cur_step < env.max_episode_steps and len(feats) < n_chunks:
                     obs_dict = build_obs(obs_deque, n_obs, ports, device, dtype)
                     with torch.inference_mode():
-                        features = policy.obs_encoder(obs_dict)             # [1, To, d]
+                        features = policy.obs_encoder(obs_dict)            # [1, To, d]
                     tk = gen_action_tokens(policy, features, bon_n, n_act)  # [1, K]
-                    a = decode_k(policy, tk, policy.max_seq_len)            # [H, D]
+                    a = decode_k(policy, tk, policy.max_seq_len)           # [H, D]
                     feats.append(features[0].detach().cpu().numpy())
                     toks.append(tk[0].detach().cpu().numpy())
                     ep_ids.append(ep_id); steps.append(int(env.cur_step)); task_ids.append(task)
-                    succ.append(0.0)                                        # placeholder, filled below
+                    succ.append(0.0)                                       # placeholder
                     pbar.update(1)
                     for t in range(n_act):
                         if env.done:
@@ -129,26 +121,69 @@ def main(checkpoint, output, device, n_chunks, n_tasks, bon_n, temperature, topk
                 for i in range(ep_start, len(succ)):
                     succ[i] = float(ep_success)                            # broadcast episode label
                 ep_id += 1
-                n_ep_done += 1
         finally:
             env.close()
     pbar.close()
+    return dict(features=feats, tokens=toks, success=succ, ep_id=ep_ids,
+                step=steps, task=task_ids, n_ep=ep_id)
 
-    feats = np.asarray(feats, dtype=np.float32)
-    toks = np.asarray(toks, dtype=np.int64)
-    succ = np.asarray(succ, dtype=np.float32)
+
+def _worker(payload):
+    return collect_chunks(**payload)
+
+
+@click.command()
+@click.option('-c', '--checkpoint', required=True)
+@click.option('-o', '--output', required=True)
+@click.option('-d', '--device', default='cuda:0')
+@click.option('--n_chunks', default=20000, type=int, help='target number of logged chunks (total)')
+@click.option('--n_tasks', default=10, type=int)
+@click.option('--bon_n', default=0, type=int, help='0/1=base policy; >1=BoN-distillation (log selected)')
+@click.option('--temperature', default=None, type=float)
+@click.option('--topk', default=None, type=int)
+@click.option('--seed', default=0, type=int)
+@click.option('--n_workers', default=1, type=int, help='parallel spawn workers (~6 optimal on EGL)')
+def main(checkpoint, output, device, n_chunks, n_tasks, bon_n, temperature, topk, seed, n_workers):
+    mode = f"BoN-distill(N={bon_n})" if bon_n > 1 else "base ReST"
+    print(f"mode={mode} | n_chunks={n_chunks} | tasks={n_tasks} | workers={n_workers}")
+
+    common = dict(checkpoint=checkpoint, device=device, n_tasks=n_tasks, bon_n=bon_n,
+                  temperature=temperature, topk=topk)
+    if n_workers <= 1:
+        results = [collect_chunks(n_chunks=n_chunks, seed=seed, show_pbar=True, **common)]
+    else:
+        share = (n_chunks + n_workers - 1) // n_workers
+        payloads = [dict(n_chunks=share, seed=seed + w, show_pbar=(w == 0), **common)
+                    for w in range(n_workers)]
+        import multiprocessing as mp
+        ctx = mp.get_context('spawn')
+        with ctx.Pool(n_workers) as pool:
+            results = pool.map(_worker, payloads)
+
+    # concat workers, offsetting ep_id to stay globally unique
+    feats, toks, succ, ep_ids, steps, task_ids = [], [], [], [], [], []
+    ep_off = 0
+    for r in results:
+        feats += r['features']; toks += r['tokens']; succ += r['success']
+        ep_ids += [e + ep_off for e in r['ep_id']]
+        steps += r['step']; task_ids += r['task']
+        ep_off += r['n_ep']
+    feats = np.asarray(feats, dtype=np.float32)[:n_chunks]
+    toks = np.asarray(toks, dtype=np.int64)[:n_chunks]
+    succ = np.asarray(succ, dtype=np.float32)[:n_chunks]
+    ep_ids = np.asarray(ep_ids)[:n_chunks]
+    steps = np.asarray(steps)[:n_chunks]
+    task_ids = np.asarray(task_ids, dtype=object)[:n_chunks]
+
     pathlib.Path(output).parent.mkdir(parents=True, exist_ok=True)
     np.savez(output, features=feats, tokens=toks, success=succ,
-             ep_id=np.asarray(ep_ids), step=np.asarray(steps),
-             task=np.asarray(task_ids, dtype=object))
-    print(f"\nsaved {len(feats)} chunks from {n_ep_done} episodes -> {output}")
+             ep_id=ep_ids, step=steps, task=task_ids)
+    n_ep = len(np.unique(ep_ids))
+    print(f"\nsaved {len(feats)} chunks from {n_ep} episodes -> {output}")
     print(f"  features {feats.shape}  tokens {toks.shape}")
-    print(f"  episode success rate (chunk-weighted) = {succ.mean():.3f}  "
-          f"(baseline for AWR advantage)")
-    ep_arr = np.asarray(ep_ids)
-    ep_sr = [succ[ep_arr == e][0] for e in np.unique(ep_arr) if (ep_arr == e).any()]
-    if ep_sr:
-        print(f"  per-episode SR = {np.mean(ep_sr):.3f}  over {len(ep_sr)} episodes")
+    print(f"  episode success rate (chunk-weighted) = {succ.mean():.3f}  (AWR baseline)")
+    ep_sr = [succ[ep_ids == e][0] for e in np.unique(ep_ids)]
+    print(f"  per-episode SR = {np.mean(ep_sr):.3f}  over {len(ep_sr)} episodes")
 
 
 if __name__ == '__main__':

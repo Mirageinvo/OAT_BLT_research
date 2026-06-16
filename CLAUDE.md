@@ -823,6 +823,34 @@ flat BoN (+0.11) remains the simple positive. Don't pursue #1. Novelty is NOT in
 
 **FINAL METHOD PATH:** AWR (cheap, offline, on the washed proxy — quick test if proxy-signal helps at all; likely plateaus per CRAFT's bias point) → **CRAFT-template** (proxy reward-model/AWR + residual closed-loop correction at disagreement points + EMA-KL anti-collapse) as the principled fix when the washed proxy plateaus. Both = borrowed positives; novelty = diagnosis (now externally validated by CRAFT). Cheapest shared first step = a **learned reward/value model on counterfactual labels** (needed by AWR, the proxy, and serves the confirmatory measurements).
 
+#### AWR/ReST PIPELINE — IMPLEMENTED & validated end-to-end (2026-06-16)
+
+Cheapest first version: **ReST/AWR with EPISODE-SUCCESS labels** (no counterfactual sim — only the executed candidate gets a reward = its episode outcome; group-relative/counterfactual is the later expensive upgrade). 3 scripts, all smoke-validated on docker:
+- **`scripts/collect_awr_dataset.py`** — sequential LIBERO rollouts (reuses `branch_value_k` env helpers); per replan logs `(features=obs_encoder(obs), executed tokens)`; broadcasts episode success to all chunks. `--bon_n 8` → **BoN-distillation** (logs the vote-selected tokens → bakes the +0.11 BoN policy); `--bon_n 0` → base ReST. Stores features (frozen encoder) not raw obs. Smoke: 200 chunks/7 eps, features (N,2,138), tokens (N,8) ✓.
+- **`scripts/train_awr.py`** — advantage-weighted SFT of the AR head ONLY (vision+tokenizer frozen; trains on stored features → no vision recompute). `weight=clip(exp((succ−baseline)/beta))`, `loss=weight·Σ_t w_t·CE + beta_kl·KL(π‖π_ref)` (frozen ref copy = anti-collapse). `--ordering {uniform,early,late}` = the per-token credit w_t = **prefix-probe (confirmatory #2)**. Saves via `workspace.save_checkpoint` (syncs ema_model). Smoke: loss 21.8→19.7, weights 0.33/1.0/2.43, kl~0.5 ✓.
+- **`scripts/verify_ckpt.py`** — fast NO-sim check (loads, AR-head L1 diff vs base, generate→detokenize). Smoke: diff 7388 "OK changed", tokens(4,8)→action(4,32,7) ✓.
+- **Eval:** existing `eval_policy_sim.py -c <awr.ckpt> --entropy_threshold 0 --use_k_tokens 8`.
+
+**Run plan:** collect (`--n_chunks 10000 --bon_n 8`, ~2h) → train_awr (`--beta 0.5 --beta_kl 0.05 --epochs 5`) → eval single-sample (n=3). **Read:** single-sample AWR >0.581 → distillation works; →0.690 → baked most of BoN at single-sample cost; ≈0.581 → washed-proxy insufficient (expected per CRAFT) → escalate to CRAFT-residual. **Ordering ablation** (early/uniform/late) = free confirmatory probe of "decision in early tokens".
+
+**⛔ RESUME (2026-06-16, after reboot) — AWR run, exact commands.** Pipeline 3 scripts all smoke-validated (collect 200ch ✓, train loss 21.8→19.7 ✓, verify diff 7388/load/generate ✓). `collect_awr_dataset.py` now PARALLELIZED (`--n_workers`, spawn). **Parallel path NOT yet smoke-tested.** Expected result: **single-sample AWR ≈ 0.60–0.63 (+0.02..+0.05 over baseline 0.581)** — modest; full 0.690 unlikely in one cheap iteration (single-sample can't replicate BoN's inference-time selection/variance-reduction; episode labels noisy). ≈0.581 plateau = CRAFT's washed-proxy point → pivot to clean counterfactual labels / ReST-iteration / CRAFT-residual (NOT more data — quantity isn't the ceiling).
+```
+cd oat
+# 0) parallel smoke (verify spawn path, ~min):
+MUJOCO_GL=egl uv run python scripts/collect_awr_dataset.py -c my_models/policy_ep-0250_sr-0.596.ckpt \
+  -o my_datasets/awr_psmoke.npz --n_chunks 100 --n_tasks 2 --bon_n 0 --n_workers 2
+# 1) full collect (BoN-distillation, ~1-1.5h; watch nvidia-smi, drop to 4 if OOM — BoN=8x gen):
+MUJOCO_GL=egl uv run python scripts/collect_awr_dataset.py -c my_models/policy_ep-0250_sr-0.596.ckpt \
+  -o my_datasets/awr_bon.npz --n_chunks 20000 --n_tasks 10 --bon_n 8 --n_workers 6
+# 2) train AWR (offline, GPU only, fast):
+uv run python scripts/train_awr.py -i my_datasets/awr_bon.npz -c my_models/policy_ep-0250_sr-0.596.ckpt \
+  -o my_models/policy_awr.ckpt --beta 0.5 --beta_kl 0.05 --epochs 5 --ordering uniform
+# 3) eval single-sample vs baseline 0.581 / BoN 0.690:
+MUJOCO_GL=egl uv run scripts/eval_policy_sim.py -c my_models/policy_awr.ckpt -o eval_out/awr -n 3 \
+  --entropy_threshold 0 --use_k_tokens 8
+# 4) (free probe) ordering ablation: rerun step 2 with --ordering early / late, eval each. early>=uniform>late => decision in early tokens.
+```
+
 #### ⛔⛔ SESSION RESUME (2026-06-09) — full state to continue in a new chat
 
 **ONE-LINE STATE:** per-obs adaptive K/R = oracle-NULL (washed by replan); plan-selection headroom is small on AVERAGE (+0.024) but CONCENTRATED at rare "edge" states (recoverability≈0.5: +0.15, replicated 3×) which are NOT detectable from simple features (look like doomed). **UPDATE 2026-06-10: deployed verifier-free BoN N=8 BEATS baseline +0.11 SR (0.581→0.690) — see BREAKTHROUGH block above. The per-chunk null stands; deployed selection COMPOUNDS over replans.** Paper now diagnosis + working positive (~7/10).
