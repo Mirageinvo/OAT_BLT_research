@@ -86,17 +86,22 @@ def collect_chunks(checkpoint, device, n_chunks, n_tasks, bon_n, temperature, to
 
     feats, toks, succ, ep_ids, steps, task_ids = [], [], [], [], [], []
     ep_id = 0
+    # spread the worker's budget evenly across its tasks (else the inner while exhausts the
+    # whole budget on tasks[0] -> single-task dataset). `target` is the cumulative cap per task.
+    per_task = (n_chunks + len(tasks) - 1) // max(1, len(tasks))
+    target = 0
     pbar = tqdm.tqdm(total=n_chunks, desc=f'chunks[s{seed}]', disable=not show_pbar)
     for task in tasks:
         if len(feats) >= n_chunks:
             break
+        target = min(n_chunks, target + per_task)
         env = LiberoEnv(task_name=task, seed=seed, **ekw)
         try:
             env.env.env.ignore_done = True
         except Exception:
             pass
         try:
-            while len(feats) < n_chunks:
+            while len(feats) < target:
                 obs, _ = env.reset()
                 obs_deque = deque([obs], maxlen=n_obs + 1)
                 ep_start = len(feats)
@@ -184,6 +189,11 @@ def main(checkpoint, output, device, n_chunks, n_tasks, bon_n, temperature, topk
     print(f"  episode success rate (chunk-weighted) = {succ.mean():.3f}  (AWR baseline)")
     ep_sr = [succ[ep_ids == e][0] for e in np.unique(ep_ids)]
     print(f"  per-episode SR = {np.mean(ep_sr):.3f}  over {len(ep_sr)} episodes")
+    tu = np.unique(task_ids)
+    print(f"  tasks covered = {len(tu)}")
+    for t in tu:
+        m = task_ids == t
+        print(f"    {int(m.sum()):6d} ch  SR={succ[m].mean():.3f}  {str(t)[:60]}")
 
 
 if __name__ == '__main__':
