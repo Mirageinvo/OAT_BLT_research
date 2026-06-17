@@ -607,6 +607,7 @@ MUJOCO_GL=egl uv run python scripts/branch_value_k.py -c my_models/policy_ep-025
 - **Verdict:** leading positive plan. ORDER: temp2 (running) → if plan-attributable headroom → **Branch-DPO with M-averaged labels + significance-gated pairs** (preferred over runtime-verifier and over SFT-distillation). This unifies #2 (distillation) + user's idea in the strongest form.
 
 #### ⭐ TURNING POINT (2026-06-08): selection headroom is CONCENTRATED at edge states (inverted-U), not dead
+> ⚠️ **SUPERSEDED 2026-06-17 — SINGLE-TASK ARTIFACT.** This edge-concentration was measured on `tasks[0]` only (collection bug); it did NOT replicate multi-task. Edge-lead CLOSED. See «🔴 CRITICAL (2026-06-17)» block below.
 
 **temp=2.0 isolate: realizable headroom stayed +0.024** (same as temp1; biased-oracle grew 0.098→0.137 = luck diversity, but held-out flat) → raising temperature does NOT grow the AVERAGE plan-headroom. Looked NEGATIVE for selection/Branch-DPO.
 
@@ -893,9 +894,36 @@ MUJOCO_GL=egl uv run scripts/eval_policy_sim.py -c my_models/policy_ep-0250_sr-0
 **Datasets:** `bon_t10.npz`(pass@k +0.18), `iso_gate.npz`(realizable +0.024 @temp1), `iso_t20.npz`(temp2), `iso_big.npz`(n=160).
 **Paper:** lead with "WHERE do decisions matter in closed-loop action-token policies?" (counterfactual study). C2=oracle-null (adaptive inference washed). C3=decision-value concentrated at rare fate-deciding states, value≠phase (latent, not contact). Method = demonstration (selection at edge / Branch-DPO / RL). Needs **multi-suite** generalization to be "phenomenon not our policy". Rating ~5-6 (diagnosis only) → ~7 with a working edge-SR-win + multi-suite. Ceiling ~8 (method not novel, sim-only, single policy).
 
+#### 🔴 CRITICAL (2026-06-17): single-task CONTAMINATION in branch harness → multi-task re-validation → EDGE-LEAD CLOSED, diagnosis SHARPENED
+
+**The bug.** `branch_value_k.py` AND `collect_awr_dataset.py` shared an identical collection bug: the inner `while len(rows) < n_branch` exhausted the WHOLE worker budget on `tasks[0]` before the `for task in tasks` loop ever advanced. So EVERY branch/oracle study (oracle value(k,R), BoN pass@N/isolate, edge-concentration, GATE A) was collected on a SINGLE task — `tasks[0]` of libero10 = `LIVING_ROOM_SCENE2_put_both_the_alphabet_soup_and_the_tomato_sauce_in_the_basket`. Confirmed via `Counter(d['task'])`: `awr_bon.npz` (20k chunks) = 1 task; old `iso_*.npz` = 1 task.
+- **Fix:** `branch_value_k.py` → **round-robin** over tasks (ONE full reference episode per task per rotation; `ti=env_seed` staggers each worker's start so the union covers all tasks even when a worker does <1 rotation). A per-row task quota was REJECTED: one episode yields many rows, so row-capping either overshoots onto tasks[0] or (mid-episode truncation) biases every state to the early/safe phase → wrecks the recoverability distribution. `collect_awr_dataset.py` → per-task chunk budget (`per_task=ceil(n/n_tasks)`, cumulative `target`) — works there because 1 chunk = 1 row and ~28 rows/episode < per_task. Both verified multi-task on smokes (3 tasks balanced).
+
+**SAFE — was always multi-task** (from `eval_policy_sim.py`→`libero_runner.py`, config `n_test=500` over 10 tasks; `-n`=num_exp repeats, NOT n_test): the load-bearing SR numbers — K-axis nulls (predictor trained on 124k multi-task demos; entropy; agnostic-mix; fixed-k dominates), R-axis nulls (fixed-R sweep; convergence<random), **BoN +0.11 deployed** (0.581→0.690→0.712), pow2/fixed-k, mode-decomposed BoN, d_task. NONE contaminated. **The decisive negative+positive backbone STANDS.**
+
+**CONTAMINATED — single-task `tasks[0]`** (all `branch_value_k` oracle/counterfactual studies): oracle value(k,R)≈0, BoN pass@N +0.18 → isolate realizable +0.024, **edge-concentration +0.15 @ recov≈0.5 (replicated 3× — all on tasks[0])**, GATE A disagreement AUC 0.316, value≠phase.
+
+**Multi-task re-validation (`iso_mt.npz`, n=120, 10 tasks balanced ~12 each, N=5, M=6, isolate):**
+| metric | single-task (tasks[0]) | **multi-task (10 tasks)** |
+|---|---|---|
+| edge bin criticality | **+0.15 ± 0.055** [0.4,0.6) n=19 | **−0.053 ± 0.142** [0.4,0.6) n=5 / +0.033 [0.35,0.65] n=10 |
+| inverted-U | clean peak @ p≈0.5 | **GONE** — flat: doomed +0.006 / edge +0.033 / safe +0.034 |
+| overall realizable headroom | +0.011..+0.024 | **+0.015 ± 0.015** (consistent, small, general) |
+| GATE A AUC(edge vs doomed) | 0.316 (anti) | **0.478 ≈ 0.5 (random)** |
+| GATE A edge−doomed disagr gap | −0.742 (−1.9σ) | **+0.080 (0.1σ)** |
+- **Edge-concentration does NOT generalize** — it was a `tasks[0]` artifact. GATE A's single-task anti-signal also did NOT replicate (now neutral, AUC~0.5). criticality is FLAT across recoverability multi-task.
+- **Caveat:** edge bin underpowered multi-task (n=5–10; 69/120 doomed) → "failed to confirm at low power", not "proven absent". But + GATE A AUC~0.5 + flat criticality → weight of evidence is AGAINST usable per-state structure. Powering the edge bin ≈ 5× overnight (~60h; ~4% of states land mid-recov) and can't be targeted (recoverability≠phase) → not worth it.
+
+**REVISED VERDICT — edge-focused method LEAD CLOSED; diagnosis SHARPENED (and now multi-task).**
+- DROP edge-targeting (Branch-DPO-on-edge, recoverability-head `V(s)`, value-gated CRAFT-residual) — unsupported multi-task.
+- Sharper/cleaner than the single-task story: **per-observation/per-state structure for adaptive computation is essentially ABSENT multi-task** — not in value(k,R), not in an edge band, not detectable from any cheap signal (disagreement AUC~0.5). The ONLY thing that works is **deployed selection (BoN)**, which compounds a small per-chunk headroom (realizable +0.015) over ~34 replans into +0.11 SR. This is the paper's spine and it is multi-task.
+- **Positive method leg = AWR / BoN-distillation** (`collect_awr_dataset.py`→`train_awr.py`): bakes deployed BoN into single-sample; needs NO per-state detection (distribution shift, compounds). The correct fine-tuning path; edge-targeting is not.
+
+**AWR collection + in-harness BoN gain (2026-06-17):** `collect_awr_dataset.py` base-probe (collect harness, single-task pre-fix): base 0.399 → BoN N=8 0.542 = **+0.143** (BoN works in-harness, even bigger than the runner's +0.11; absolute lower because that harness ran one hard task — now fixed to multi-task). Re-collect multi-task with the fix, THEN train AWR. Old single-task `awr_bon.npz`/`awr_base_probe.npz` → discard.
+
 ### TODO next
 
-**Status:** K-axis (token count) adaptivity — **NEGATIVE & CLOSED** (predictor/entropy/agnostic-mix ≈ fixed-k; fixed k=4 dominates). R-axis convergence signal — **NEGATIVE & CLOSED** (2026-06-05: convergence 0.553 < random 0.595 at matched mean R≈14; random ≈ fixed → no Jensen room; see "GATE 1 RESULT"). Reconstruction-based adaptivity (min-k, entropy, convergence) all dead → `reconstruction ≠ value`. Step 0 — done. **Current focus = PIVOT to Value-Guided OAT** (value not reconstruction); gate = counterfactual-sim oracle harness (oracle value(k|phase) headline + oracle-BoN + oracle-R add-on).
+**Status:** K-axis (token count) adaptivity — **NEGATIVE & CLOSED** (predictor/entropy/agnostic-mix ≈ fixed-k; fixed k=4 dominates). R-axis convergence signal — **NEGATIVE & CLOSED** (2026-06-05: convergence 0.553 < random 0.595 at matched mean R≈14; random ≈ fixed → no Jensen room; see "GATE 1 RESULT"). Reconstruction-based adaptivity (min-k, entropy, convergence) all dead → `reconstruction ≠ value`. Step 0 — done. **Current focus (2026-06-17) = AWR/BoN-distillation positive leg + multi-task diagnosis.** Edge-concentration lead CLOSED (single-task artifact, did NOT replicate multi-task — see «🔴 CRITICAL (2026-06-17)»). Per-state adaptive-compute structure absent multi-task; only deployed selection (BoN +0.11, multi-task) works → bake it into single-sample via AWR. Value-Guided/edge-targeting dropped.
 
 1. **GATE 1 — DONE, NEGATIVE (see "GATE 1 RESULT (2026-06-05)" above).** convergence-R < random < fixed at matched mean → convergence signal anti-informative & dead. R-adaptivity prior now LOW (not formally closed — oracle-R unbuilt, but reconstruction-signal pattern + random≈fixed make it unlikely). → pivot to Value-Guided OAT (#9).
 2. **(cheap) Add R=4 to the fixed-R sweep** — find the SR(R) peak / where reactivity saturates.
