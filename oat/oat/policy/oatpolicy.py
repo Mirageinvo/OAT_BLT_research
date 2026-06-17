@@ -602,6 +602,27 @@ class OATPolicy(BasePolicy):
                 torch.full_like(first, r_max),
             ).clamp(min=r_min, max=r_max).long()
             div_mean = d.mean(dim=1)
+        elif adaptive_r == 'pace':
+            # phase-aware (PACE, arXiv 2606.00537): replan at the first PROMINENT low-speed
+            # valley of the decoded plan's speed profile. speed_t = ||EE-delta||_t (commanded
+            # motion magnitude in normalizer space); a valley = the plan slowing = a phase
+            # transition (contact/grasp) = natural replan boundary. Reads the PLAN, not obs
+            # (dodges the obs-wall). r_threshold is reused as the valley PROMINENCE threshold.
+            from scipy.signal import find_peaks
+            norm = self.action_tokenizer.normalizer['action']
+            speed = norm.normalize(action_pred)[:, :r_max, :6].norm(dim=-1)   # [B, r_max]
+            sp = speed
+            if r_max >= 3:                                   # smooth (window 3, edge-replicate)
+                kernel = torch.ones(1, 1, 3, device=self.device) / 3.0
+                sp = F.conv1d(F.pad(speed[:, None, :], (1, 1), mode='replicate'), kernel)[:, 0, :]
+            sp_np = sp.detach().cpu().numpy()
+            r_list = []
+            for b in range(B):
+                valleys, _ = find_peaks(-sp_np[b], prominence=float(r_threshold))
+                r_list.append(int(valleys[0]) + 1 if len(valleys) else r_max)
+            r_exec = torch.tensor(r_list, device=self.device, dtype=torch.long
+                                  ).clamp(min=r_min, max=r_max)
+            div_mean = speed.mean(dim=1)
         else:
             raise ValueError(f"unknown adaptive_r mode: {adaptive_r}")
 
