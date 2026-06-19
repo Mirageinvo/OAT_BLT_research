@@ -3,3 +3,4 @@ oat/my_models/policy_ep-0500_sr-0.466.ckpt filter=lfs diff=lfs merge=lfs -text
 oat/my_models/tokenizer_ep-0820_mse-0.002.ckpt filter=lfs diff=lfs merge=lfs -text
 oat/my_models/token_count_predictor_4cls_w2.ckpt filter=lfs diff=lfs merge=lfs -text
 oat/my_models/token_count_predictor_4cls_w4.ckpt filter=lfs diff=lfs merge=lfs -text
+oat/my_datasets/awr_bon16.npz filter=lfs diff=lfs merge=lfs -text
