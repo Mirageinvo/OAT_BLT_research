@@ -32,7 +32,9 @@ from oat.policy.oatpolicy import OATPolicy
 @click.option('--n', default=3000, type=int, help='num feature rows to use')
 @click.option('--thresholds', default='0.03,0.05,0.08,0.1,0.12,0.15,0.2,0.3',
               help='comma-separated prominence thresholds to sweep')
-def main(checkpoint, inp, device, r_min, r_max, n, thresholds):
+@click.option('--raw', is_flag=True, default=False,
+              help="pace_raw variant: speed = ||raw EE-translation[:3]|| (no normalizer)")
+def main(checkpoint, inp, device, r_min, r_max, n, thresholds, raw):
     device = torch.device(device)
     pol = BasePolicy.from_checkpoint(checkpoint)
     pol.to(device).eval()
@@ -50,7 +52,8 @@ def main(checkpoint, inp, device, r_min, r_max, n, thresholds):
             tk = pol.model.generate(bos, cond=fb, max_new_tokens=K,
                                     temperature=pol.temperature, top_k=pol.topk)[:, 1:]
             a = pol.action_tokenizer.detokenize(tk, eval_keep_k=[K] * B)        # [B,H,D] raw
-            sp = norm.normalize(a)[:, :r_max, :6].norm(dim=-1)                  # [B,r_max] speed
+            sp = (a[:, :r_max, :3].norm(dim=-1) if raw                          # [B,r_max] speed
+                  else norm.normalize(a)[:, :r_max, :6].norm(dim=-1))
             speed_chunks.append(sp.cpu())
     speed = torch.cat(speed_chunks, 0)                                         # [N,r_max]
     kernel = torch.ones(1, 1, 3) / 3.0                                         # smooth (window 3)

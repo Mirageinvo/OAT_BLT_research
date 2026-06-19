@@ -602,15 +602,21 @@ class OATPolicy(BasePolicy):
                 torch.full_like(first, r_max),
             ).clamp(min=r_min, max=r_max).long()
             div_mean = d.mean(dim=1)
-        elif adaptive_r == 'pace':
+        elif adaptive_r in ('pace', 'pace_raw'):
             # phase-aware (PACE, arXiv 2606.00537): replan at the first PROMINENT low-speed
-            # valley of the decoded plan's speed profile. speed_t = ||EE-delta||_t (commanded
-            # motion magnitude in normalizer space); a valley = the plan slowing = a phase
+            # valley of the decoded plan's speed profile. A valley = the plan slowing = a phase
             # transition (contact/grasp) = natural replan boundary. Reads the PLAN, not obs
             # (dodges the obs-wall). r_threshold is reused as the valley PROMINENCE threshold.
+            #   'pace'     : speed = ||EE-delta||_{:6} in normalizer space (uniform per-dim scale,
+            #                the analog of PACE's joint-space speed).
+            #   'pace_raw' : speed = ||raw EE-translation||_{:3} (no normalizer) -- robustness
+            #                variant ruling out the normalizer-space speed choice as the reason.
             from scipy.signal import find_peaks
-            norm = self.action_tokenizer.normalizer['action']
-            speed = norm.normalize(action_pred)[:, :r_max, :6].norm(dim=-1)   # [B, r_max]
+            if adaptive_r == 'pace':
+                norm = self.action_tokenizer.normalizer['action']
+                speed = norm.normalize(action_pred)[:, :r_max, :6].norm(dim=-1)   # [B, r_max]
+            else:
+                speed = action_pred[:, :r_max, :3].norm(dim=-1)                   # raw translation
             sp = speed
             if r_max >= 3:                                   # smooth (window 3, edge-replicate)
                 kernel = torch.ones(1, 1, 3, device=self.device) / 3.0
