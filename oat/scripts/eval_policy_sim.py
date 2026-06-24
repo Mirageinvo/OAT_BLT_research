@@ -66,8 +66,12 @@ from typing import List, Optional
 @click.option('--bon_free', default=0, type=int,
               help="verifier-free best-of-N: sample N candidate plans per replan (vision "
                    "amortized), pick by a FREE signal (no trained verifier). 0=off.")
-@click.option('--bon_signal', default='vote', type=click.Choice(['vote', 'medoid']),
-              help="free ranking signal: 'vote'=mode-seeking KDE density, 'medoid'=min sum dist")
+@click.option('--bon_signal', default='vote', type=click.Choice(['vote', 'medoid', 'value']),
+              help="ranking signal: 'vote'=mode-seeking KDE density, 'medoid'=min sum dist, "
+                   "'value'=argmax ChunkQ critic (needs --chunk_q; Q-chunking QC analog)")
+@click.option('--chunk_q', default=None, type=str,
+              help="path to a ChunkQ critic .ckpt; attaches it so --bon_signal value ranks the "
+                   "best-of-N candidates by learned Q(features, chunk) instead of consensus")
 @click.option('--bon_prefix_k', default=0, type=int,
               help="coarse-to-fine BoN (idea #2): sample+select on the first bon_prefix_k "
                    "tokens (prefix-decoded to full chunk), then AR-refine the winner's tail "
@@ -96,6 +100,7 @@ def eval_policy_sim(
     r_threshold: float = 0.5,
     bon_free: int = 0,
     bon_signal: str = 'vote',
+    chunk_q: Optional[str] = None,
     bon_prefix_k: int = 0,
     bon_first_temp: float = 0.0,
 ):
@@ -137,6 +142,12 @@ def eval_policy_sim(
             predictor = TokenCountPredictor.from_checkpoint(token_predictor)
             policy.set_token_predictor(predictor)
             print(f"Attached token-count predictor from {token_predictor}")
+
+        # optionally attach a ChunkQ critic for value-guided best-of-N (--bon_signal value)
+        if chunk_q is not None:
+            from oat.model.chunk_q import ChunkQ
+            policy.set_chunk_q(ChunkQ.from_checkpoint(chunk_q))
+            print(f"Attached ChunkQ critic from {chunk_q} (value-guided BoN)")
 
         # optionally attach an obs-agnostic budget mixture (gate baseline)
         if agnostic_mix is not None:

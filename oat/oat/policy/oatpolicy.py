@@ -143,6 +143,17 @@ class OATPolicy(BasePolicy):
             for p in predictor.parameters():
                 p.requires_grad_(False)
 
+    def set_chunk_q(self, critic):
+        """Attach a frozen ChunkQ critic (Q-chunking QC analog). When set and
+        `bon_signal='value'`, verifier-free best-of-N ranks the N candidate chunks by
+        Q(features, chunk) and executes argmax_chunk Q instead of the consensus vote.
+        Pass None to disable."""
+        self.chunk_q = critic
+        if critic is not None:
+            critic.to(self.device).eval()
+            for p in critic.parameters():
+                p.requires_grad_(False)
+
     def set_agnostic_mix(self, k_probs):
         """Attach an obs-agnostic budget mixture (adaptivity-gate baseline). When set,
         `predict_action_adaptive` samples each sample's budget k ~ Categorical(k_probs),
@@ -250,13 +261,18 @@ class OATPolicy(BasePolicy):
         return result
 
     @torch.inference_mode()
-    def _bon_select(self, cand_b: torch.Tensor, R: int, bon_signal: str) -> int:
-        """Pick the best candidate index from [N, H, D] by a FREE consensus signal over the
-        executed prefix R (normalizer space). 'vote' = mode-seeking KDE density (pick the
-        candidate in the densest region — NOT centroid-averaging, which across multimodal
-        plans gives an invalid action); 'medoid' = min sum of distances to the others."""
+    def _bon_select(self, cand_b: torch.Tensor, R: int, bon_signal: str,
+                    features_b: Optional[torch.Tensor] = None) -> int:
+        """Pick the best candidate index from [N, H, D] by a ranking signal over the executed
+        prefix R (normalizer space). 'vote' = mode-seeking KDE density (pick the candidate in
+        the densest region — NOT centroid-averaging, which across multimodal plans gives an
+        invalid action); 'medoid' = min sum of distances to the others; 'value' = argmax of an
+        attached ChunkQ critic Q(features, chunk) (Q-chunking QC analog; needs features_b)."""
         norm = self.action_tokenizer.normalizer['action']
         a = norm.normalize(cand_b[:, :R])             # [N, R, D]
+        if bon_signal == 'value' and getattr(self, 'chunk_q', None) is not None:
+            feat = features_b.unsqueeze(0).expand(a.shape[0], -1, -1)   # [N, To, d]
+            return int(self.chunk_q.score(feat, a).argmax())
         flat = a.reshape(cand_b.shape[0], -1)         # [N, R*D]
         dist = torch.cdist(flat, flat)                # [N, N]
         if bon_signal == 'medoid':
@@ -329,7 +345,7 @@ class OATPolicy(BasePolicy):
 
         R = min(self.n_action_steps, H)               # rank over the executed prefix only
         best_idx = torch.tensor(
-            [self._bon_select(cand[b], R, bon_signal) for b in range(B)],
+            [self._bon_select(cand[b], R, bon_signal, features[b]) for b in range(B)],
             device=self.device, dtype=torch.long)
         ar = torch.arange(B, device=self.device)
         chosen_tokens = tokens[ar, best_idx]          # [B, gen_k]
