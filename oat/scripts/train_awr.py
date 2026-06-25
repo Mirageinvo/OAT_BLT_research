@@ -47,7 +47,13 @@ import tqdm
 @click.option('--batch_size', default=256, type=int)
 @click.option('--ordering', default='uniform', type=click.Choice(['uniform', 'early', 'late']),
               help='per-token credit w_t (prefix-probe): early=1/t weights the mode tokens')
-def main(inp, checkpoint, output, device, beta, beta_kl, w_max, epochs, lr, batch_size, ordering):
+@click.option('--critic', default=None, type=str,
+              help='path to a ChunkQ critic .ckpt; if set, the AWR baseline becomes the learned '
+                   'state-value V(s)=Q(s,executed_chunk) (real AWR, Peng 2019) instead of the '
+                   'constant mean SR -> lower-variance per-state advantage. chunk-Q is ~flat in '
+                   'the action (within-state std 0.014) so Q(s,a)~=V(s) is a valid baseline.')
+def main(inp, checkpoint, output, device, beta, beta_kl, w_max, epochs, lr, batch_size, ordering,
+         critic):
     device = torch.device(device)
 
     # --- load workspace + policy (so we can save_checkpoint back) ---
@@ -69,12 +75,32 @@ def main(inp, checkpoint, output, device, beta, beta_kl, w_max, epochs, lr, batc
     toks = torch.from_numpy(d['tokens']).long()            # [N, K]
     succ = torch.from_numpy(d['success']).float()          # [N]
     assert toks.shape[1] == K, f"token width {toks.shape[1]} != max_seq_len {K}"
-    baseline = succ.mean().item()
-    adv = succ - baseline
+
+    # AWR baseline: constant mean SR, OR a learned state-value V(s) from a ChunkQ critic
+    # (real AWR). V(s)=Q(s, executed_chunk); chunk-Q is ~flat in the action so this ~= V(s).
+    if critic is not None:
+        from oat.model.chunk_q import ChunkQ
+        cq = ChunkQ.from_checkpoint(critic).to(device).eval()
+        norm = policy.action_tokenizer.normalizer['action']
+        bsz, vlist = 512, []
+        with torch.inference_mode():
+            for i in range(0, len(toks), bsz):
+                tk = toks[i:i + bsz].to(device)
+                a = policy.action_tokenizer.detokenize(tk, eval_keep_k=[K] * tk.shape[0])
+                ch = norm.normalize(a[:, :cq.horizon])
+                vlist.append(cq.score(feats[i:i + bsz].to(device), ch).cpu())
+        baseline_vec = torch.cat(vlist)                    # [N] = V(s) per sample
+        adv = succ - baseline_vec
+        bl_desc = f"V(s) critic [{baseline_vec.min():.2f},{baseline_vec.max():.2f}] mean {baseline_vec.mean():.3f}"
+    else:
+        baseline_vec = succ.mean()
+        adv = succ - baseline_vec
+        bl_desc = f"const SR={float(baseline_vec):.3f}"
     weight = torch.exp(adv / beta).clamp(max=w_max)        # AWR weight
     weight = weight / weight.mean()                        # normalize -> mean 1 (stable LR)
-    print(f"N={len(feats)}  baseline(SR)={baseline:.3f}  weight[min/mean/max]="
-          f"{weight.min():.2f}/{weight.mean():.2f}/{weight.max():.2f}  ordering={ordering}")
+    print(f"N={len(feats)}  baseline={bl_desc}  adv[min/mean/max]={adv.min():.2f}/{adv.mean():.2f}/"
+          f"{adv.max():.2f}  weight[min/mean/max]={weight.min():.2f}/{weight.mean():.2f}/{weight.max():.2f}"
+          f"  ordering={ordering}")
 
     # per-token ordering credit w_t
     pos = torch.arange(1, K + 1, dtype=torch.float32)
