@@ -153,13 +153,17 @@ def env_kwargs_from_cfg(cfg):
             return er[name]
         except Exception:
             return default
-    return dict(
+    kwargs = dict(
         image_size=g('image_size', 128),
         camera_names=list(g('camera_names', ['agentview', 'robot0_eye_in_hand'])),
         state_ports=list(g('state_ports', ['robot0_joint_pos', 'robot0_eef_pos',
                                            'robot0_eef_quat', 'robot0_gripper_qpos'])),
         max_episode_steps=g('max_episode_steps', 550),
     )
+    dataset_path = g('dataset_path', None)
+    if dataset_path is not None:
+        kwargs['dataset_path'] = dataset_path
+    return kwargs
 
 
 def collect_rows(checkpoint, device, tasks, n_branch, M, R_small, R_large, k_coarse, free_frac,

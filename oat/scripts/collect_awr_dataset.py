@@ -1,13 +1,16 @@
 """
-Collect an AWR / ReST fine-tuning dataset by rolling out the policy in LIBERO and labeling
+Collect an AWR / ReST fine-tuning dataset by rolling out the policy in sim and labeling
 each executed chunk with its EPISODE success (cheap reward — no counterfactual sim).
+
+Supports LIBERO (multi-task) and RoboMimic (lift/can/square) — benchmark is inferred
+from the checkpoint's env_runner config.
 
 Per replan we log (features = obs_encoder(obs), executed action tokens); at episode end we
 broadcast the binary episode success to every chunk of that episode. AWR then does weighted
 SFT: weight = exp((success - baseline)/beta), so successful-episode chunks are up-weighted.
 
   --bon_n N   : roll out WITH verifier-free BoN selection (vote) and log the SELECTED tokens
-                -> distills the +0.11 BoN policy into the AR head (BoN-distillation).
+                -> distills BoN into the AR head (BoN-distillation).
                 default 0/1 = base policy (plain ReST on the base policy's own successes).
   --n_workers : parallel sequential-env workers (spawn, distinct seeds). Bottleneck is the
                 MuJoCo/EGL render; ~6 optimal, more over-subscribes the GPU.
@@ -15,10 +18,15 @@ SFT: weight = exp((success - baseline)/beta), so successful-episode chunks are u
 Features (not raw obs) are stored: obs_encoder is frozen, features are fixed, obs are huge.
 Output .npz: features [N,To,d], tokens [N,K], success [N], ep_id [N], step [N], task [N(obj)].
 
-Run (sim machine):
+Run (LIBERO):
   cd oat && MUJOCO_GL=egl uv run python scripts/collect_awr_dataset.py \
       -c my_models/policy_ep-0250_sr-0.596.ckpt -o my_datasets/awr_bon.npz \
       --n_chunks 20000 --bon_n 8 --n_tasks 10 --n_workers 6
+
+Run (RoboMimic lift — baseline ckpt, BoN-distill dataset for AWR):
+  cd oat && MUJOCO_GL=egl uv run python scripts/collect_awr_dataset.py \
+      -c output/.../ep-xxxx_sr-0.950.ckpt -o my_datasets/awr_lift_bon.npz \
+      --n_chunks 20000 --bon_n 8 --n_workers 6
 """
 import sys, os, pathlib
 ROOT_DIR = str(pathlib.Path(__file__).parent.parent)
@@ -36,9 +44,36 @@ import tqdm
 
 from oat.policy.base_policy import BasePolicy
 from oat.policy.oatpolicy import OATPolicy
-from oat.env.libero.env import LiberoEnv
-from oat.env.libero.factory import get_subtasks
 from scripts.branch_value_k import build_obs, decode_k, env_kwargs_from_cfg
+
+
+def benchmark_from_cfg(cfg) -> str:
+    target = str(cfg.task.policy.env_runner.get('_target_', ''))
+    if 'robomimic' in target.lower():
+        return 'robomimic'
+    return 'libero'
+
+
+def tasks_for_cfg(cfg, n_tasks: int):
+    suite = cfg.task.policy.env_runner.task_name
+    if benchmark_from_cfg(cfg) == 'robomimic':
+        from oat.env.robomimic.factory import get_subtasks
+    else:
+        from oat.env.libero.factory import get_subtasks
+    return get_subtasks(suite)[:n_tasks]
+
+
+def make_env(task, seed, ekw, benchmark):
+    if benchmark == 'robomimic':
+        from oat.env.robomimic.env import RoboMimicEnv
+        return RoboMimicEnv(task_name=task, seed=seed, enable_render=True, **ekw)
+    from oat.env.libero.env import LiberoEnv
+    env = LiberoEnv(task_name=task, seed=seed, **ekw)
+    try:
+        env.env.env.ignore_done = True
+    except Exception:
+        pass
+    return env
 
 
 @torch.inference_mode()
@@ -78,11 +113,8 @@ def collect_chunks(checkpoint, device, n_chunks, n_tasks, bon_n, temperature, to
     n_obs = policy.n_obs_steps
     n_act = policy.n_action_steps
     ekw = env_kwargs_from_cfg(cfg)
-    try:
-        suite = cfg.task.policy.env_runner.task_name
-    except Exception:
-        suite = 'libero10'
-    tasks = get_subtasks(suite)[:n_tasks]
+    benchmark = benchmark_from_cfg(cfg)
+    tasks = tasks_for_cfg(cfg, n_tasks)
 
     feats, toks, succ, ep_ids, steps, task_ids = [], [], [], [], [], []
     ep_id = 0
@@ -95,14 +127,13 @@ def collect_chunks(checkpoint, device, n_chunks, n_tasks, bon_n, temperature, to
         if len(feats) >= n_chunks:
             break
         target = min(n_chunks, target + per_task)
-        env = LiberoEnv(task_name=task, seed=seed, **ekw)
-        try:
-            env.env.env.ignore_done = True
-        except Exception:
-            pass
+        env = make_env(task, seed, ekw, benchmark)
         try:
             while len(feats) < target:
-                obs, _ = env.reset()
+                if benchmark == 'robomimic':
+                    obs, _ = env.reset(seed=seed + ep_id)
+                else:
+                    obs, _ = env.reset()
                 obs_deque = deque([obs], maxlen=n_obs + 1)
                 ep_start = len(feats)
                 ep_success = False
@@ -142,15 +173,22 @@ def _worker(payload):
 @click.option('-o', '--output', required=True)
 @click.option('-d', '--device', default='cuda:0')
 @click.option('--n_chunks', default=20000, type=int, help='target number of logged chunks (total)')
-@click.option('--n_tasks', default=10, type=int)
+@click.option('--n_tasks', default=None, type=int,
+              help='subtasks to cover (default: 10 for LIBERO, 1 for RoboMimic)')
 @click.option('--bon_n', default=0, type=int, help='0/1=base policy; >1=BoN-distillation (log selected)')
 @click.option('--temperature', default=None, type=float)
 @click.option('--topk', default=None, type=int)
 @click.option('--seed', default=0, type=int)
 @click.option('--n_workers', default=1, type=int, help='parallel spawn workers (~6 optimal on EGL)')
 def main(checkpoint, output, device, n_chunks, n_tasks, bon_n, temperature, topk, seed, n_workers):
+    _, cfg = BasePolicy.from_checkpoint(checkpoint, return_configuration=True)
+    benchmark = benchmark_from_cfg(cfg)
+    if n_tasks is None:
+        n_tasks = 1 if benchmark == 'robomimic' else 10
+
     mode = f"BoN-distill(N={bon_n})" if bon_n > 1 else "base ReST"
-    print(f"mode={mode} | n_chunks={n_chunks} | tasks={n_tasks} | workers={n_workers}")
+    print(f"benchmark={benchmark} | mode={mode} | n_chunks={n_chunks} | tasks={n_tasks} | "
+          f"workers={n_workers}")
 
     common = dict(checkpoint=checkpoint, device=device, n_tasks=n_tasks, bon_n=bon_n,
                   temperature=temperature, topk=topk)

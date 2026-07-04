@@ -8,6 +8,12 @@
 #   bash scripts/prepare_robomimic_lift.sh tok               # phase C: tokenizer
 #   export TOKENIZER_CKPT=output/.../ep-xxxx_mse-0.002.ckpt
 #   bash scripts/prepare_robomimic_lift.sh policy            # phase D: policy
+#   export POLICY_CKPT=output/.../ep-xxxx_sr-0.9xx.ckpt
+#   bash scripts/prepare_robomimic_lift.sh eval_base         # phase E: baseline SR
+#   bash scripts/prepare_robomimic_lift.sh eval_bon          # phase F: BoN vs baseline
+#   bash scripts/prepare_robomimic_lift.sh awr_collect       # phase G: BoN-distill dataset
+#   bash scripts/prepare_robomimic_lift.sh awr_train         # phase H: AWR fine-tune
+#   bash scripts/prepare_robomimic_lift.sh eval_awr          # phase I: AWR single-sample SR
 #   bash scripts/prepare_robomimic_lift.sh all               # download+convert+tok
 #
 # Cluster (SLURM): slurm/robomimic/{convert_lift,train_tok_lift,train_policy_lift}.slurm
@@ -91,14 +97,62 @@ policy() {
     logging.mode=disabled
 }
 
+eval_base() {
+  POLICY_CKPT="${POLICY_CKPT:?Set POLICY_CKPT to baseline policy .ckpt}"
+  MUJOCO_GL=egl bash scripts/eval_robomimic_policy.sh "${POLICY_CKPT}" lift
+}
+
+eval_bon() {
+  POLICY_CKPT="${POLICY_CKPT:?Set POLICY_CKPT to baseline policy .ckpt}"
+  BON_N="${BON_N:-8}"
+  MUJOCO_GL=egl bash scripts/eval_robomimic_bon.sh "${POLICY_CKPT}" lift
+}
+
+awr_collect() {
+  POLICY_CKPT="${POLICY_CKPT:?Set POLICY_CKPT to baseline policy .ckpt}"
+  AWR_DATASET="${AWR_DATASET:-my_datasets/awr_lift_bon.npz}"
+  AWR_N_CHUNKS="${AWR_N_CHUNKS:-20000}"
+  AWR_N_WORKERS="${AWR_N_WORKERS:-6}"
+  echo "Collecting BoN-distill AWR dataset -> ${AWR_DATASET}"
+  MUJOCO_GL=egl uv run python scripts/collect_awr_dataset.py \
+    -c "${POLICY_CKPT}" \
+    -o "${AWR_DATASET}" \
+    --n_chunks "${AWR_N_CHUNKS}" \
+    --bon_n "${BON_N:-8}" \
+    --n_workers "${AWR_N_WORKERS}"
+  uv run python scripts/validate_awr.py -i "${AWR_DATASET}"
+}
+
+awr_train() {
+  POLICY_CKPT="${POLICY_CKPT:?Set POLICY_CKPT to baseline policy .ckpt}"
+  AWR_DATASET="${AWR_DATASET:-my_datasets/awr_lift_bon.npz}"
+  AWR_CKPT="${AWR_CKPT:-my_models/policy_awr_lift.ckpt}"
+  AWR_EPOCHS="${AWR_EPOCHS:-100}"
+  uv run python scripts/train_awr.py \
+    -i "${AWR_DATASET}" \
+    -c "${POLICY_CKPT}" \
+    -o "${AWR_CKPT}" \
+    --beta 0.5 --beta_kl 0.05 --epochs "${AWR_EPOCHS}" --ordering uniform
+}
+
+eval_awr() {
+  AWR_CKPT="${AWR_CKPT:-my_models/policy_awr_lift.ckpt}"
+  MUJOCO_GL=egl bash scripts/eval_robomimic_awr.sh "${AWR_CKPT}" lift
+}
+
 case "${ACTION}" in
   download) download ;;
   convert)  convert ;;
   tok|train) tok ;;   # train = legacy alias
   policy)   policy ;;
+  eval_base) eval_base ;;
+  eval_bon)  eval_bon ;;
+  awr_collect) awr_collect ;;
+  awr_train)   awr_train ;;
+  eval_awr)    eval_awr ;;
   all)      download; convert; tok ;;
   *)
-    echo "Usage: $0 {download|convert|tok|policy|all}"
+    echo "Usage: $0 {download|convert|tok|policy|eval_base|eval_bon|awr_collect|awr_train|eval_awr|all}"
     exit 1
     ;;
 esac
