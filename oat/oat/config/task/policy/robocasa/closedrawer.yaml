@@ -1,0 +1,55 @@
+# OAT policy task config — single RoboCasa atomic task.
+# Mirror of oat/config/task/policy/libero/libero10.yaml.
+# RoboCasa shares robosuite proprio keys (robot0_eef_pos/quat/gripper_qpos) with LIBERO, so the
+# state ports + shape_meta are almost identical. RoboCasa-specific bits: camera mapping, the
+# RoboCasaRunner target, and the 7D action (base DoF dropped in the converter).
+name: closedrawer
+
+task_name: CloseDrawer
+lazy_eval: true
+
+shape_meta: &shape_meta
+  obs:
+    agentview_rgb:          {shape: [128, 128, 3], type: rgb}   # RoboCasaEnv must expose the
+    robot0_eye_in_hand_rgb: {shape: [128, 128, 3], type: rgb}   # two cameras under THESE keys
+    robot0_eef_pos:         {shape: [3], type: state}
+    robot0_eef_quat:        {shape: [4], type: state}
+    robot0_gripper_qpos:    {shape: [2], type: state}
+    task_uid:               {shape: [1], type: state}
+  action:
+    shape: [7]
+
+env_runner:
+  _target_: oat.env_runner.robocasa_runner.RoboCasaRunner   # TODO build (Phase 2D, mirror LiberoRunner)
+  task_name: CloseDrawer
+  n_test: 500
+  n_test_vis: 20
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  fps: 20
+  n_parallel_envs: 20
+  image_size: 128
+  camera_names:                 # RoboCasa PHYSICAL cameras; RoboCasaEnv._extract_obs renders
+    - robot0_agentview_left     #   these and exposes them as 'agentview_rgb'
+    - robot0_eye_in_hand        #   and 'robot0_eye_in_hand_rgb' (VERIFY exact camera names)
+  state_ports:
+    - robot0_eef_pos
+    - robot0_eef_quat
+    - robot0_gripper_qpos
+  max_episode_steps: 500        # RoboCasa atomic ~500; verify per task
+
+dataset:
+  _target_: oat.dataset.zarr_dataset.ZarrDataset
+  zarr_path: data/robocasa/CloseDrawer_N${training.num_demo}.zarr
+  obs_keys:
+    - agentview_rgb
+    - robot0_eye_in_hand_rgb
+    - robot0_eef_pos
+    - robot0_eef_quat
+    - robot0_gripper_qpos
+    - task_uid
+  action_key: action
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${horizon}
+  seed: ${seed}
+  val_ratio: 0.1

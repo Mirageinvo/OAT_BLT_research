@@ -1,0 +1,23 @@
+# OAT tokenizer task config — single RoboCasa atomic task.
+# Mirror of oat/config/task/tokenizer/libero/libero10.yaml.
+# The tokenizer is ACTION-ONLY (no vision) -> the only RoboCasa-specific bits are the zarr path
+# and that action is 7D. Copy this file per task and change `name`/`task_name`/zarr path.
+name: closedrawer
+
+task_name: CloseDrawer            # RoboCasa atomic task (CamelCase). CHANGE per task.
+
+shape_meta: &shape_meta
+  action:
+    shape: [7]                    # MUST be 7 (arm OSC_POSE 6 + gripper 1; base/torso DoF dropped
+                                  # in the converter). If your RoboCasa action > 7 -> fix the
+                                  # converter (Phase 0 / decision Р3), NOT this file.
+
+dataset:
+  _target_: oat.dataset.zarr_dataset.ZarrDataset
+  zarr_path: data/robocasa/CloseDrawer_N${training.num_demo}.zarr   # output of the converter
+  obs_keys: []                    # tokenizer ignores observations
+  action_key: action
+  n_obs_steps: 0
+  n_action_steps: ${horizon}
+  seed: ${seed}
+  val_ratio: 0.1
