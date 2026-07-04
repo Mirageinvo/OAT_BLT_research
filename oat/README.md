@@ -112,6 +112,42 @@ uv run scripts/eval_policy_sim.py \
 
 The script instantiates the same LIBERO runner and dataset from `oat.config.task.policy.libero.libero10` and dumps per-checkpoint statistics plus optional videos to `output/eval/libero10`.
 
+## RoboMimic (Lift / Can / Square)
+
+Paper protocol: **200 multi-human (mh) image demos**, `lazy_eval=false` during policy training (checkpoint by sim SR), eval with **OAT8** (`--use_k_tokens 8`, `--entropy_threshold 0`).
+
+### 1) Data
+
+```bash
+cd oat
+bash scripts/download_robomimic_datasets.sh lift    # mh image HDF5 -> data/robomimic/hdf5_datasets/
+bash scripts/prepare_robomimic_lift.sh convert        # -> data/robomimic/lift_N200.zarr
+```
+
+### 2) Train tokenizer (phase C)
+
+```bash
+bash scripts/prepare_robomimic_lift.sh tok
+# pick best ep-*_mse-*.ckpt (target test_reconst_mse ~ 0.002)
+```
+
+### 3) Train policy (phase D)
+
+```bash
+export TOKENIZER_CKPT=output/.../ep-xxxx_mse-0.002.ckpt
+bash scripts/prepare_robomimic_lift.sh policy
+```
+
+### 4) Eval (phase E)
+
+```bash
+MUJOCO_GL=egl bash scripts/eval_robomimic_policy.sh output/.../ep-xxxx_sr-0.9xx.ckpt lift
+```
+
+**SLURM:** `slurm/robomimic/convert_lift.slurm`, `train_tok_lift.slurm`, `train_policy_lift.slurm`.
+
+Configs: `oat/config/task/{tokenizer,policy}/robomimic/{lift,can,square}.yaml`. Env uses `robomimic` dataset metadata (`lift_mh_image.hdf5`).
+
 ## Further reading
 
 Also checkout [sim_env](https://github.com/Chaoqi-LIU/sim_env), which provides a set of simulation benchmarks. 
