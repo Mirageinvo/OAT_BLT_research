@@ -25,6 +25,7 @@ cd "${OAT_DIR}"
 NUM_DEMO="${NUM_DEMO:-200}"
 NUM_MACHINES="${NUM_MACHINES:-1}"
 NUM_PROCESSES="${NUM_PROCESSES:-1}"
+ROLLOUT_EVERY="${ROLLOUT_EVERY:-100}"
 TOKENIZER_CKPT="${TOKENIZER_CKPT:?Set TOKENIZER_CKPT to stage-1 tokenizer .ckpt}"
 
 HYDRA_FULL_ERROR=1 MUJOCO_GL=egl uv run accelerate launch \
@@ -37,5 +38,7 @@ HYDRA_FULL_ERROR=1 MUJOCO_GL=egl uv run accelerate launch \
   task.policy.lazy_eval=false \
   policy.action_tokenizer.checkpoint="${TOKENIZER_CKPT}" \
   training.num_demo="${NUM_DEMO}" \
+  training.rollout_every="${ROLLOUT_EVERY}" \
   checkpoint.topk.k=3 \
+  checkpoint.topk.monitor_key=mean_success_rate \
   logging.mode=disabled

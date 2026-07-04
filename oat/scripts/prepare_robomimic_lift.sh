@@ -82,19 +82,35 @@ tok() {
 
 policy() {
   TOKENIZER_CKPT="${TOKENIZER_CKPT:?Set TOKENIZER_CKPT to stage-1 tokenizer .ckpt}"
+  ROLLOUT_EVERY="${ROLLOUT_EVERY:-100}"
+  POLICY_LOG="${POLICY_LOG:-logs/train_policy_lift.log}"
+  mkdir -p logs "$(dirname "${POLICY_LOG}")"
+  : > "${POLICY_LOG}"
   echo "Training policy with tokenizer: ${TOKENIZER_CKPT}"
-  HYDRA_FULL_ERROR=1 MUJOCO_GL=egl uv run accelerate launch \
-    --num_machines "${NUM_MACHINES}" \
-    --multi_gpu \
-    --num_processes "${NUM_PROCESSES}" \
-    scripts/run_workspace.py \
-    --config-name=train_oatpolicy \
-    task/policy=robomimic/lift \
-    task.policy.lazy_eval=false \
-    policy.action_tokenizer.checkpoint="${TOKENIZER_CKPT}" \
-    training.num_demo="${NUM_DEMO}" \
-    checkpoint.topk.k=3 \
-    logging.mode=disabled
+  echo "  sim-eval (SR) every ${ROLLOUT_EVERY} epochs | top-3 ckpt by mean_success_rate"
+  echo "  full log -> ${POLICY_LOG} (+ hydra run dir under output/)"
+  # shellcheck disable=SC2068
+  run_policy() {
+    HYDRA_FULL_ERROR=1 MUJOCO_GL=egl uv run accelerate launch \
+      --num_machines "${NUM_MACHINES}" \
+      --multi_gpu \
+      --num_processes "${NUM_PROCESSES}" \
+      scripts/run_workspace.py \
+      --config-name=train_oatpolicy \
+      task/policy=robomimic/lift \
+      task.policy.lazy_eval=false \
+      policy.action_tokenizer.checkpoint="${TOKENIZER_CKPT}" \
+      training.num_demo="${NUM_DEMO}" \
+      training.rollout_every="${ROLLOUT_EVERY}" \
+      checkpoint.topk.k=3 \
+      checkpoint.topk.monitor_key=mean_success_rate \
+      logging.mode=disabled
+  }
+  if [[ -t 1 ]]; then
+    run_policy 2>&1 | tee -a "${POLICY_LOG}"
+  else
+    run_policy >> "${POLICY_LOG}" 2>&1
+  fi
 }
 
 eval_base() {
