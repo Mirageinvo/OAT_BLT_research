@@ -32,7 +32,8 @@ env_runner:
   n_obs_steps: ${n_obs_steps}
   n_action_steps: ${n_action_steps}
   fps: 20
-  n_parallel_envs: 10
+  # Sim rollouts at eval time only (n_test=50 total). Keep low on single-GPU docker.
+  n_parallel_envs: 2
   image_size: 84
   camera_names:
     - agentview
@@ -42,6 +43,9 @@ env_runner:
     - robot0_eef_quat
     - robot0_gripper_qpos
   max_episode_steps: 400
+  # Paper OAT8 (Table VI): train-time sim eval must match eval_robomimic_policy.sh
+  policy_use_k_tokens: 8
+  policy_entropy_threshold: 0.0
 
 dataset:
   _target_: oat.dataset.zarr_dataset.ZarrDataset

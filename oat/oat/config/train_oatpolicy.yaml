@@ -53,6 +53,7 @@ training:
   val_every: 10
   sample_every: 10
   rollout_every: 200
+  rollout_start_epoch: 0  # skip rollout before this epoch (e.g. 200 → first eval @ ep 200)
   checkpoint_every: 10
   lr_scheduler: constant
   lr_warmup_steps: 100

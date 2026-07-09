@@ -20,7 +20,7 @@ dependencies = [
     "torch>=2.10.0",
     "torchvision>=0.25.0",
     "vector-quantize-pytorch>=1.27.19",
-    "robomimic==0.2.0",
+    "robomimic==0.3.0",
     "robosuite==1.4.0",
     "easydict>=1.13",
     "bddl>=3.6.0",
@@ -29,6 +29,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "gym>=0.26.2",
     "pandas>=2.3.3",
+    "metaworld",
 ]
 
 [project.urls]
@@ -36,6 +37,7 @@ Repository = "https://github.com/Chaoqi-LIU/oat"
 
 [tool.uv.sources]
 libero = { workspace = true, editable = true }
+metaworld = { git = "https://github.com/rlworkgroup/metaworld.git", branch = "master" }
 
 [tool.uv.workspace]
 members = [

@@ -5,6 +5,9 @@ import gymnasium
 import numpy as np
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.file_utils as FileUtils
+import robomimic.utils.obs_utils as ObsUtils
+
+from oat.env.robomimic.env_args_compat import sanitize_env_meta
 
 
 TASK_NAME_TO_ROBOSUITE_ENV = {
@@ -65,25 +68,50 @@ def resolve_dataset_path(task_name: str, dataset_path: Optional[str] = None) -> 
     return str(chosen)
 
 
+# robosuite 1.5+ metadata fields not accepted by our 1.4 stack (can/square image HDF5).
+def _reference_env_meta_for_task(task_key: str) -> dict | None:
+    """Lift mh image HDF5 has camera kwargs compatible with our 1.4 stack."""
+    if task_key == "lift":
+        return None
+    lift_h5 = DEFAULT_HDF5_ROOT / "lift_mh_image.hdf5"
+    if not lift_h5.is_file():
+        return None
+    return FileUtils.get_env_metadata_from_dataset(str(lift_h5))
+
+
+def _init_robomimic_obs_utils(env_kwargs: dict) -> None:
+    """robomimic EnvRobosuite.get_observation requires ObsUtils modality map."""
+    camera_names = env_kwargs.get("camera_names", [])
+    rgb_keys = [
+        cam if str(cam).endswith("_image") else f"{cam}_image"
+        for cam in camera_names
+    ]
+    ObsUtils.initialize_obs_modality_mapping_from_dict({
+        "rgb": rgb_keys,
+        "low_dim": ["object-state"],
+    })
+
+
 def _create_robomimic_env(
     dataset_path: str,
     enable_render: bool,
     seed: int,
+    task_key: str = "lift",
 ):
-    env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path)
+    raw_meta = FileUtils.get_env_metadata_from_dataset(dataset_path)
+    ref_meta = _reference_env_meta_for_task(task_key)
+    env_meta = sanitize_env_meta(raw_meta, reference_env_meta=ref_meta)
     env_kwargs = dict(env_meta.get("env_kwargs", {}))
-    # Match dataset collection: raw RGB in HDF5 (no ObsUtils resize/crop).
-    env_kwargs["postprocess_visual_obs"] = False
-    env_meta = dict(env_meta)
-    env_meta["env_kwargs"] = env_kwargs
+    _init_robomimic_obs_utils(env_kwargs)
 
     env = EnvUtils.create_env_from_metadata(
         env_meta=env_meta,
         render=False,
-        render_offscreen=enable_render,
-        # Policy always needs RGB obs, even for non-visualized worker envs.
+        render_offscreen=True,
         use_image_obs=True,
     )
+    # Paper: raw RGB as in HDF5 (robomimic create_env defaults to postprocess=True).
+    env.postprocess_visual_obs = False
     if hasattr(env, "env") and hasattr(env.env, "seed"):
         env.env.seed(seed)
     return env
@@ -131,6 +159,7 @@ class RoboMimicEnv(gymnasium.Env):
             dataset_path=self.dataset_path,
             enable_render=enable_render,
             seed=seed,
+            task_key=task_key,
         )
         self.done = False
         self.cur_step = 0
@@ -224,4 +253,5 @@ class RoboMimicEnv(gymnasium.Env):
         return self._extract_obs(obs)
 
     def close(self):
-        self.env.close()
+        if hasattr(self.env, "close"):
+            self.env.close()

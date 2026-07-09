@@ -148,11 +148,22 @@ def estimate_success(env, ctrl, snap, snap_step, branch_deque, chunk, R, M,
 
 def env_kwargs_from_cfg(cfg):
     er = cfg.task.policy.env_runner
+    target = str(er.get('_target_', ''))
+
     def g(name, default):
         try:
             return er[name]
         except Exception:
             return default
+
+    if 'metaworld' in target.lower():
+        return dict(
+            image_size=g('image_size', 128),
+            camera_names=list(g('camera_names', ['corner', 'corner2', 'corner3', 'behindGripper'])),
+            max_episode_steps=g('max_episode_steps', 200),
+            device=g('device', 'cuda:0'),
+        )
+
     kwargs = dict(
         image_size=g('image_size', 128),
         camera_names=list(g('camera_names', ['agentview', 'robot0_eye_in_hand'])),

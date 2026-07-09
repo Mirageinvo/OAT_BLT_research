@@ -42,6 +42,8 @@ env_runner:
     - robot0_eef_quat
     - robot0_gripper_qpos
   max_episode_steps: 400
+  policy_use_k_tokens: 8
+  policy_entropy_threshold: 0.0
 
 dataset:
   _target_: oat.dataset.zarr_dataset.ZarrDataset

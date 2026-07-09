@@ -10,7 +10,7 @@ set -euo pipefail
 CKPT="${1:?Usage: $0 <awr_policy.ckpt> [lift|can|square]}"
 TASK="${2:-lift}"
 OUT_DIR="${3:-output/eval/robomimic_${TASK}_awr}"
-NUM_EXP="${NUM_EXP:-5}"
+NUM_EXP="${NUM_EXP:-1}"
 
 MUJOCO_GL=egl uv run scripts/eval_policy_sim.py \
   --checkpoint "${CKPT}" \

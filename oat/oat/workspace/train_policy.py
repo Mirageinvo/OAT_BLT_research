@@ -68,6 +68,13 @@ class TrainPolicyWorkspace(BaseWorkspace):
         cfg = copy.deepcopy(self.cfg)
 
         # configure accelerator
+        # V100: no bf16 → fp16 tensor cores; A100+ uses bf16 when available.
+        if cfg.training.allow_bf16 and detect_bf16_support():
+            _mp = "bf16"
+        elif getattr(cfg.training, "allow_fp16", True) and torch.cuda.is_available():
+            _mp = "fp16"
+        else:
+            _mp = "no"
         accelerator = Accelerator(
             log_with="wandb",
             kwargs_handlers=[
@@ -75,7 +82,7 @@ class TrainPolicyWorkspace(BaseWorkspace):
                 InitProcessGroupKwargs(timeout=timedelta(hours=2)), # sim eval can take long time
             ],
             gradient_accumulation_steps=cfg.training.gradient_accumulate_every,
-            mixed_precision="bf16" if cfg.training.allow_bf16 and detect_bf16_support() else "no",
+            mixed_precision=_mp,
         )
         device = accelerator.device
 
@@ -110,13 +117,9 @@ class TrainPolicyWorkspace(BaseWorkspace):
                 **cfg.checkpoint.topk
             )
 
-        # configure env
-        lazy_eval = cfg.task.policy.lazy_eval  # don't eval during training
-        if (not lazy_eval) and accelerator.is_main_process:
-            env_runner: BaseRunner = hydra.utils.instantiate(
-                cfg.task.policy.env_runner,
-                output_dir=self.output_dir
-            )
+        # configure env (lazy: sim init deferred to rollout epochs — mujoco EGL + cuDNN conflict)
+        lazy_eval = cfg.task.policy.lazy_eval
+        env_runner: BaseRunner | None = None
 
         # resume training
         if cfg.training.resume:
@@ -268,9 +271,21 @@ class TrainPolicyWorkspace(BaseWorkspace):
                 # run policy rollout
                 if not lazy_eval:
                     accelerator.wait_for_everyone()
-                    if accelerator.is_main_process and (self.epoch % cfg.training.rollout_every) == 0:
+                    rollout_start = cfg.training.get("rollout_start_epoch", 0)
+                    if (
+                        accelerator.is_main_process
+                        and self.epoch >= rollout_start
+                        and (self.epoch % cfg.training.rollout_every) == 0
+                    ):
+                        if env_runner is None:
+                            env_runner = hydra.utils.instantiate(
+                                cfg.task.policy.env_runner,
+                                output_dir=self.output_dir,
+                            )
                         runner_log = env_runner.run(policy)
                         step_log.update(runner_log)
+                        env_runner.close()
+                        env_runner = None
                     accelerator.wait_for_everyone()
 
                 # run validation
@@ -395,7 +410,7 @@ class TrainPolicyWorkspace(BaseWorkspace):
         # clean up
         if not lazy_eval:
             accelerator.wait_for_everyone()
-            if accelerator.is_main_process and (not lazy_eval):
+            if accelerator.is_main_process and env_runner is not None:
                 env_runner.close()
             accelerator.wait_for_everyone()
         accelerator.end_training()

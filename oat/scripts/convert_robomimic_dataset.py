@@ -41,6 +41,18 @@ from oat.env.robomimic.dataset_conversion import (
     default=DEFAULT_REQUIRED_OBS_KEYS,
     help="Required obs keys in each demo['obs']. Repeat this option to override defaults.",
 )
+@click.option(
+    "--hdf5",
+    "hdf5_filter",
+    type=str,
+    default=None,
+    help="Convert only this HDF5 (path or basename under hdf5_dir).",
+)
+@click.option(
+    "--skip-existing/--overwrite",
+    default=False,
+    help="Skip existing zarr (non-interactive). Default: prompt on conflict.",
+)
 def convert_all_robomimic_datasets(
     root_dir: str,
     hdf5_dir_name: str,
@@ -50,9 +62,19 @@ def convert_all_robomimic_datasets(
     chunk_size: int,
     verify_sample_size: int,
     required_obs_key: tuple[str, ...],
+    hdf5_filter: str | None,
+    skip_existing: bool,
 ):
     hdf5_root = pathlib.Path(root_dir) / hdf5_dir_name
-    hdf5_paths = sorted(hdf5_root.glob("*.hdf5"))
+    if hdf5_filter is not None:
+        p = pathlib.Path(hdf5_filter)
+        if not p.is_absolute():
+            p = hdf5_root / hdf5_filter
+        if not p.exists():
+            raise FileNotFoundError(p)
+        hdf5_paths = [p]
+    else:
+        hdf5_paths = sorted(hdf5_root.glob("*.hdf5"))
     if not hdf5_paths:
         raise FileNotFoundError(f"No .hdf5 files found in {hdf5_root}")
 
@@ -82,6 +104,9 @@ def convert_all_robomimic_datasets(
         save_path = pathlib.Path(root_dir) / f"{task_name}_N{expected_n_demo}.zarr"
 
         if save_path.exists():
+            if skip_existing:
+                print(f"Skip existing export: {save_path}")
+                continue
             keypress = wait_user_input(
                 valid_input=lambda key: key in ["", "y", "n"],
                 prompt=f"{save_path} already exists. Overwrite? [y/`n`]: ",

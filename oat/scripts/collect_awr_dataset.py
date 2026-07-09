@@ -2,8 +2,8 @@
 Collect an AWR / ReST fine-tuning dataset by rolling out the policy in sim and labeling
 each executed chunk with its EPISODE success (cheap reward — no counterfactual sim).
 
-Supports LIBERO (multi-task) and RoboMimic (lift/can/square) — benchmark is inferred
-from the checkpoint's env_runner config.
+Supports LIBERO, RoboMimic (lift/can/square), and MetaWorld (mt4/mt10) — benchmark is
+inferred from the checkpoint's env_runner config.
 
 Per replan we log (features = obs_encoder(obs), executed action tokens); at episode end we
 broadcast the binary episode success to every chunk of that episode. AWR then does weighted
@@ -51,13 +51,18 @@ def benchmark_from_cfg(cfg) -> str:
     target = str(cfg.task.policy.env_runner.get('_target_', ''))
     if 'robomimic' in target.lower():
         return 'robomimic'
+    if 'metaworld' in target.lower():
+        return 'metaworld'
     return 'libero'
 
 
 def tasks_for_cfg(cfg, n_tasks: int):
     suite = cfg.task.policy.env_runner.task_name
-    if benchmark_from_cfg(cfg) == 'robomimic':
+    bench = benchmark_from_cfg(cfg)
+    if bench == 'robomimic':
         from oat.env.robomimic.factory import get_subtasks
+    elif bench == 'metaworld':
+        from oat.env.metaworld.factory import get_subtasks
     else:
         from oat.env.libero.factory import get_subtasks
     return get_subtasks(suite)[:n_tasks]
@@ -67,6 +72,9 @@ def make_env(task, seed, ekw, benchmark):
     if benchmark == 'robomimic':
         from oat.env.robomimic.env import RoboMimicEnv
         return RoboMimicEnv(task_name=task, seed=seed, enable_render=True, **ekw)
+    if benchmark == 'metaworld':
+        from oat.env.metaworld.env import MetaworldEnv
+        return MetaworldEnv(task_name=task, seed=seed, enable_render=True, **ekw)
     from oat.env.libero.env import LiberoEnv
     env = LiberoEnv(task_name=task, seed=seed, **ekw)
     try:
@@ -130,7 +138,7 @@ def collect_chunks(checkpoint, device, n_chunks, n_tasks, bon_n, temperature, to
         env = make_env(task, seed, ekw, benchmark)
         try:
             while len(feats) < target:
-                if benchmark == 'robomimic':
+                if benchmark in ('robomimic', 'metaworld'):
                     obs, _ = env.reset(seed=seed + ep_id)
                 else:
                     obs, _ = env.reset()
@@ -174,7 +182,7 @@ def _worker(payload):
 @click.option('-d', '--device', default='cuda:0')
 @click.option('--n_chunks', default=20000, type=int, help='target number of logged chunks (total)')
 @click.option('--n_tasks', default=None, type=int,
-              help='subtasks to cover (default: 10 for LIBERO, 1 for RoboMimic)')
+              help='subtasks to cover (default: 10 LIBERO, 4 MetaWorld mt4, 1 RoboMimic)')
 @click.option('--bon_n', default=0, type=int, help='0/1=base policy; >1=BoN-distillation (log selected)')
 @click.option('--temperature', default=None, type=float)
 @click.option('--topk', default=None, type=int)
@@ -184,7 +192,12 @@ def main(checkpoint, output, device, n_chunks, n_tasks, bon_n, temperature, topk
     _, cfg = BasePolicy.from_checkpoint(checkpoint, return_configuration=True)
     benchmark = benchmark_from_cfg(cfg)
     if n_tasks is None:
-        n_tasks = 1 if benchmark == 'robomimic' else 10
+        if benchmark == 'robomimic':
+            n_tasks = 1
+        elif benchmark == 'metaworld':
+            n_tasks = len(tasks_for_cfg(cfg, 99))
+        else:
+            n_tasks = 10
 
     mode = f"BoN-distill(N={bon_n})" if bon_n > 1 else "base ReST"
     print(f"benchmark={benchmark} | mode={mode} | n_chunks={n_chunks} | tasks={n_tasks} | "

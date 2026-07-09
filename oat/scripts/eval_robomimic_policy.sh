@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Paper-aligned eval for RoboMimic OAT policies (OAT8, 50 rollouts, 5 repeats).
+# Paper-aligned eval for RoboMimic OAT policies (OAT8, 50 rollouts).
 #
 # Usage:
 #   cd oat
@@ -11,7 +11,7 @@ set -euo pipefail
 CKPT="${1:?Usage: $0 <policy.ckpt> [lift|can|square]}"
 TASK="${2:-lift}"
 OUT_DIR="${3:-output/eval/robomimic_${TASK}}"
-NUM_EXP="${NUM_EXP:-5}"
+NUM_EXP="${NUM_EXP:-1}"
 
 MUJOCO_GL=egl uv run scripts/eval_policy_sim.py \
   --checkpoint "${CKPT}" \

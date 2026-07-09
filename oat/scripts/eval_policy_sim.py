@@ -80,6 +80,12 @@ from typing import List, Optional
               help="mode-injection BoN (idea #3): sample the FIRST token at this temperature "
                    "(inject mode diversity), continue the tail at base temperature. "
                    "0=off (uniform temperature). OAT-unique: targets the mode token.")
+@click.option('--n_parallel_envs', default=None, type=int,
+              help="parallel sim envs during eval (n_test unchanged). For A/B validation.")
+@click.option('--n_test', default=None, type=int,
+              help="override number of eval episodes for the runner.")
+@click.option('--test_start_seed', default=None, type=int,
+              help="override env episode seed base (episode i uses test_start_seed + i).")
 def eval_policy_sim(
     checkpoint: str,
     output_dir: str,
@@ -103,6 +109,9 @@ def eval_policy_sim(
     chunk_q: Optional[str] = None,
     bon_prefix_k: int = 0,
     bon_first_temp: float = 0.0,
+    n_parallel_envs: Optional[int] = None,
+    n_test: Optional[int] = None,
+    test_start_seed: Optional[int] = None,
 ):
     if os.path.exists(output_dir):
         click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
@@ -176,6 +185,15 @@ def eval_policy_sim(
         runner_overrides = {}
         if n_action_steps is not None:
             runner_overrides['n_action_steps'] = n_action_steps   # sync wrapper action_space to R
+        if n_parallel_envs is not None:
+            runner_overrides['n_parallel_envs'] = n_parallel_envs
+            print(f"Override n_parallel_envs = {n_parallel_envs}")
+        if n_test is not None:
+            runner_overrides['n_test'] = n_test
+            print(f"Override n_test = {n_test}")
+        if test_start_seed is not None:
+            runner_overrides['test_start_seed'] = test_start_seed
+            print(f"Override test_start_seed = {test_start_seed}")
         env_runner: BaseRunner = hydra.utils.instantiate(
             cfg.task.policy.env_runner,
             output_dir=output_dir,

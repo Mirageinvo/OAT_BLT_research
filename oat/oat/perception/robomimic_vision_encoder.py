@@ -1,10 +1,29 @@
 from typing import Dict, Tuple, Union
+
 import torch
 import torch.nn as nn
 import robomimic.utils.obs_utils as ObsUtils
 import robomimic.models.base_nets as rmbn
 import robomimic.models.obs_nets as rmon
-from typing import Dict, Tuple, Union
+
+def _import_robomimic_visual_modules():
+    """robomimic 0.3+ moved VisualCore/CropRandomizer to obs_core; 0.2 keeps them in base_nets."""
+    try:
+        from robomimic.models.obs_core import CropRandomizer as crop_randomizer
+        from robomimic.models.obs_core import VisualCore as visual_core
+        return crop_randomizer, visual_core
+    except (ImportError, AttributeError):
+        pass
+    try:
+        return rmbn.CropRandomizer, rmbn.VisualCore
+    except AttributeError as e:
+        raise ImportError(
+            "robomimic install is broken: neither obs_core nor base_nets exposes "
+            "VisualCore. Use robomimic==0.3.0 (obs_core) or 0.2.0 (base_nets)."
+        ) from e
+
+
+RmbCropRandomizer, VisualCore = _import_robomimic_visual_modules()
 
 from oat.common.pytorch_util import replace_submodules
 from oat.perception.base_obs_encoder import BaseObservationEncoder
@@ -40,7 +59,7 @@ class RobomimicRgbEncoder(BaseObservationEncoder):
         def crop_randomizer(shape, crop_shape):
             if crop_shape is None:
                 return None
-            return rmbn.CropRandomizer(
+            return RmbCropRandomizer(
                 input_shape=shape,
                 crop_height=crop_shape[0],
                 crop_width=crop_shape[1],
@@ -51,7 +70,7 @@ class RobomimicRgbEncoder(BaseObservationEncoder):
         def visual_net(shape, crop_shape):
             if crop_shape is not None:
                 shape = (shape[0], crop_shape[0], crop_shape[1])
-            net = rmbn.VisualCore(
+            net = VisualCore(
                 input_shape=shape,
                 feature_dimension=64,
                 backbone_class='ResNet18Conv',
@@ -111,7 +130,7 @@ class RobomimicRgbEncoder(BaseObservationEncoder):
         if eval_fixed_crop:
             replace_submodules(
                 root_module=obs_encoder,
-                predicate=lambda x: isinstance(x, rmbn.CropRandomizer),
+                predicate=lambda x: isinstance(x, RmbCropRandomizer),
                 func=lambda x: CropRandomizer(
                     input_shape=x.input_shape,
                     crop_height=x.crop_height,
