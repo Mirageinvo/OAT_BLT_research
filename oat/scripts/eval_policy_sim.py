@@ -86,6 +86,9 @@ from typing import List, Optional
               help="override number of eval episodes for the runner.")
 @click.option('--test_start_seed', default=None, type=int,
               help="override env episode seed base (episode i uses test_start_seed + i).")
+@click.option('--env_task_name', default=None, type=str,
+              help="override MetaworldRunner task_name (e.g. mt4 or box-close). "
+                   "Use mt4 for interleaved MT4 eval; single subtask for per-task paper eval.")
 def eval_policy_sim(
     checkpoint: str,
     output_dir: str,
@@ -112,6 +115,7 @@ def eval_policy_sim(
     n_parallel_envs: Optional[int] = None,
     n_test: Optional[int] = None,
     test_start_seed: Optional[int] = None,
+    env_task_name: Optional[str] = None,
 ):
     if os.path.exists(output_dir):
         click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
@@ -194,6 +198,9 @@ def eval_policy_sim(
         if test_start_seed is not None:
             runner_overrides['test_start_seed'] = test_start_seed
             print(f"Override test_start_seed = {test_start_seed}")
+        if env_task_name is not None:
+            runner_overrides['task_name'] = env_task_name
+            print(f"Override env_runner.task_name = {env_task_name}")
         env_runner: BaseRunner = hydra.utils.instantiate(
             cfg.task.policy.env_runner,
             output_dir=output_dir,

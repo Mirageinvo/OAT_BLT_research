@@ -36,6 +36,14 @@ def main() -> None:
     )
     parser.add_argument("--episodes-per-task", type=int, default=50)
     parser.add_argument("--num-tasks", type=int, default=4)
+    parser.add_argument(
+        "--require-subtask-counts",
+        action="store_true",
+        help=(
+            "Fail if meta/subtask_counts is missing. "
+            "Recommended for multitask datasets (e.g. mt4_N50.zarr)."
+        ),
+    )
     args = parser.parse_args()
 
     path = Path(args.zarr_path)
@@ -63,14 +71,35 @@ def main() -> None:
         if arr.shape[0] != episode_ends[-1]:
             raise AssertionError(f"{key} length {arr.shape[0]} != episode_ends[-1] {episode_ends[-1]}")
 
+    expect_multitask = args.num_tasks > 1
+    require_subtask_counts = args.require_subtask_counts or expect_multitask
+
     if "subtask_counts" in meta:
         counts = np.asarray(meta["subtask_counts"][:], dtype=np.int64)
         print(f"subtask_counts: {counts.tolist()}")
-        expected_counts = np.full(args.num_tasks, args.episodes_per_task, dtype=np.int64)
-        if not np.array_equal(counts, expected_counts):
-            raise AssertionError(f"Expected subtask_counts {expected_counts.tolist()}, got {counts.tolist()}")
+        if expect_multitask:
+            expected_counts = np.full(args.num_tasks, args.episodes_per_task, dtype=np.int64)
+            if not np.array_equal(counts, expected_counts):
+                raise AssertionError(
+                    f"Expected subtask_counts {expected_counts.tolist()}, got {counts.tolist()}"
+                )
+        else:
+            print("subtask_counts: present (single-task file may omit this key; this is fine)")
     else:
-        print("subtask_counts: missing (cannot verify per-task balance)")
+        if require_subtask_counts:
+            raise AssertionError(
+                "subtask_counts: missing for multitask validation. "
+                "Pass --num-tasks 1 for single-task files or regenerate multitask data."
+            )
+        print("subtask_counts: missing (expected for single-task datasets)")
+
+    if "num_episodes" in meta:
+        num_episodes_meta = int(np.asarray(meta["num_episodes"][()]).item())
+        print(f"meta/num_episodes: {num_episodes_meta}")
+        if num_episodes_meta != expected_episodes:
+            raise AssertionError(
+                f"meta/num_episodes={num_episodes_meta} does not match expected {expected_episodes}"
+            )
 
     print("OK")
 
