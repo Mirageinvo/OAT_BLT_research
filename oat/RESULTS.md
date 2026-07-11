@@ -5,10 +5,11 @@ Workspace root: `/workspace/oat` (paths below are relative to `oat/`)
 
 **Eval protocol notes:**
 - **Chain5 (paper-style):** 5 eval seeds × 50 rollouts = **250 episodes**; `summary.json` in eval dir.
+- **Train-time policy eval (paper, no fast mode):** `lazy_eval=false`, `n_test=250`, `rollout_every=200`, `checkpoint.topk.k=3` by `mean_success_rate`.
 - **BoN / AWR (quick pipeline):** `--n_test 50`, `--num_exp 3`, BoN `N=8 vote`; `eval_log.json` in eval dir.
 - All use **OAT8:** `--use_k_tokens 8 --entropy_threshold 0`, `MUJOCO_GL=egl`.
 
-Single-task MetaWorld specialists → **TBD** (section stub at bottom).
+**Cluster snapshot (2026-07-11 ~16:40 MSK):** GPUs idle; no tmux in docker. All RoboMimic + MT4 multitask pipelines **DONE**. Single-task tokenizers **DONE** (epoch 5000); policy training **launched** via `cluster_launch_metaworld_single_policy_4.sh`.
 
 ---
 
@@ -18,10 +19,11 @@ Single-task MetaWorld specialists → **TBD** (section stub at bottom).
 |-----------|-----------------|-----------------|--------------------|---------------|---------------|
 | **Lift** | **83.6 ± 1.7%** | 91.3 ± 2.9% | **93.3 ± 1.8%** | +7.7 pp | +9.7 pp |
 | **Can** | **86.0 ± 2.8%** | 90.7 ± 1.3% | 89.3 ± 1.8% | +4.7 pp | +3.3 pp |
-| **Square** | **31.2 ± 1.5%** (ep1500) | 38.0 ± 2.0% | *in progress* | +6.8 pp | — |
+| **Square** | **31.2 ± 1.5%** (ep1500) | 38.0 ± 2.0% | **36.7 ± 5.0%** | +6.8 pp | +5.5 pp |
 | **MT4 multitask** | **28.4 ± 3.1%** | 26.7 ± 2.4% | 18.7 ± 1.8% | −1.7 pp | −9.7 pp |
+| **MT4 single-task** | *in progress* | TBD | TBD | — | — |
 
-Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%**, MT4 avg **24.4%**.
+Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%**, MT4 per-task specialists **44.4 / 26.4 / 17.2 / 9.6%**, MT4 avg **24.4%**.
 
 ---
 
@@ -38,7 +40,7 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 | Item | Value |
 |------|-------|
 | Run dir | `output/20260704/203215_train_oattok_lift_N200/` |
-| Train log | `logs/train_tok_lift.log` (also early runs under `output/.../.hydra/`) |
+| Train log | `logs/train_tok_lift.log` |
 | **Best ckpt (top-1 mse)** | `output/20260704/203215_train_oattok_lift_N200/checkpoints/ep-1970_mse-0.006.ckpt` |
 | Config | `task/tokenizer=robomimic/lift`, `training.num_demo=200`, `num_epochs=5001`, top-3 by `test_reconst_mse` |
 
@@ -67,6 +69,7 @@ Also: `output/eval/robomimic_lift_paper5_ep1200/` → **77.6 ± 3.1%** (`logs/ev
 |------|-------|
 | Pipeline script | `scripts/cluster_lift_bon_awr_pipeline.sh` |
 | Pipeline log | `logs/lift_bon_awr_pipeline.log` |
+| Status | **DONE** (2026-07-10 05:28 UTC) |
 | Base ckpt | `ep-0600_sr-0.920.ckpt` |
 
 **BoN**
@@ -132,8 +135,9 @@ Also: `output/eval/robomimic_lift_paper5_ep1200/` → **77.6 ± 3.1%** (`logs/ev
 ### Eval — BoN → AWR pipeline
 | Item | Value |
 |------|-------|
-| Pipeline script | `scripts/cluster_can_bon_awr_resume.sh` (resume from STEP2) |
+| Pipeline script | `scripts/cluster_can_bon_awr_resume.sh` |
 | Pipeline log | `logs/can_bon_awr_pipeline.log` |
+| Status | **DONE** (2026-07-10 05:04 UTC) |
 | Base ckpt | `ep-1700_sr-0.940.ckpt` |
 
 **BoN:** `output/eval/robomimic_can_bon_n8_n3/` → **90.7 ± 1.3%** (`eval_log.json`)
@@ -180,12 +184,12 @@ Per-seed (ep1500): 0.32, 0.26, 0.30, 0.34, 0.34. Paper target: **39.2 ± 2.4%**.
 |------|-------|
 | Pipeline script | `scripts/cluster_square_bon_awr_pipeline.sh` |
 | Pipeline log | `logs/square_bon_awr_pipeline.log` |
-| tmux | `square_bon_awr` |
+| Status | **DONE** (2026-07-11 00:57 UTC; EGL warnings in eval, results valid) |
 | Base ckpt | `ep-0600_sr-0.420.ckpt` |
 
 **BoN:** `output/eval/robomimic_square_bon_n8_n3/` → **38.0 ± 2.0%** (exp: 0.40, 0.34, 0.40)
 
-**AWR:** dataset `my_datasets/awr_square_bon.npz`; ckpt `my_models/policy_awr_square.ckpt` (485 MB); eval dir `output/eval/robomimic_square_awr_n3/` — **IN PROGRESS** (STEP5, Jul 11)
+**AWR:** dataset `my_datasets/awr_square_bon.npz`; ckpt `my_models/policy_awr_square.ckpt` (485 MB); eval `output/eval/robomimic_square_awr_n3/` → **36.7 ± 5.0%** (exp: 0.40, 0.32, 0.38)
 
 ---
 
@@ -211,6 +215,7 @@ One shared model on interleaved `mt4_N50.zarr` (200 eps, 50/task). **Not** paper
 |------|-------|
 | Run dir | `output/20260708/032431_train_oatpolicy_mw-mt4_N50/` |
 | Train logs | `logs/train_policy_mt4_paper_s0.log`, `logs/train_policy_mt4_paper_s42.log` |
+| Train eval | fast mode during train (`n_test=50`, `rollout_every=50`) |
 | **Chain5 / BoN ckpt** | `.../checkpoints/ep-0450_sr-0.280.ckpt` |
 | Other top-k | `ep-0200_sr-0.280.ckpt`, `ep-1000_sr-0.240.ckpt` |
 
@@ -261,27 +266,50 @@ Per-task SR (chain5):
 
 ## MetaWorld — single-task specialists
 
-**Status: IN PROGRESS** — data regen done; tokenizer training running. Full results block to be filled after policy + chain5 + BoN/AWR.
+Paper protocol: one model per task, 50 demos, **full** train-time sim eval (`n_test=250`, `rollout_every=200`, top-3 SR ckpts). See `METAWORLD_SINGLE_TASK_SPECIALIST.md`.
 
-### Data (fresh gen, 2026-07-10)
-| Task | Zarr | Regen log |
-|------|------|-----------|
+### Data (regen 2026-07-10)
+| Task | Zarr | Log |
+|------|------|-----|
 | box-close | `data/metaworld/box-close_N50.zarr` | `logs/metaworld_single_data_regen.log` |
 | coffee-pull | `data/metaworld/coffee-pull_N50.zarr` | (same) |
 | disassemble | `data/metaworld/disassemble_N50.zarr` | (same) |
 | stick-pull | `data/metaworld/stick-pull_N50.zarr` | (same) |
 
-### Tokenizer (partial — not all runs finished 5001 epochs)
-| Task | Run dir | Log | Best ckpt so far | Status |
-|------|---------|-----|------------------|--------|
-| box-close | `output/20260710/212943_train_oattok_mw-box-close_st_N50/` | `logs/train_oattok_mw-box-close_st_N50_s0.log` | `ep-3450_mse-0.019.ckpt` | stopped ~ep3450 |
-| coffee-pull | `output/20260710/212943_train_oattok_mw-coffee-pull_st_N50/` | `logs/train_oattok_mw-coffee-pull_st_N50_s0.log` | `ep-2670_mse-0.039.ckpt` | stopped ~ep2670 |
-| disassemble | `output/20260710/235437_train_oattok_mw-disassemble_st_N50/` | `logs/train_oattok_mw-disassemble_st_N50_s0.log` | TBD | **running** (`mwst_tok_disassemble`) |
-| stick-pull | `output/20260710/235437_train_oattok_mw-stick-pull_st_N50/` | `logs/train_oattok_mw-stick-pull_st_N50_s0.log` | TBD | **running** (`mwst_tok_stick_pull`) |
+Status: **DONE** — `[DONE] 2026-07-10T22:12:19` in regen log.
+
+### Tokenizer (5001 epochs, DONE)
+| Task | Run dir | Log | **Best ckpt (min mse)** | Final mse |
+|------|---------|-----|-------------------------|-----------|
+| box-close | `output/20260710/212943_train_oattok_mw-box-close_st_N50/` | `logs/train_oattok_mw-box-close_st_N50_s0.log` | `checkpoints/ep-3450_mse-0.019.ckpt` | 0.019 |
+| coffee-pull | `output/20260710/212943_train_oattok_mw-coffee-pull_st_N50/` | `logs/train_oattok_mw-coffee-pull_st_N50_s0.log` | `checkpoints/ep-2670_mse-0.039.ckpt` | 0.039 |
+| disassemble | `output/20260710/235437_train_oattok_mw-disassemble_st_N50/` | `logs/train_oattok_mw-disassemble_st_N50_s0.log` | `checkpoints/ep-3410_mse-0.027.ckpt` | 0.027 |
+| stick-pull | `output/20260710/235437_train_oattok_mw-stick-pull_st_N50/` | `logs/train_oattok_mw-stick-pull_st_N50_s0.log` | `checkpoints/ep-3030_mse-0.042.ckpt` | 0.042 |
 
 Launch: `scripts/cluster_tokenizer_metaworld_single.sh`, `scripts/cluster_gen_metaworld_single_data.sh`
 
-Policy / chain5 / BoN / AWR: **TBD** — see `METAWORLD_SINGLE_TASK_SPECIALIST.md`.
+### Policy — **IN PROGRESS** (2026-07-11)
+| Task | tmux | GPU | Frozen tokenizer | Train log | Run dir |
+|------|------|-----|----------------|-----------|---------|
+| box-close | `mwst_pol_box_close` | 0 | `ep-3450_mse-0.019.ckpt` | `logs/train_oatpolicy_mw-box-close_st_N50_s0.log` | TBD |
+| coffee-pull | `mwst_pol_coffee_pull` | 1 | `ep-2670_mse-0.039.ckpt` | `logs/train_oatpolicy_mw-coffee-pull_st_N50_s0.log` | TBD |
+| disassemble | `mwst_pol_disassemble` | 0 | `ep-3410_mse-0.027.ckpt` | `logs/train_oatpolicy_mw-disassemble_st_N50_s0.log` | TBD |
+| stick-pull | `mwst_pol_stick_pull` | 1 | `ep-3030_mse-0.042.ckpt` | `logs/train_oatpolicy_mw-stick-pull_st_N50_s0.log` | TBD |
+
+Launch: `scripts/cluster_launch_metaworld_single_policy_4.sh`  
+Script: `scripts/cluster_policy_metaworld_single.sh`  
+Settings: `lazy_eval=false`, `rollout_every=200`, `n_test=250`, `n_parallel_envs=4`, `checkpoint.topk.k=3`, `monitor_key=mean_success_rate`
+
+Chain5 / BoN / AWR: **TBD** after policy train → `cluster_metaworld_single_full_pipeline.sh` steps 3–4 or manual chain5.
+
+Paper targets (Table VI, per-task specialist):
+
+| Task | Paper OAT₈ |
+|------|------------|
+| box-close | 44.4% |
+| coffee-pull | 26.4% |
+| disassemble | 17.2% |
+| stick-pull | 9.6% |
 
 ---
 
@@ -300,11 +328,14 @@ output/eval/robomimic_can_awr_n3/
 output/eval/robomimic_square_paper5_ep0600/
 output/eval/robomimic_square_paper5_ep1500/
 output/eval/robomimic_square_bon_n8_n3/
-output/eval/robomimic_square_awr_n3/          # in progress
+output/eval/robomimic_square_awr_n3/
 
 output/eval/metaworld_mt4_paper5_ep0450/
 output/eval/metaworld_mt4_bon_n8_n3/
 output/eval/metaworld_mt4_awr_n3/
+
+# single-task (after policy + chain5):
+# output/eval/metaworld_<task>_paper5_ep-XXXX_sr-0.XXX_*/
 ```
 
 ## Quick reference — AWR datasets & checkpoints
@@ -314,17 +345,19 @@ output/eval/metaworld_mt4_awr_n3/
 | Lift | `my_datasets/awr_lift_bon.npz` | `my_models/policy_awr_lift.ckpt` |
 | Can | `my_datasets/awr_can_bon.npz` | `my_models/policy_awr_can.ckpt` |
 | Square | `my_datasets/awr_square_bon.npz` | `my_models/policy_awr_square.ckpt` |
-| MT4 | `my_datasets/awr_mt4_bon.npz` | `my_models/policy_awr_mt4.ckpt` |
+| MT4 multitask | `my_datasets/awr_mt4_bon.npz` | `my_models/policy_awr_mt4.ckpt` |
+| MT4 single-task | TBD | TBD |
 
 ## Pipeline logs
 
-| Pipeline | Log |
-|----------|-----|
-| Lift BoN→AWR | `logs/lift_bon_awr_pipeline.log` |
-| Can BoN→AWR | `logs/can_bon_awr_pipeline.log` |
-| Square BoN→AWR | `logs/square_bon_awr_pipeline.log` |
-| MT4 BoN→AWR | `logs/mt4_bon_awr_pipeline.log` |
+| Pipeline | Log | Status |
+|----------|-----|--------|
+| Lift BoN→AWR | `logs/lift_bon_awr_pipeline.log` | DONE |
+| Can BoN→AWR | `logs/can_bon_awr_pipeline.log` | DONE |
+| Square BoN→AWR | `logs/square_bon_awr_pipeline.log` | DONE |
+| MT4 BoN→AWR | `logs/mt4_bon_awr_pipeline.log` | DONE |
+| MT4 data regen (single) | `logs/metaworld_single_data_regen.log` | DONE |
 
 ---
 
-*Last updated: 2026-07-11 (cluster snapshot). Re-sync after square AWR eval and single-task MT4 pipeline complete.*
+*Last updated: 2026-07-11. Re-sync after single-task policy train + chain5 complete.*
