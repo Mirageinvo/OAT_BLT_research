@@ -9,7 +9,17 @@ Workspace root: `/workspace/oat` (paths below are relative to `oat/`)
 - **BoN / AWR (quick pipeline):** `--n_test 50`, `--num_exp 3`, BoN `N=8 vote`; `eval_log.json` in eval dir.
 - All use **OAT8:** `--use_k_tokens 8 --entropy_threshold 0`, `MUJOCO_GL=egl`.
 
-**Cluster snapshot (2026-07-11 ~16:40 MSK):** GPUs idle; no tmux in docker. All RoboMimic + MT4 multitask pipelines **DONE**. Single-task tokenizers **DONE** (epoch 5000); policy training **launched** via `cluster_launch_metaworld_single_policy_4.sh`.
+**Cluster snapshot (2026-07-12 ~00:55 MSK):** RoboMimic + MT4 multitask **DONE**. Single-task policy **IN PROGRESS** — all 4 tmux alive; **epoch 200 train-time eval** running (`n_test=250`); epoch-0 SR logged (near zero, expected early). Chain5/BoN/AWR single-task — **TBD**.
+
+**Status overview**
+
+| Block | Status |
+|-------|--------|
+| RoboMimic (Lift / Can / Square) | **DONE** — chain5 + BoN/AWR pipelines complete |
+| MetaWorld MT4 multitask | **DONE** — chain5 + BoN/AWR complete |
+| MetaWorld single-task data + tokenizer | **DONE** |
+| MetaWorld single-task policy | **IN PROGRESS** (4 tmux, paper eval `n_test=250`) |
+| MetaWorld single-task chain5 / BoN / AWR | **TBD** |
 
 ---
 
@@ -17,15 +27,22 @@ Workspace root: `/workspace/oat` (paths below are relative to `oat/`)
 
 | Benchmark | Chain5 baseline | BoN N=8 (3 exp) | AWR single (3 exp) | BoN Δ vs base | AWR Δ vs base |
 |-----------|-----------------|-----------------|--------------------|---------------|---------------|
-| **Lift** | **83.6 ± 1.7%** | 91.3 ± 2.9% | **93.3 ± 1.8%** | +7.7 pp | +9.7 pp |
-| **Can** | **86.0 ± 2.8%** | 90.7 ± 1.3% | 89.3 ± 1.8% | +4.7 pp | +3.3 pp |
-| **Square** | **31.2 ± 1.5%** (ep1500) | 38.0 ± 2.0% | **36.7 ± 5.0%** | +6.8 pp | +5.5 pp |
-| **MT4 multitask** | **28.4 ± 3.1%** | 26.7 ± 2.4% | 18.7 ± 1.8% | −1.7 pp | −9.7 pp |
+| **Lift** | **83.6 ± 1.7%** (ep-0600) | 91.3 ± 2.9% | **93.3 ± 1.8%** | +7.7 pp | +9.7 pp |
+| **Can** | **86.0 ± 2.8%** (ep-1700) | 90.7 ± 1.3% | 89.3 ± 1.8% | +4.7 pp | +3.3 pp |
+| **Square** (chain5 best) | **31.2 ± 1.5%** (ep-1500) | — | — | — | — |
+| **Square** (BoN/AWR @ ep-0600) | **30.8 ± 2.7%** (ep-0600) | 38.0 ± 2.0% | **36.7 ± 5.0%** | **+7.2 pp** | **+5.9 pp** |
+| **MT4 multitask** | **28.4 ± 3.1%** (ep-0450) | 26.7 ± 2.4% | 18.7 ± 1.8% | −1.7 pp | −9.7 pp |
 | **MT4 single-task** | *in progress* | TBD | TBD | — | — |
+
+**Square caveat:** BoN/AWR pipeline used **`ep-0600_sr-0.420.ckpt`**, not the better chain5 ckpt **`ep-1500`** (31.2%). Δ for BoN/AWR is vs **ep-0600 chain5 only** (30.8%). BoN/AWR eval is quick protocol (`n_test=50`, 3 exp), not chain5 250-eps — same as Lift/Can/MT4 pipelines.
 
 Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%**, MT4 per-task specialists **44.4 / 26.4 / 17.2 / 9.6%**, MT4 avg **24.4%**.
 
 ---
+
+## RoboMimic — all DONE
+
+Pipelines: chain5 (paper 250 eps) + BoN N=8 + AWR for Lift, Can, Square. See summary table; Square BoN/AWR from **ep-0600** (not best chain5 ep-1500).
 
 ## RoboMimic — Lift
 
@@ -49,20 +66,17 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 |------|-------|
 | Run dir (paper) | `output/20260706/163500_train_oatpolicy_lift_N200/` |
 | Train log | `logs/train_policy_lift_paper_s42.log` |
-| **Chain5 ckpt** | `output/20260706/163500_train_oatpolicy_lift_N200/checkpoints/ep-0600_sr-0.920.ckpt` |
-| Alt ckpt (chain5 also run) | `.../ep-1200_sr-0.900.ckpt` |
+| **Chain5 + BoN/AWR ckpt** | `.../ep-0600_sr-0.920.ckpt` |
+| Alt chain5 only (worse) | `.../ep-1200_sr-0.900.ckpt` |
 | Frozen tokenizer | `ep-1970_mse-0.006.ckpt` (above) |
 
 ### Eval — Chain5 (250 eps)
-| Item | Value |
-|------|-------|
-| Output dir | `output/eval/robomimic_lift_paper5_ep0600/` |
-| Log | `logs/eval_lift_chain5.log` |
-| Summary | `output/eval/robomimic_lift_paper5_ep0600/summary.json` |
-| **SR** | **83.6 ± 1.7%** (per-seed: 0.84, 0.86, 0.78, 0.88, 0.82) |
-| Paper target | 99.2 ± 0.5% |
+| Ckpt | Output dir | Log | SR |
+|------|------------|-----|-----|
+| **ep-0600** (BoN/AWR base) | `output/eval/robomimic_lift_paper5_ep0600/` | `logs/eval_lift_chain5.log` | **83.6 ± 1.7%** |
+| ep-1200 (extra run) | `output/eval/robomimic_lift_paper5_ep1200/` | `logs/eval_lift_chain5_ep1200.log` | 77.6 ± 3.1% |
 
-Also: `output/eval/robomimic_lift_paper5_ep1200/` → **77.6 ± 3.1%** (`logs/eval_lift_chain5_ep1200.log`).
+Per-seed ep-0600: 0.84, 0.86, 0.78, 0.88, 0.82. Paper target: **99.2 ± 0.5%**.
 
 ### Eval — BoN → AWR pipeline
 | Item | Value |
@@ -187,13 +201,17 @@ Per-seed (ep1500): 0.32, 0.26, 0.30, 0.34, 0.34. Paper target: **39.2 ± 2.4%**.
 | Status | **DONE** (2026-07-11 00:57 UTC; EGL warnings in eval, results valid) |
 | Base ckpt | `ep-0600_sr-0.420.ckpt` |
 
-**BoN:** `output/eval/robomimic_square_bon_n8_n3/` → **38.0 ± 2.0%** (exp: 0.40, 0.34, 0.40)
+**BoN** (from `ep-0600`, `n_test=50`, 3 exp): `output/eval/robomimic_square_bon_n8_n3/` → **38.0 ± 2.0%** (exp: 0.40, 0.34, 0.40)  
+Δ vs ep-0600 chain5 (30.8%): **+7.2 pp**. Not comparable to ep-1500 (31.2%) — other ckpt, other protocol.
 
-**AWR:** dataset `my_datasets/awr_square_bon.npz`; ckpt `my_models/policy_awr_square.ckpt` (485 MB); eval `output/eval/robomimic_square_awr_n3/` → **36.7 ± 5.0%** (exp: 0.40, 0.32, 0.38)
+**AWR** (distilled from BoN @ ep-0600): `my_datasets/awr_square_bon.npz`; `my_models/policy_awr_square.ckpt`; eval `output/eval/robomimic_square_awr_n3/` → **36.7 ± 5.0%** (exp: 0.40, 0.32, 0.38)  
+Δ vs ep-0600 chain5: **+5.9 pp**. BoN > AWR on this ckpt (+7.2 vs +5.9).
+
+> ep-1500 chain5 (31.2%) is the **best single-sample** checkpoint; BoN/AWR were **not** re-run from ep-1500.
 
 ---
 
-## MetaWorld — MT4 multitask
+## MetaWorld — MT4 multitask (DONE)
 
 One shared model on interleaved `mt4_N50.zarr` (200 eps, 50/task). **Not** paper single-task specialist protocol.
 
@@ -288,19 +306,30 @@ Status: **DONE** — `[DONE] 2026-07-10T22:12:19` in regen log.
 
 Launch: `scripts/cluster_tokenizer_metaworld_single.sh`, `scripts/cluster_gen_metaworld_single_data.sh`
 
-### Policy — **IN PROGRESS** (2026-07-11)
+### Policy — **IN PROGRESS** (launched 2026-07-11 13:44 UTC)
 | Task | tmux | GPU | Frozen tokenizer | Train log | Run dir |
-|------|------|-----|----------------|-----------|---------|
-| box-close | `mwst_pol_box_close` | 0 | `ep-3450_mse-0.019.ckpt` | `logs/train_oatpolicy_mw-box-close_st_N50_s0.log` | TBD |
-| coffee-pull | `mwst_pol_coffee_pull` | 1 | `ep-2670_mse-0.039.ckpt` | `logs/train_oatpolicy_mw-coffee-pull_st_N50_s0.log` | TBD |
-| disassemble | `mwst_pol_disassemble` | 0 | `ep-3410_mse-0.027.ckpt` | `logs/train_oatpolicy_mw-disassemble_st_N50_s0.log` | TBD |
-| stick-pull | `mwst_pol_stick_pull` | 1 | `ep-3030_mse-0.042.ckpt` | `logs/train_oatpolicy_mw-stick-pull_st_N50_s0.log` | TBD |
+|------|------|-----|------------------|-----------|---------|
+| box-close | `mwst_pol_box_close` | 0 | `ep-3450_mse-0.019.ckpt` | `logs/train_oatpolicy_mw-box-close_st_N50_s0.log` | `output/20260711/134439_train_oatpolicy_mw-box-close_st_N50/` |
+| coffee-pull | `mwst_pol_coffee_pull` | 1 | `ep-2670_mse-0.039.ckpt` | `logs/train_oatpolicy_mw-coffee-pull_st_N50_s0.log` | `output/20260711/134440_train_oatpolicy_mw-coffee-pull_st_N50/` |
+| disassemble | `mwst_pol_disassemble` | 0 | `ep-3410_mse-0.027.ckpt` | `logs/train_oatpolicy_mw-disassemble_st_N50_s0.log` | `output/20260711/134440_train_oatpolicy_mw-disassemble_st_N50/` |
+| stick-pull | `mwst_pol_stick_pull` | 1 | `ep-3030_mse-0.042.ckpt` | `logs/train_oatpolicy_mw-stick-pull_st_N50_s0.log` | `output/20260711/134439_train_oatpolicy_mw-stick-pull_st_N50/` |
 
 Launch: `scripts/cluster_launch_metaworld_single_policy_4.sh`  
 Script: `scripts/cluster_policy_metaworld_single.sh`  
-Settings: `lazy_eval=false`, `rollout_every=200`, `n_test=250`, `n_parallel_envs=4`, `checkpoint.topk.k=3`, `monitor_key=mean_success_rate`
+Settings: `lazy_eval=false`, `rollout_every=200`, `n_test=250`, `n_parallel_envs=4`, `checkpoint.topk.k=3`, `monitor_key=mean_success_rate` (full paper eval every 200 epochs, **no fast mode**).
 
-Chain5 / BoN / AWR: **TBD** after policy train → `cluster_metaworld_single_full_pipeline.sh` steps 3–4 or manual chain5.
+**Train-time SR so far** (250-eps eval, not chain5):
+
+| Task | Epoch | SR (train eval) | top-k ckpt |
+|------|-------|-----------------|------------|
+| box-close | 0 | 0.4% | `ep-0000_sr-0.004.ckpt` |
+| coffee-pull | 0 | 0.0% | `ep-0000_sr-0.000.ckpt` |
+| disassemble | 0 | 0.0% | `ep-0000_sr-0.000.ckpt` |
+| stick-pull | 0 | 0.0% | `ep-0000_sr-0.000.ckpt` |
+
+Epoch **200** eval in progress (~23–27/63 rollout batches as of 2026-07-12 00:55 MSK).
+
+Chain5 / BoN / AWR: **TBD** after policy train → `cluster_metaworld_single_full_pipeline.sh` steps 3–4.
 
 Paper targets (Table VI, per-task specialist):
 
@@ -360,4 +389,4 @@ output/eval/metaworld_mt4_awr_n3/
 
 ---
 
-*Last updated: 2026-07-11. Re-sync after single-task policy train + chain5 complete.*
+*Last updated: 2026-07-12 ~00:55 MSK. Re-sync after epoch-200 eval + chain5 complete.*
