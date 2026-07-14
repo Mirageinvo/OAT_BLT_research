@@ -59,21 +59,18 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 
 ### Limitations
 
-- **Comparison protocol.** Our main claim is a fixed-policy improvement of a single OAT checkpoint under BoN and AWR, not a full reproduction of the paper’s five independently trained seeds. Relatedly, our MT4 result is one shared four-task policy, whereas Table VI reports per-task specialists — do not treat MT4-vs-Table-VI as protocol-matched.
-- **Evaluation variance.** The chain5 estimate uses five disjoint environment-seed blocks, whereas the quick BoN/AWR pipeline averages three stochastic repeats on a shared seed set; these uncertainty estimates are therefore not directly comparable.
-- **Seed pairing.** A final paper-ready table should evaluate baseline, BoN, and AWR on the same held-out initialization set to enable a paired comparison and reduce variance (including task-level significance claims).
-- **Checkpoint selection.** Some checkpoints were selected using the same evaluation pool later used for reporting, so absolute success rates should be interpreted as a strong sanity check rather than fully independent test-set estimates. Paired Δ on a fixed checkpoint is less affected.
-- **Meta-World port.** Our Meta-World data pipeline is a controlled port rather than a byte-for-byte reproduction of the original demonstration generator (original `sim-env` required ≥5 success timesteps and continued to 10; this port accepts on first success), so results should be interpreted within that implementation.
-- **Compute cost.** BoN improves accuracy at the cost of multiple candidate generations per decision, so we report success rate together with deployment overhead rather than accuracy alone.
+- **Exploratory vs paper claim (RM/MW).** Summary-table Δ vs chain5 for RoboMimic / MetaWorld are **exploratory** until matched re-eval. Do **not** treat them as the same matched estimator used for LIBERO (baseline and BoN/AWR on one shared seed set, `-n 3`). For the paper: main text = matched only; chain5 mean = separate sanity-check, not the primary BoN/AWR comparison.
+- **Comparison protocol / seed pairing.** Chain5 uses five disjoint environment-seed blocks (250 inits); quick BoN/AWR uses three stochastic repeats on seeds `1000–1049` (`n_test=50`). Uncertainty estimates are not comparable; sign/magnitude of Δ can flip (Can, MT4, coffee). Paper-ready: baseline, BoN, and AWR on one held-out init set and the same repetition count.
+- **n_test / suite mismatch.** LIBERO selection results use `n_test=500`; RM/MW quick pipelines use `n_test=50`. Different eval regimes — do not mix suites into one causal claim without protocol notes (or rematch).
+- **Can / MT4.** Until matched reruns exist, keep out of the central claim (or report as exploratory only). Chain5-mean Δ can over/under-state the paired effect.
+- **Coffee (MetaWorld).** Treat as a **controlled negative** under matched evaluation (vote BoN can regress vs same-seed single-sample), not as a pipeline quirk or unexplained anomaly.
+- **Fixed-policy vs Table VI.** Claim is improvement of a single OAT checkpoint under BoN/AWR, not five independently trained paper seeds. MT4 here is one shared four-task policy; Table VI specialists are a different protocol — not matched.
+- **Checkpoint selection.** Some ckpts were picked on the same eval pool later used for reporting; absolute SR is a strong sanity check, not a fully held-out test. Paired Δ on a fixed ckpt is less affected. Square BoN/AWR used `ep-0600`, not best chain5 `ep-1500`.
+- **Meta-World port.** Controlled demo port, not byte-for-byte original generator (original `sim-env` required ≥5 success timesteps then continued to 10; this port accepts on first success). Interpret MW numbers within that implementation.
+- **Compute cost.** BoN raises SR via N candidates per replan; report latency/cost with SR, not accuracy alone.
+- **Claim scope.** Adaptive-compute negatives and selection positives on LIBERO are the load-bearing story; RM/MW are generalization probes and stay subordinate until matched.
 
-> Our results should be interpreted as an evaluation of BoN/AWR on a fixed OAT baseline rather than a full reproduction of Table VI. In particular, chain5 and quick BoN/AWR use different repetition structures, so their confidence intervals are not directly comparable. For the final paper, we will report paired evaluations on a common held-out seed set, and we will clearly distinguish protocol differences from benchmark-matched results.
-
-### Current interpretation
-
-- **Lift:** strong exploratory positive; BoN and AWR are well above the chain5 baseline.
-- **Can:** cluster logs are correct (BoN 92/92/88%; AWR 90/92/86%), but the matched baseline `n=3` was not run, so the exact paired delta is unresolved.
-- **Square:** positive exploratory delta on `ep-0600`; it must not be compared against the better `ep-1500` checkpoint without rerunning methods from that checkpoint.
-- **MT4:** BoN is flat/slightly negative and AWR regresses; this is a useful negative result.
+> RM/MW chain5↔quick-BoN deltas are exploratory. LIBERO remains the matched reference. Paper tables will use paired baseline/BoN/AWR on a common held-out seed set; chain5 stays a separate sanity estimate. Coffee is a controlled negative under matched eval, not an anomaly.
 
 ---
 
