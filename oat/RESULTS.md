@@ -9,38 +9,38 @@ Workspace root: `/workspace/oat` (paths below are relative to `oat/`)
 - **BoN / AWR (quick pipeline):** `--n_test 50`, `--num_exp 3`, BoN `N=8 vote`; `eval_log.json` in eval dir.
 - All use **OAT8:** `--use_k_tokens 8 --entropy_threshold 0`, `MUJOCO_GL=egl`.
 
-**Cluster snapshot (2026-07-13 ~23:06 MSK):** RoboMimic + MT4 **DONE**. Active: **box-close** train mid ep-2000 eval (last logged SR **52.8%** @ep-1800); **disassemble chain5** seed **2/4** (done: seed0 **66%**, seed1 **64%**); **coffee/stick BoN** STEP1 Exp **2/3** (Exp1: coffee **28%**, stick **34%** — partial, not final).
+**Cluster snapshot (2026-07-14 ~03:55 MSK):** RoboMimic + MT4 chain5/BoN/AWR **DONE** (Δ vs chain5 = exploratory). Active: **box-close** train (last ckpt **ep-1800 @ 52.8%**); **coffee/stick** AWR collect ~28–29%; **disassemble chain5 DONE** **66.4 ± 3.2%**. Matched rematch **not started**.
 
 **Status overview**
 
 | Block | Status |
 |-------|--------|
-| RoboMimic (Lift / Can / Square) | **DONE** — chain5 + BoN/AWR pipelines complete |
-| MetaWorld MT4 multitask | **DONE** — chain5 + BoN/AWR complete |
+| RoboMimic (Lift / Can / Square) | **DONE** exploratory pipelines; **matched rematch TBD** |
+| MetaWorld MT4 multitask | **DONE** exploratory; **matched rematch TBD** |
 | MetaWorld single-task data + tokenizer | **DONE** |
-| MetaWorld single-task policy train | **PARTIAL** — box-close **IN PROGRESS**; coffee / stick / disassemble **STOPPED** |
-| MetaWorld single-task chain5 | coffee **DONE**, stick **DONE**, disassemble **IN PROGRESS**, box-close **TBD** |
-| MetaWorld single-task BoN / AWR | coffee **IN PROGRESS**, stick **IN PROGRESS**, box / disassemble **TBD** |
+| MetaWorld single-task policy train | **PARTIAL** — box-close **IN PROGRESS**; others stopped |
+| MetaWorld single-task chain5 | coffee / stick / disassemble **DONE**; box-close **TBD** |
+| MetaWorld single-task BoN / AWR | coffee / stick BoN **DONE**, AWR collect **IN PROGRESS**; box / disassemble BoN **TBD** |
 
 ---
 
 ## Summary table
 
-| Benchmark | Chain5 baseline | BoN N=8 (3 exp) | AWR single (3 exp) | BoN Δ vs chain5† | AWR Δ vs chain5† |
-|-----------|-----------------|-----------------|--------------------|---------------|---------------|
+| Benchmark | Chain5 baseline (sanity) | BoN N=8 (3 exp) | AWR single (3 exp) | Δ_BoN vs chain5† | Δ_AWR vs chain5† |
+|-----------|--------------------------|-----------------|--------------------|------------------|------------------|
 | **Lift** | **83.6 ± 1.7%** (ep-0600) | 91.3 ± 2.9% | **93.3 ± 1.8%** | +7.7 pp | +9.7 pp |
 | **Can** | **86.0 ± 2.8%** (ep-1700) | 90.7 ± 1.3% | 89.3 ± 1.8% | +4.7 pp | +3.3 pp |
 | **Square** (chain5 best) | **31.2 ± 1.5%** (ep-1500) | — | — | — | — |
 | **Square** (BoN/AWR @ ep-0600) | **30.8 ± 2.7%** (ep-0600) | 38.0 ± 2.0% | **36.7 ± 2.9%** | **+7.2 pp** | **+5.9 pp** |
 | **MT4 multitask** | **28.4 ± 3.1%** (ep-0450) | 26.7 ± 2.4% | 18.7 ± 1.8% | −1.7 pp | −9.7 pp |
-| **MW coffee-pull** (specialist) | **43.2 ± 3.3%** (ep-1000) | *BoN Exp1=28%; Exp2/3 running* | *pending BoN* | — | — |
-| **MW stick-pull** (specialist) | **16.4 ± 4.0%** (ep-0800) | *BoN Exp1=34%; Exp2/3 running* | *pending BoN* | — | — |
-| **MW disassemble** (specialist) | *chain5 2/4* (so far 66%, 64%; train ep-1400 70.0%) | TBD | TBD | — | — |
-| **MW box-close** (specialist) | *train ep-2000 eval*; last logged **52.8%** @ep-1800 | TBD | TBD | — | — |
+| **MW coffee-pull** (specialist) | **43.2 ± 3.3%** (ep-1000) | **28.0 ± 0.0%** | *AWR collect* | exploratory −15.2 pp | — |
+| **MW stick-pull** (specialist) | **16.4 ± 4.0%** (ep-0800) | **30.7 ± 1.8%** | *AWR collect* | exploratory +14.3 pp | — |
+| **MW disassemble** (specialist) | **66.4 ± 3.2%** (ep-1400) | TBD | TBD | — | — |
+| **MW box-close** (specialist) | *train*; last **52.8%** @ep-1800 | TBD | TBD | — | — |
 
-**Square caveat:** BoN/AWR pipeline used **`ep-0600_sr-0.420.ckpt`**, not the better chain5 ckpt **`ep-1500`** (31.2%). Δ for BoN/AWR is vs **ep-0600 chain5 only** (30.8%). BoN/AWR eval is quick protocol (`n_test=50`, 3 exp), not chain5 250-eps — same as Lift/Can/MT4 pipelines.
+**Square caveat:** BoN/AWR used **`ep-0600_sr-0.420.ckpt`**, not best chain5 **`ep-1500`**. Quick BoN/AWR = `n_test=50`, 3 exp — same as Lift/Can/MT4 exploratory pipelines.
 
-† **Exploratory deltas, not the final matched estimator.** Chain5 averages 250 distinct environment initializations; quick BoN/AWR averages 3 stochastic runs on the same default 50 initializations (`1000–1049`). The arithmetic is correct, but a paper-ready causal comparison requires baseline, BoN, and AWR to use the same initialization set and repetition count.
+† **Exploratory only — not the paper matched estimator.** Chain5 = 5×50 distinct inits; quick BoN/AWR = 3 stochastic runs on seeds `1000–1049`. Paper Δ requires matched baseline/BoN/AWR on one **shared fixed init set** (`test_start_seed=1000`, `n_test=50`, `-n 3`). See [`RESOLUTIONPLAN.md`](RESOLUTIONPLAN.md).
 
 Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%**, MT4 per-task specialists **44.4 / 26.4 / 17.2 / 9.6%**, MT4 avg **24.4%**.
 
@@ -48,29 +48,32 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 
 ## Publication-readiness audit (ICRA)
 
-**Intended claim:** BoN and/or AWR improve **our own fixed OAT baseline**. Absolute agreement with OAT Table VI is a sanity check, not the main claim.
+**This repo track (us):** RoboMimic + MetaWorld — matched BoN/AWR on fixed OAT checkpoints.  
+**LIBERO / adaptive K–R diagnosis / breadth (other suites, DP, contact-rich):** scientific lead — referenced as story context and protocol example, not our build scope.  
+**Intended RM/MW claim:** relative Δ of BoN/AWR vs a **matched** single-sample baseline on the same shared fixed init set. Table VI absolute parity is a sanity check only.
 
 ### Verified facts
 
-- All completed SR values in the summary table match the cluster `summary.json` / `eval_log.json` artifacts.
-- Baseline and BoN use the same base checkpoint within each pipeline; AWR is distilled from BoN rollouts generated from that checkpoint.
-- AWR collection starts from environment seeds near 0 (parallel workers use distinct offsets), while final evaluation starts at 1000; no direct collection/eval seed overlap was observed in the completed RoboMimic datasets.
-- RoboMimic data are the official multi-human image datasets converted to Zarr. MetaWorld single-task data are locally regenerated expert demonstrations.
+- Completed exploratory SR values match cluster `summary.json` / `eval_log.json`.
+- Within each pipeline, BoN and AWR share the same base checkpoint; AWR is distilled from BoN rollouts of that checkpoint.
+- AWR collection uses env seeds near 0 (worker offsets); final eval defaults to seed base 1000 — no direct collect/eval seed overlap observed on completed RoboMimic sets.
+- RoboMimic = official multi-human image Zarr; MetaWorld single-task = locally regenerated demos (port caveats below).
 
 ### Limitations
 
-- **Exploratory vs paper claim (RM/MW).** Summary-table Δ vs chain5 for RoboMimic / MetaWorld are **exploratory** until matched re-eval. Do **not** treat them as the same matched estimator used for LIBERO (baseline and BoN/AWR on one shared seed set, `-n 3`). For the paper: main text = matched only; chain5 mean = separate sanity-check, not the primary BoN/AWR comparison.
-- **Comparison protocol / seed pairing.** Chain5 uses five disjoint environment-seed blocks (250 inits); quick BoN/AWR uses three stochastic repeats on seeds `1000–1049` (`n_test=50`). Uncertainty estimates are not comparable; sign/magnitude of Δ can flip (Can, MT4, coffee). Paper-ready: baseline, BoN, and AWR on one held-out init set and the same repetition count.
-- **n_test / suite mismatch.** LIBERO selection results use `n_test=500`; RM/MW quick pipelines use `n_test=50`. Different eval regimes — do not mix suites into one causal claim without protocol notes (or rematch).
-- **Can / MT4.** Until matched reruns exist, keep out of the central claim (or report as exploratory only). Chain5-mean Δ can over/under-state the paired effect.
-- **Coffee (MetaWorld).** Treat as a **controlled negative** under matched evaluation (vote BoN can regress vs same-seed single-sample), not as a pipeline quirk or unexplained anomaly.
-- **Fixed-policy vs Table VI.** Claim is improvement of a single OAT checkpoint under BoN/AWR, not five independently trained paper seeds. MT4 here is one shared four-task policy; Table VI specialists are a different protocol — not matched.
-- **Checkpoint selection.** Some ckpts were picked on the same eval pool later used for reporting; absolute SR is a strong sanity check, not a fully held-out test. Paired Δ on a fixed ckpt is less affected. Square BoN/AWR used `ep-0600`, not best chain5 `ep-1500`.
-- **Meta-World port.** Controlled demo port, not byte-for-byte original generator (original `sim-env` required ≥5 success timesteps then continued to 10; this port accepts on first success). Interpret MW numbers within that implementation.
-- **Compute cost.** BoN raises SR via N candidates per replan; report latency/cost with SR, not accuracy alone.
-- **Claim scope.** Adaptive-compute negatives and selection positives on LIBERO are the load-bearing story; RM/MW are generalization probes and stay subordinate until matched.
+- **Exploratory vs paper claim (RM/MW).** Summary Δ vs **chain5** are **exploratory** until matched rematch. Paper main text for this track uses only matched Δ (baseline, BoN, AWR on one shared fixed init set, `-n 3`). Chain5 absolute SR = sanity/appendix, not the BoN comparator.
+- **Shared fixed init set (not “held-out”).** Matched protocol uses `test_start_seed=1000`, `n_test=50` (episodes `1000–1049`). This is the **canonical eval pool** and often overlaps train-time checkpoint selection — do **not** call it an unused held-out test set unless a new seed base is chosen. Prefer the term **matched-seed estimator**, not classic per-episode paired testing.
+- **Comparison protocol.** Chain5 = five disjoint seed blocks × 50 (`num_exp=1`); exploratory BoN/AWR = three stochastic repeats on one block. Uncertainty and Δ are not comparable; sign/magnitude can flip (Can, MT4, coffee).
+- **n_test / suite mismatch.** LIBERO lead track typically uses `n_test=500`; our RM/MW matched table uses `n_test=50`. Do not pool suites into one causal claim without an explicit protocol note.
+- **Can / MT4.** Keep out of the central claim until matched rematch (or report exploratory only).
+- **Coffee (MetaWorld).** Under matched eval, treat as a **controlled negative** if vote-BoN ≲ matched baseline (possible mode-seeking on a dense bad mode) — not a pipeline bug. Do not claim “short task ⇒ weak compounding” without separate analysis.
+- **Fixed-policy vs Table VI.** We evaluate improvement of a **single** OAT checkpoint under BoN/AWR, not five independently trained paper seeds. MT4 here is one shared four-task policy; Table VI specialists are a different protocol.
+- **Checkpoint selection.** Some ckpts were selected on the same eval pool later used for reporting; absolute SR is a strong sanity check, not a fully independent test estimate. Matched Δ on a fixed ckpt is less affected. Square BoN/AWR used `ep-0600`, not best chain5 `ep-1500`.
+- **Meta-World port.** Controlled demo port (original `sim-env` required ≥5 success timesteps then continued to 10; this port accepts on first success). Interpret MW numbers within that implementation.
+- **Compute cost.** BoN costs N candidates per replan; report latency/cost with SR for selection claims.
+- **Claim scope.** Whole-paper adaptive-null + compounding diagnosis is load-bearing on LIBERO (lead). RM/MW are generalization / stress probes and enter main text only after matched protocol.
 
-> RM/MW chain5↔quick-BoN deltas are exploratory. LIBERO remains the matched reference. Paper tables will use paired baseline/BoN/AWR on a common held-out seed set; chain5 stays a separate sanity estimate. Coffee is a controlled negative under matched eval, not an anomaly.
+> RM/MW chain5↔quick-BoN deltas are exploratory. Paper tables for this track will use matched baseline/BoN/AWR on a shared fixed init set (`1000` + `n_test=50`); chain5 remains a separate sanity estimate. Coffee is a controlled negative under matched eval, not an anomaly. See [`RESOLUTIONPLAN.md`](RESOLUTIONPLAN.md).
 
 ---
 
