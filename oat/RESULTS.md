@@ -9,38 +9,41 @@ Workspace root: `/workspace/oat` (paths below are relative to `oat/`)
 - **BoN / AWR (quick pipeline):** `--n_test 50`, `--num_exp 3`, BoN `N=8 vote`; `eval_log.json` in eval dir.
 - All use **OAT8:** `--use_k_tokens 8 --entropy_threshold 0`, `MUJOCO_GL=egl`.
 
-**Cluster snapshot (2026-07-13 ~23:06 MSK):** RoboMimic + MT4 **DONE**. Active: **box-close** train mid ep-2000 eval (last logged SR **52.8%** @ep-1800); **disassemble chain5** seed **2/4** (done: seed0 **66%**, seed1 **64%**); **coffee/stick BoN** STEP1 Exp **2/3** (Exp1: coffee **28%**, stick **34%** — partial, not final).
+**Cluster snapshot (2026-07-15 ~01:05 MSK):** RoboMimic + MT4 exploratory **DONE**. coffee/stick **BoN+AWR DONE**. disassemble chain5 **DONE**. box-close train plateaued (best **ep-2000 @ 55.2%**); **matched baseline RUNNING** (`mwst_matched_box_close`). Paper matched rematch (baseline −n 3 for all suites) still mostly TBD — see matched table below.
 
 **Status overview**
 
 | Block | Status |
 |-------|--------|
-| RoboMimic (Lift / Can / Square) | **DONE** — chain5 + BoN/AWR pipelines complete |
-| MetaWorld MT4 multitask | **DONE** — chain5 + BoN/AWR complete |
+| RoboMimic (Lift / Can / Square) | **DONE** exploratory; **matched baseline rematch TBD** |
+| MetaWorld MT4 multitask | **DONE** exploratory; **matched baseline rematch TBD** |
 | MetaWorld single-task data + tokenizer | **DONE** |
-| MetaWorld single-task policy train | **PARTIAL** — box-close **IN PROGRESS**; coffee / stick / disassemble **STOPPED** |
-| MetaWorld single-task chain5 | coffee **DONE**, stick **DONE**, disassemble **IN PROGRESS**, box-close **TBD** |
-| MetaWorld single-task BoN / AWR | coffee **IN PROGRESS**, stick **IN PROGRESS**, box / disassemble **TBD** |
+| MetaWorld single-task policy train | **DONE** — all four specialists stopped |
+| MetaWorld single-task chain5 | coffee / stick / disassemble **DONE**; box-close **skip for now** |
+| MetaWorld single-task BoN / AWR | coffee / stick **DONE**; box / disassemble **TBD** |
+| Matched (ICRA) | box-close baseline **RUNNING**; others TBD (see Table B) |
 
 ---
 
 ## Summary table
 
-| Benchmark | Chain5 baseline | BoN N=8 (3 exp) | AWR single (3 exp) | BoN Δ vs chain5† | AWR Δ vs chain5† |
-|-----------|-----------------|-----------------|--------------------|---------------|---------------|
+| Benchmark | Chain5 baseline (sanity) | BoN N=8 (3 exp) | AWR single (3 exp) | Δ_BoN vs chain5† | Δ_AWR vs chain5† |
+|-----------|--------------------------|-----------------|--------------------|------------------|------------------|
 | **Lift** | **83.6 ± 1.7%** (ep-0600) | 91.3 ± 2.9% | **93.3 ± 1.8%** | +7.7 pp | +9.7 pp |
 | **Can** | **86.0 ± 2.8%** (ep-1700) | 90.7 ± 1.3% | 89.3 ± 1.8% | +4.7 pp | +3.3 pp |
 | **Square** (chain5 best) | **31.2 ± 1.5%** (ep-1500) | — | — | — | — |
 | **Square** (BoN/AWR @ ep-0600) | **30.8 ± 2.7%** (ep-0600) | 38.0 ± 2.0% | **36.7 ± 2.9%** | **+7.2 pp** | **+5.9 pp** |
-| **MT4 multitask** | **28.4 ± 3.1%** (ep-0450) | 26.7 ± 2.4% | 18.7 ± 1.8% | −1.7 pp | −9.7 pp |
-| **MW coffee-pull** (specialist) | **43.2 ± 3.3%** (ep-1000) | *BoN Exp1=28%; Exp2/3 running* | *pending BoN* | — | — |
-| **MW stick-pull** (specialist) | **16.4 ± 4.0%** (ep-0800) | *BoN Exp1=34%; Exp2/3 running* | *pending BoN* | — | — |
-| **MW disassemble** (specialist) | *chain5 2/4* (so far 66%, 64%; train ep-1400 70.0%) | TBD | TBD | — | — |
-| **MW box-close** (specialist) | *train ep-2000 eval*; last logged **52.8%** @ep-1800 | TBD | TBD | — | — |
+| **MT4 multitask** ‡ | **28.4 ± 3.1%** (ep-0450) | 26.7 ± 2.4% | 18.7 ± 1.8% | −1.7 pp | −9.7 pp |
+| **MW coffee-pull** (specialist) | **43.2 ± 3.3%** (ep-1000) | **28.0 ± 0.0%** | **29.3 ± 2.3%** | exploratory −15.2 pp | exploratory −13.9 pp |
+| **MW stick-pull** (specialist) | **16.4 ± 4.0%** (ep-0800) | **30.7 ± 3.1%** | **39.3 ± 7.6%** | exploratory +14.3 pp | exploratory +22.9 pp |
+| **MW disassemble** (specialist) | **66.4 ± 3.2%** (ep-1400) | TBD | TBD | — | — |
+| **MW box-close** (specialist) | *train best* **55.2%** @ep-2000 (chain5 N/A) | TBD | TBD | — | — |
 
-**Square caveat:** BoN/AWR pipeline used **`ep-0600_sr-0.420.ckpt`**, not the better chain5 ckpt **`ep-1500`** (31.2%). Δ for BoN/AWR is vs **ep-0600 chain5 only** (30.8%). BoN/AWR eval is quick protocol (`n_test=50`, 3 exp), not chain5 250-eps — same as Lift/Can/MT4 pipelines.
+**Square caveat:** BoN/AWR used **`ep-0600_sr-0.420.ckpt`**, not best chain5 **`ep-1500`**. Quick BoN/AWR = `n_test=50`, 3 exp — same as Lift/Can/MT4 exploratory pipelines.
 
-† **Exploratory deltas, not the final matched estimator.** Chain5 averages 250 distinct environment initializations; quick BoN/AWR averages 3 stochastic runs on the same default 50 initializations (`1000–1049`). The arithmetic is correct, but a paper-ready causal comparison requires baseline, BoN, and AWR to use the same initialization set and repetition count.
+† **Exploratory only — not the paper matched estimator.** Chain5 = 5×50 distinct inits; quick BoN/AWR = 3 stochastic runs on seeds `1000–1049`. Paper Δ requires matched baseline/BoN/AWR on one **shared fixed init set** (`test_start_seed=1000`, `n_test=50`, `-n 3`). See [`RESOLUTIONPLAN.md`](RESOLUTIONPLAN.md).
+
+‡ **MT4:** kept for the exploratory record; **not** in matched Table B / paper (BoN/AWR did not help).
 
 Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%**, MT4 per-task specialists **44.4 / 26.4 / 17.2 / 9.6%**, MT4 avg **24.4%**.
 
@@ -48,32 +51,186 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 
 ## Publication-readiness audit (ICRA)
 
-**Intended claim:** BoN and/or AWR improve **our own fixed OAT baseline**. Absolute agreement with OAT Table VI is a sanity check, not the main claim.
+**This repo track (us):** RoboMimic + MetaWorld — matched BoN/AWR on fixed OAT checkpoints.  
+**LIBERO / adaptive K–R diagnosis / breadth (other suites, DP, contact-rich):** scientific lead — referenced as story context and protocol example, not our build scope.  
+**Intended RM/MW claim:** relative Δ of BoN/AWR vs a **matched** single-sample baseline on the same shared fixed init set. Table VI absolute parity is a sanity check only.
 
 ### Verified facts
 
-- All completed SR values in the summary table match the cluster `summary.json` / `eval_log.json` artifacts.
-- Baseline and BoN use the same base checkpoint within each pipeline; AWR is distilled from BoN rollouts generated from that checkpoint.
-- AWR collection starts from environment seeds near 0 (parallel workers use distinct offsets), while final evaluation starts at 1000; no direct collection/eval seed overlap was observed in the completed RoboMimic datasets.
-- RoboMimic data are the official multi-human image datasets converted to Zarr. MetaWorld single-task data are locally regenerated expert demonstrations.
+- Completed exploratory SR values match cluster `summary.json` / `eval_log.json`.
+- Within each pipeline, BoN and AWR share the same base checkpoint; AWR is distilled from BoN rollouts of that checkpoint.
+- AWR collection uses env seeds near 0 (worker offsets); final eval defaults to seed base 1000 — no direct collect/eval seed overlap observed on completed RoboMimic sets.
+- RoboMimic = official multi-human image Zarr; MetaWorld single-task = locally regenerated demos (port caveats below).
 
 ### Limitations
 
-- **Comparison protocol.** Our main claim is a fixed-policy improvement of a single OAT checkpoint under BoN and AWR, not a full reproduction of the paper’s five independently trained seeds. Relatedly, our MT4 result is one shared four-task policy, whereas Table VI reports per-task specialists — do not treat MT4-vs-Table-VI as protocol-matched.
-- **Evaluation variance.** The chain5 estimate uses five disjoint environment-seed blocks, whereas the quick BoN/AWR pipeline averages three stochastic repeats on a shared seed set; these uncertainty estimates are therefore not directly comparable.
-- **Seed pairing.** A final paper-ready table should evaluate baseline, BoN, and AWR on the same held-out initialization set to enable a paired comparison and reduce variance (including task-level significance claims).
-- **Checkpoint selection.** Some checkpoints were selected using the same evaluation pool later used for reporting, so absolute success rates should be interpreted as a strong sanity check rather than fully independent test-set estimates. Paired Δ on a fixed checkpoint is less affected.
-- **Meta-World port.** Our Meta-World data pipeline is a controlled port rather than a byte-for-byte reproduction of the original demonstration generator (original `sim-env` required ≥5 success timesteps and continued to 10; this port accepts on first success), so results should be interpreted within that implementation.
-- **Compute cost.** BoN improves accuracy at the cost of multiple candidate generations per decision, so we report success rate together with deployment overhead rather than accuracy alone.
+- **Exploratory vs paper claim (RM/MW).** Summary Δ vs **chain5** are **exploratory** until matched rematch. Paper main text for this track uses only matched Δ (baseline, BoN, AWR on one shared fixed init set, `-n 3`). Chain5 absolute SR = sanity/appendix, not the BoN comparator.
+- **Shared fixed init set (not “held-out”).** Matched protocol uses `test_start_seed=1000`, `n_test=50` (episodes `1000–1049`). This is the **canonical eval pool** and often overlaps train-time checkpoint selection — do **not** call it an unused held-out test set unless a new seed base is chosen. Prefer the term **matched-seed estimator**, not classic per-episode paired testing.
+- **Comparison protocol.** Chain5 = five disjoint seed blocks × 50 (`num_exp=1`); exploratory BoN/AWR = three stochastic repeats on one block. Uncertainty and Δ are not comparable; sign/magnitude can flip (Can, MT4, coffee).
+- **n_test / suite mismatch.** LIBERO lead track typically uses `n_test=500`; our RM/MW matched table uses `n_test=50`. Do not pool suites into one causal claim without an explicit protocol note.
+- **Can / coffee / stick / disassemble / box:** same matched rematch; no suite pre-labeled from exploratory runs. Paper includes a suite only after Table B cells are filled from `matched/`.
+- **Lift:** matched baseline logged, но paper path = **retrain** → new matched triplet later.
+- **Square:** finish matched baseline, then same rematch as others.
+- **MT4 multitask.** Exploratory only; **not** in matched/paper wave.
+- **Fixed-policy vs Table VI.** Single OAT checkpoint under BoN/AWR vs paper’s multi-seed Table VI — absolute parity is sanity only.
+- **Checkpoint selection.** Some ckpts selected on the same eval pool; matched Δ on a fixed ckpt is the claim.
+- **Meta-World port.** Controlled demo port differs from original sim-env success criterion — interpret MW within this implementation.
+- **Compute cost.** BoN costs N candidates per replan; report latency/cost with SR (Table C, all suites).
+- **Claim scope.** LIBERO = lead diagnosis; RM/MW = matched generalization probes.
 
-> Our results should be interpreted as an evaluation of BoN/AWR on a fixed OAT baseline rather than a full reproduction of Table VI. In particular, chain5 and quick BoN/AWR use different repetition structures, so their confidence intervals are not directly comparable. For the final paper, we will report paired evaluations on a common held-out seed set, and we will clearly distinguish protocol differences from benchmark-matched results.
+> **PAPER = Table P only** (`matched_s10000`, episodes `10000–10049`).  
+> Table B below = lab draft on selection seeds `1000–1049` — **не в статью**. Exploratory Summary = тоже только lab.
 
-### Current interpretation
+### Table P — PAPER matched (seed 10000) ← сюда пишем числа для статьи
 
-- **Lift:** strong exploratory positive; BoN and AWR are well above the chain5 baseline.
-- **Can:** cluster logs are correct (BoN 92/92/88%; AWR 90/92/86%), but the matched baseline `n=3` was not run, so the exact paired delta is unresolved.
-- **Square:** positive exploratory delta on `ep-0600`; it must not be compared against the better `ep-1500` checkpoint without rerunning methods from that checkpoint.
-- **MT4:** BoN is flat/slightly negative and AWR regresses; this is a useful negative result.
+**Protocol:** `test_start_seed=10000`, `n_test=50`, `-n 5`, OAT8, `--temperature 1.0 --topk 10`, BoN `--bon_free 8 --bon_signal vote`.  
+**Δ** = method − paper baseline. Ckpt выбирался на seed 1000; отчёт на 10000 (disjoint).  
+**Wave 1 (сейчас):** baseline + BoN, `SKIP_AWR=1`.  
+**Wave 2:** только после GATE ниже — свежий AWR, **не** ранние exploratory раны.  
+**Launch:** `bash scripts/cluster_launch_matched_paper_wave.sh` (5 tmux параллельно).
+
+#### ⛔ GATE → Wave 2 (зафиксировано 2026-07-16)
+
+Пока Gate не закрыт — **AWR не запускать**. Полный текст: [`RESOLUTIONPLAN.md`](RESOLUTIONPLAN.md).
+
+1. Wave 1 suite DONE: есть `summary.json` + baseline/BoN в Table P (**только** `matched_s10000`).
+2. ❌ Не брать: exploratory `policy_awr_*.ckpt` / старые `awr_*.npz` / seed-1000 Table B / chain5 как paper Δ.
+3. Collect: явный `--seed 0` (❌ selection RM `1000–1049` / MW `1000–1249`, ❌ report `10000`); eval AWR: `TEST_START_SEED=10000`.
+4. Square: first **ep-1500**; если BoN flat → rematch **ep-0600** @ s10000 (exploratory 600 ≠ paper).
+5. Оригинал OAT Table VI — **sanity only**, не comparator.
+6. **RM vs MW фиты разные** (`cfg.seed` 42 vs 0), но env TopK у обоих default `test_start_seed=1000` (MW длиннее до 1249). Paper `10000` вне обоих.
+
+**После anti-leak seeds:** остаётся (a) **MW demo port** = controlled limitation; (b) **Lift** retrain; (c) **Square** Wave1/fallback. MT4 — не в paper.
+
+| Suite | Base ckpt | Paper baseline | BoN N=8 | AWR | Δ_BoN | Δ_AWR | Artifacts |
+|-------|-----------|----------------|---------|-----|-------|-------|-----------|
+| Can | ep-1700 | **76.4±3.0%** | **80.8±1.1%** | **79.2±7.7%** | **+4.4** | **+2.8** | `matched_s10000/can/` · `awr_s10000_can.*` (AWR < BoN) |
+| MW coffee-pull | ep-1000 | **41.6±4.1%** | **42.8±2.3%** | **41.2±3.3%** | **+1.2** | **−0.4** | `matched_s10000/coffee-pull/` · `awr_s10000_coffee-pull.*` (AWR ≈ base, flat) |
+| MW stick-pull | ep-0800 | **15.6±6.2%** | **25.6±2.6%** | **26.8±5.2%** | **+10.0** | **+11.2** | `matched_s10000/stick-pull/` · `awr_s10000_stick-pull.*` |
+| MW disassemble | ep-1400 | **62.4±5.2%** | **63.2±6.3%** | **69.6±5.7%** | **+0.8** | **+7.2** | `matched_s10000/disassemble/` · `awr_s10000_disassemble.*` |
+| MW box-close | ep-2000 | **59.6±7.5%** | **66.4±3.0%** | **72.8±4.1%** | **+6.8** | **+13.2** | `matched_s10000/box-close/` · `awr_s10000_box-close.*` |
+| Square | **ep-0600** | **29.6±7.3%** | **31.2±9.0%** | Wave2 RUN | **+1.6** | — | `matched_s10000/square/` · `paper_w2_square` · base=`ep-0600_sr-0.420` |
+| Square ep-1500 (archived) | ep-1500 | **27.2±6.9%** | **26.0±7.5%** | — | **−1.2** | — | `matched_s10000/square_ep1500/` — BoN flat, not paper primary |
+| Lift | retrain | — | — | — | — | — | later |
+
+**Wave1 BoN verified (2026-07-16):** can / coffee / stick — `eval_log.json` ↔ `summary.json` match; Wave1 logs contain `DONE baseline` + `DONE bon`. Missing `ALL DONE` only (triplet.sh edited mid-run) — **не** invalidates paper numbers. Primary artifacts = eval_logs under `matched_s10000/`.
+
+**Wave1 Square ep-0600 DONE (2026-07-17):** baseline 29.6±7.3 / BoN 31.2±9.0 (Δ+1.6, weak). Gate → Wave2 launched.
+
+**Wave2 DONE (2026-07-17):** box-close AWR 72.8±4.1 (Δ_AWR +13.2); disassemble AWR 69.6±5.7 (Δ_AWR +7.2); can AWR 79.2±7.7 (Δ_AWR +2.8, below BoN 80.8); coffee-pull AWR 41.2±3.3 (Δ_AWR −0.4, flat); stick-pull AWR 26.8±5.2 (Δ_AWR +11.2). Sources: `awr_n5/eval_log.json` @ `matched_s10000/`.
+
+**Wave 2 in flight (2026-07-17):** **square ep-0600** collect ~93% (18.6k/20k) → потом train→eval@10000.  
+Collect `--seed 0` · train `--seed 0` · eval `@10000` · `scripts/cluster_matched_paper_wave2_awr.sh`.  
+❌ not using exploratory `policy_awr_*` / old `awr_*.npz` / ep-1500 / seed-1000.
+
+**Why Wave2 collect is slow (not stuck):** parallel BoN-distill collects (`n_chunks=20000`, `--bon_n 8`) on **2 GPUs / shared CPU+EGL**. Sim-bound (~4–6 s/chunk); GPU util often ~0%. Do **not** interpret as hung.
+
+Paper Wave1 artifacts:  
+`output/eval/matched_s10000/<suite>/{baseline_n5,bon_n8_n5}/eval_log.json` + `summary.json` + `logs/matched_s10000_<suite>_gpu*.log`.
+
+| Artifact pattern | Examples |
+|------------------|----------|
+| AWR dataset | `my_datasets/awr_s10000_{can,coffee-pull,stick-pull,box-close,disassemble,square}.npz` |
+| AWR ckpt | `my_models/awr_s10000_<suite>.ckpt` |
+| Wave2 log | `logs/awr_s10000_<suite>_wave2_gpu{0\|1}.log` |
+| Wave2 eval log | `logs/awr_s10000_<suite>_wave2_eval_gpu{0\|1}.log` |
+| AWR eval | `output/eval/matched_s10000/<suite>/awr_n5/` |
+| tmux | `paper_w2_<suite>` |
+| ❌ never | `my_models/policy_awr_*` / old exploratory `awr_*.npz` / Table B |
+
+**Lift** after retrain.
+
+**Имена файлов на suite (одинаковый шаблон):**
+
+```text
+output/eval/matched_s10000/<suite>/
+  baseline_n5/eval_log.json     # Wave1 single-sample OAT8  ← paper source of truth
+  bon_n8_n5/eval_log.json       # Wave1 BoN N=8 vote
+  awr_n5/eval_log.json          # Wave2
+  summary.json                  # protocol + SR + Δ + paths
+my_datasets/awr_s10000_<suite>.npz
+my_models/awr_s10000_<suite>.ckpt
+logs/matched_s10000_<suite>_gpu*.log           # Wave1 (DONE baseline/bon)
+logs/awr_s10000_<suite>_wave2_gpu*.log         # Wave2 collect+train
+logs/awr_s10000_<suite>_wave2_eval_gpu*.log    # Wave2 AWR eval only
+tmux: paper_s10000_<suite> | paper_w2_<suite>
+```
+
+**Роль RM/MW в статье (к сводке от 2026-06-23):** LIBERO несёт диагноз (компаундинг / K·R null / отбор+).  
+Наш трек = **ширина**: тот же позитив отбора (BoN + потом AWR) на RoboMimic/MetaWorld при **чистом** matched-протоколе. Не Таблица VI absolute parity.
+
+### Latency / Table C — протокол репрезентативности (зафиксировано 2026-07-17)
+
+Latency **нужна для статьи** (BoN = N× AR/replan; AWR = single-forward).  
+Отдельный **policy-forward** замер — **не** перепрогон matched SR. Цифры Table P не меняются.
+
+| | |
+|--|--|
+| **Когда** | после Wave 1–2 SR для suite’ов в paper (Phase 5) |
+| **Что** | Single (OAT8) / BoN N=8 vote / AWR — **ms per policy call**, batch=1 |
+| **Куда** | `output/eval/matched_s10000/<suite>/latency.json` → Table C (SR из Table P × ms × ΔSR × cost) |
+| **Скрипт** | `my_scripts/measure_latency*` (+ `bon_free` + AWR ckpt), тот же docker/кластер, что paper eval |
+| **Канон** | также [`RESOLUTIONPLAN.md`](RESOLUTIONPLAN.md) § Latency / Table C |
+
+**Обязательно (иначе не в статью):**
+
+1. **Тот же hardware / окружение**, где интерпретируем SR — один GPU того же типа (cluster V100), тот же docker/CUDA/driver. ❌ Mac/другая машина + cluster SR. ❌ TRT/ONNX только если так же крутится sim-eval.
+2. **Batch=1 + deterministic** насколько возможно (`cudnn.deterministic` / fixed timing seeds). Warmup **вне** статистики.
+3. **5–10 timed reps** на режим → в Table C **median** + **mean±std** (или IQR). ❌ один случайный прогон.
+4. **Тот же input pipeline**, что sim-eval (resize/norm/To-stack/dtype) — obs из checkpoint dataset / val, не dummy, если он меняет путь. Single = OAT8 (`k=8`, `entropy_threshold=0`, T=1, topk=10); BoN = `bon_free=8` vote; AWR = `awr_s10000_<suite>.ckpt` single-sample.
+5. **AWR ckpt = Wave2 артефакт, архитектура не менялась** — тот же `my_models/awr_s10000_<suite>.ckpt`, что дал `awr_n5/` (path/mtime/sha ↔ Wave2 log / summary). Baseline/BoN — тот же `BASE_CKPT`, что Wave1. ❌ exploratory `policy_awr_*` / другой epoch / ckpt после рефактора policy. Если код модели после Wave2 eval менялся — откат к commit Wave2 или пересчёт SR, не смешивать.
+6. **`latency.json` обязан содержать воспроизводимость:** `git_commit`, `git_dirty`, `git_branch`, `measured_at`, `host`/`gpu_name`, `docker_image`, пути (+ optional sha256) `base_ckpt`/`awr_ckpt`, N reps + median/mean/std. Без commit — не paper-final.
+
+**Не делать:** пересчёт Table P SR ради latency; мешать MuJoCo/render wall-clock в «policy latency» (с оговоркой, что episode time доминирует sim); кросс-suite SOTA latency без одной машины/протокола; AWR latency на другом ckpt/архитектуре, чем Wave2 Table P.
+
+В тексте: *latency on same cluster GPU/stack as matched eval; batch=1; median over N timed forwards; same obs pipeline; same Wave2 AWR ckpt; code commit in latency.json; SR from Table P unchanged.*
+
+### Table C — PAPER latency (paper-proof remasure, 2026-07-17)
+
+Источник: `output/eval/matched_s10000/<suite>/latency.json` + сводка `matched_s10000/table_c.json` (`paper_proof: true`).  
+Кластер **Tesla V100-SXM2-32GB**, torch **2.5.1+cu124**, batch=1, warmup=20 excluded, **10 reps**, median; obs = val dataset; **obs counter reset + warmup per mode** (fair Single↔BoN); `git_commit=643bca01…` via `OAT_GIT_*` (docker без `.git`); `git_dirty=true` (uncommitted scripts at measure).  
+**Не** MuJoCo wall-clock. Square — после Wave2. Pre-proof archive: `matched_s10000/_latency_pre_paperproof/`.
+
+| Suite | Single median | BoN N=8 median | AWR median | SR (Table P) base→BoN→AWR |
+|-------|---------------|----------------|------------|---------------------------|
+| Can | **40.9** ms | **40.3** ms | **40.4** ms | 76.4 → 80.8 → 79.2 |
+| coffee-pull | **48.7** | **47.7** | **49.3** | 41.6 → 42.8 → 41.2 |
+| stick-pull | **47.2** | **46.2** | **49.9** | 15.6 → 25.6 → 26.8 |
+| disassemble | **47.6** | **49.1** | **49.2** | 62.4 → 63.2 → 69.6 |
+| box-close | **48.8** | **48.1** | **48.0** | 59.6 → 66.4 → 72.8 |
+
+**Table C artifacts** (paper latency sources; все под `output/eval/matched_s10000/`):
+
+| Suite | `latency.json` | AWR ckpt (timed) | Base ckpt (Single/BoN) | note |
+|-------|----------------|------------------|------------------------|------|
+| Can | `can/latency.json` | `my_models/awr_s10000_can.ckpt` | Wave1 `base_ckpt` in json / `summary.json` | `paper_proof: true` |
+| coffee-pull | `coffee-pull/latency.json` | `my_models/awr_s10000_coffee-pull.ckpt` | idem | |
+| stick-pull | `stick-pull/latency.json` | `my_models/awr_s10000_stick-pull.ckpt` | idem | |
+| disassemble | `disassemble/latency.json` | `my_models/awr_s10000_disassemble.ckpt` | idem | |
+| box-close | `box-close/latency.json` | `my_models/awr_s10000_box-close.ckpt` | idem | |
+| Square | — | `my_models/awr_s10000_square.ckpt` (после Wave2) | ep-0600 | **TBD** after AWR eval |
+| **сводка** | `table_c.json` | — | — | rebuild: `scripts/build_table_c.py` |
+| pre-proof archive | `_latency_pre_paperproof/<suite>_latency.json` | — | — | не в статью |
+
+Scripts: `scripts/measure_latency_paper.py`, `scripts/cluster_latency_paper_done.sh` (requires `OAT_GIT_COMMIT`), `scripts/build_table_c.py`.
+
+**Read for paper:** BoN median ≈ Single на всех 5 suite (~41–49 ms) — ожидаемо: vision encode **один раз** (amortized), AR дешёвый → N=8 почти не бьёт policy-forward cost. Это и есть OAT-substrate win рядом с +SR. AWR ≈ Single. Episode time всё ещё доминирует sim — Table C = inference cost only.
+
+### Table B — LAB ONLY (seed 1000, selection pool) — не paper
+
+Deprecated for paper claims. Kept so we don't lose the draft numbers.
+
+| Suite | baseline | BoN | AWR | note |
+|-------|----------|-----|-----|------|
+| Can | 79.3±1.2 | 80.0±5.3 | 76.0±0.0 | selection-pool leak |
+| coffee | 30.0±4.0 | 30.0±4.0 | 29.3±1.2 | lab |
+| stick | 18.7±10.1 | 25.3±3.1 | 30.7±6.4 | lab |
+| disassemble | 69.3±7.0 | 70.0±6.0 | — | lab |
+| box | 52.0±3.5 | 56.0±5.3 | — | was under `metaworld_box-close/` |
+| Lift | 78.7±1.2 | — | — | retrain before paper |
+| Square | **25.3±4.2** (ep-0600) | — | — | baseline seed1000 DONE; BoN/AWR not run on that pool |
+
+Paths: `output/eval/matched/<suite>/` (seed 1000). **Do not cite in paper.**
 
 ---
 
@@ -402,30 +559,30 @@ Verdict: **plateau ~43%** since ep-1000; stopped for chain5/BoN.
 
 > Chain5 mean **matches** train-time ep-1000 (43.2%) — no train-eval gap on this task.
 
-#### Eval — BoN → AWR pipeline — **IN PROGRESS** (2026-07-13)
+#### Eval — BoN → AWR pipeline — **DONE** (2026-07-14)
 | Item | Value |
 |------|-------|
-| Script | `scripts/cluster_mw_coffee_pull_bon_awr_pipeline.sh` |
-| tmux | `mw_coffee_bon_awr` |
-| Pipeline log | `logs/mw_coffee_pull_bon_awr_pipeline.log` |
+| Script | `scripts/cluster_mw_coffee_pull_bon_awr_pipeline.sh` + `scripts/resume_mw_coffee_awr_step45.sh` |
+| Logs | `logs/mw_coffee_pull_bon_awr_pipeline.log`, `logs/mw_coffee_pull_awr_resume.log` |
 | Base ckpt | `ep-1000_sr-0.432.ckpt` |
 | Chain5 baseline | **43.2 ± 3.3%** |
 
-**BoN** (expected paths):
+**BoN** — **DONE** (`n_test=50`, `-n 3`, vote; seeds `1000–1049`):
 | Item | Value |
 |------|-------|
 | Output | `output/eval/metaworld_coffee-pull_bon_n8_n3/` |
-| Log artifact | `output/eval/metaworld_coffee-pull_bon_n8_n3/eval_log.json` |
-| SR | TBD (STEP1: Exp1 **28%** done; Exp 2/3 running — not a final mean) |
+| **SR** | **28.0 ± 0.0%** |
+| Δ vs chain5† | exploratory **−15.2 pp** |
 
-**AWR** (expected paths):
+**AWR** — **DONE** (train+eval after docker NVML restart):
 | Item | Value |
 |------|-------|
 | Dataset | `my_datasets/awr_mw_coffee_pull_bon.npz` |
+| Collect stats | chunk-w SR 0.238; per-ep SR **0.390** / 1926 eps |
 | AWR ckpt | `my_models/policy_awr_mw_coffee_pull.ckpt` |
-| Eval output | `output/eval/metaworld_coffee-pull_awr_n3/` |
-| Eval log | `output/eval/metaworld_coffee-pull_awr_n3/eval_log.json` |
-| SR | TBD |
+| Eval output | `output/eval/metaworld_coffee-pull_awr_n3/eval_log.json` |
+| **SR** | **29.3 ± 2.3%** |
+| Δ vs chain5† | exploratory **−13.9 pp** (still well below chain5; ≈ BoN — distill keeps the low mode) |
 
 ---
 
@@ -471,30 +628,30 @@ Verdict: **peak @ ep-800**, monotonic decline after → stopped.
 
 > Chain5 **below** train best (16.4% vs 21.2%) — high seed variance; train SR optimistic.
 
-#### Eval — BoN → AWR pipeline — **IN PROGRESS** (2026-07-13)
+#### Eval — BoN → AWR pipeline — **DONE** (2026-07-14)
 | Item | Value |
 |------|-------|
-| Script | `scripts/cluster_mw_stick_pull_bon_awr_pipeline.sh` |
-| tmux | `mw_stick_bon_awr` |
-| Pipeline log | `logs/mw_stick_pull_bon_awr_pipeline.log` |
+| Script | `scripts/cluster_mw_stick_pull_bon_awr_pipeline.sh` + `scripts/resume_mw_stick_awr_step45.sh` |
+| Logs | `logs/mw_stick_pull_bon_awr_pipeline.log`, `logs/mw_stick_pull_awr_resume.log` |
 | Base ckpt | `ep-0800_sr-0.212.ckpt` |
 | Chain5 baseline | **16.4 ± 4.0%** |
 
-**BoN** (expected paths):
+**BoN** — **DONE** (`n_test=50`, `-n 3`, vote; seeds `1000–1049`):
 | Item | Value |
 |------|-------|
 | Output | `output/eval/metaworld_stick-pull_bon_n8_n3/` |
-| Log artifact | `output/eval/metaworld_stick-pull_bon_n8_n3/eval_log.json` |
-| SR | TBD (STEP1: Exp1 **34%** done; Exp 2/3 running — not a final mean) |
+| **SR** | **30.7 ± 3.1%** (exp ≈ 0.34 / 0.30 / 0.28) |
+| Δ vs chain5† | exploratory **+14.3 pp** |
 
-**AWR** (expected paths):
+**AWR** — **DONE** (train+eval after docker NVML restart):
 | Item | Value |
 |------|-------|
 | Dataset | `my_datasets/awr_mw_stick_pull_bon.npz` |
+| Collect stats | chunk-w SR 0.186; per-ep SR **0.237** / 1643 eps |
 | AWR ckpt | `my_models/policy_awr_mw_stick_pull.ckpt` |
-| Eval output | `output/eval/metaworld_stick-pull_awr_n3/` |
-| Eval log | `output/eval/metaworld_stick-pull_awr_n3/eval_log.json` |
-| SR | TBD |
+| Eval output | `output/eval/metaworld_stick-pull_awr_n3/eval_log.json` |
+| **SR** | **39.3 ± 7.6%** |
+| Δ vs chain5† | exploratory **+22.9 pp** (AWR > BoN here — strong distill on hard task; matched baseline still owed for paper Δ) |
 
 ---
 
@@ -524,81 +681,82 @@ Train-time SR curve:
 
 Verdict: plateau ~68–70% for 800 ep, then drop at ep-1800 → stopped; chain5 uses **ep-1400**.
 
-#### Eval — Chain5 — **IN PROGRESS** (2026-07-13)
+#### Eval — Chain5 — **DONE** (2026-07-14)
 | Item | Value |
 |------|-------|
 | Script | `scripts/cluster_eval_mw_disassemble_chain5.sh` |
-| tmux | `mwst_chain5_disassemble` |
+| tmux (was) | `mwst_chain5_disassemble` |
 | Log | `logs/eval_mw_disassemble_chain5.log` |
 | Output dir | `output/eval/metaworld_disassemble_paper5_ep1400/` |
-| Summary (when done) | `output/eval/metaworld_disassemble_paper5_ep1400/summary.json` |
+| Summary | `output/eval/metaworld_disassemble_paper5_ep1400/summary.json` |
 | Per-seed dirs | `.../seed_{0..4}/` + `seed_{0..4}.log` |
 | Base ckpt | `ep-1400_sr-0.700.ckpt` |
 | Train-time SR @ ckpt | 70.0% |
+| **SR** | **66.4 ± 3.2%** |
+| Per-environment-block | 66%, 64%, 56%, 72%, 74% |
 | Paper target | 17.2% |
-| SR | TBD (seeds 0–1 done: **66%**, **64%**; seed **2/4** running) |
 
-> Train 70% vs paper 17.2% — chain5 is the authoritative number; train SR may be optimistic (top-k selected on same 250 test seeds).
+> Chain5 slightly below train best (66.4% vs 70.0%); still ≫ paper specialist 17.2%. Train SR mildly optimistic.
 
-#### Eval — BoN → AWR — **TBD** (after chain5)
+#### Eval — BoN → AWR — **TBD** (after chain5; not started)
 
 ---
 
 ### MetaWorld single-task — box-close
 
-#### Policy train — **IN PROGRESS** (2026-07-13, possible plateau after ep-1800)
+#### Policy train — **STOPPED on plateau** (2026-07-14)
 | Item | Value |
 |------|-------|
-| tmux | `mwst_pol_box_close` |
-| GPU | 0 |
+| tmux (was) | `mwst_pol_box_close` (killed) |
+| GPU | 0 (freed for AWR resume) |
 | Run dir | `output/20260711/134439_train_oatpolicy_mw-box-close_st_N50/` |
 | Train log | `logs/train_oatpolicy_mw-box-close_st_N50_s0.log` |
 | Metrics log | `output/20260711/134439_train_oatpolicy_mw-box-close_st_N50/logs.json` |
 | Frozen tokenizer | `output/20260710/212943_train_oattok_mw-box-close_st_N50/checkpoints/ep-3450_mse-0.019.ckpt` |
-| Launch | `scripts/cluster_launch_metaworld_single_policy_4.sh` |
-| Script | `scripts/cluster_policy_metaworld_single.sh` |
 | Settings | `lazy_eval=false`, `rollout_every=200`, `n_test=250`, `n_parallel_envs=4`, `checkpoint.topk.k=3` |
 
-Train-time SR curve:
+Train-time SR curve (`mean_success_rate`):
 
 | Epoch | SR |
 |-------|-----|
 | 600 | 42.8% |
+| 800 | 42.4% |
+| 1000 | 42.0% |
 | 1200 | 44.4% |
 | 1400 | 45.6% |
 | 1600 | 52.4% |
-| 1800 | **52.8%** |
-| 2000 | *eval in progress* (chunk ~5/63) |
-| top-k | `ep-1400_sr-0.456.ckpt`, `ep-1600_sr-0.524.ckpt`, `ep-1800_sr-0.528.ckpt` |
+| 1800 | 52.8% |
+| **2000** | **55.2%** (**best**) |
+| 2200 | 50.4% |
+| 2400 | 54.0% |
+| ~2600 | train-only when stopped (no better top-k) |
+| top-k on disk | `ep-1800_sr-0.528.ckpt`, `ep-2000_sr-0.552.ckpt`, `ep-2400_sr-0.540.ckpt` |
 
-Verdict: large gain through ep-1600, then only +0.4 pp at ep-1800 → **possible plateau**; ep-2000 eval running — wait for it before selecting the chain5 checkpoint.
+Verdict: **plateaued** — peak at ep-2000; next two evals below best (−4.8 / −1.2 pp). Stopped train; **matched / BoN / AWR ckpt = `ep-2000_sr-0.552.ckpt`**.
 
-#### Eval — Chain5 / BoN / AWR — **TBD**
+#### Eval — matched baseline — **RUNNING**; BoN / AWR — **TBD**
 
-Expected artifact names (when launched):
-| Item | Path pattern |
-|------|--------------|
-| Chain5 script | `scripts/cluster_eval_mw_box_close_chain5.sh` (TBD) |
-| Chain5 output | `output/eval/metaworld_box-close_paper5_epXXXX/` |
-| Chain5 log | `logs/eval_mw_box_close_chain5.log` |
-| BoN/AWR script | `scripts/cluster_mw_box_close_bon_awr_pipeline.sh` (TBD) |
-| BoN output | `output/eval/metaworld_box-close_bon_n8_n3/` |
-| AWR dataset | `my_datasets/awr_mw_box_close_bon.npz` |
-| AWR ckpt | `my_models/policy_awr_mw_box_close.ckpt` |
-| AWR eval | `output/eval/metaworld_box-close_awr_n3/` |
+| Item | Path / status |
+|------|---------------|
+| Script | `scripts/cluster_eval_mw_box_close_matched_baseline.sh` |
+| tmux | `mwst_matched_box_close` |
+| Log | `logs/eval_mw_box_close_matched_baseline.log` |
+| Output | `output/eval/matched/metaworld_box-close/baseline_n3/` |
+| Protocol | `seed=1000`, `n_test=50`, `-n 3`, OAT8 |
+| BoN / AWR | after baseline (same ckpt) — see Table B |
+| Chain5 | not prioritized (sanity only) |
 
-Paper target: **44.4%** (already exceeded in train-time eval; this is not an independent final estimate).
+Paper target: **44.4%** (train-time 55.2% already above; not an independent final estimate).
 
 ---
 
-### Active cluster tmux (2026-07-13)
+### Active cluster tmux (2026-07-15 ~01:05 MSK)
 
 | tmux | Task | Stage |
 |------|------|-------|
-| `mwst_pol_box_close` | box-close | policy train — ep-2000 eval |
-| `mwst_chain5_disassemble` | disassemble | chain5 seed **2/4** (0=66%, 1=64%) |
-| `mw_coffee_bon_awr` | coffee-pull | BoN STEP1 Exp **2/3** (Exp1=28%) |
-| `mw_stick_bon_awr` | stick-pull | BoN STEP1 Exp **2/3** (Exp1=34%) |
+| `mwst_matched_box_close` | box-close | **matched baseline RUNNING** (`seed=1000`, `n_test=50`, `-n 3`, ep-2000) |
+
+Finished: coffee/stick AWR (`[DONE]` ~17:55 UTC); coffee/stick BoN; disassemble chain5; box train (plateau).
 
 
 ---
@@ -627,16 +785,16 @@ output/eval/metaworld_mt4_awr_n3/
 # MetaWorld single-task specialists — chain5 (paper 250 eps)
 output/eval/metaworld_coffee-pull_paper5_ep1000/     # DONE 43.2±3.3%
 output/eval/metaworld_stick-pull_paper5_ep0800/      # DONE 16.4±4.0%
-output/eval/metaworld_disassemble_paper5_ep1400/   # IN PROGRESS
+output/eval/metaworld_disassemble_paper5_ep1400/   # DONE 66.4±3.2%
 
-# MetaWorld single-task specialists — BoN / AWR (quick protocol)
-output/eval/metaworld_coffee-pull_bon_n8_n3/         # IN PROGRESS
-output/eval/metaworld_coffee-pull_awr_n3/           # TBD
-output/eval/metaworld_stick-pull_bon_n8_n3/         # IN PROGRESS
-output/eval/metaworld_stick-pull_awr_n3/            # TBD
-# output/eval/metaworld_box-close_paper5_epXXXX/   # TBD after train plateau
-# output/eval/metaworld_box-close_bon_n8_n3/       # TBD
-# output/eval/metaworld_box-close_awr_n3/          # TBD
+# MetaWorld single-task — exploratory BoN / AWR (NOT Table B; Δ vs chain5 only)
+output/eval/metaworld_coffee-pull_bon_n8_n3/         # DONE 28.0±0.0%
+output/eval/metaworld_coffee-pull_awr_n3/           # DONE 29.3±2.3%
+output/eval/metaworld_stick-pull_bon_n8_n3/         # DONE 30.7±3.1%
+output/eval/metaworld_stick-pull_awr_n3/            # DONE 39.3±7.6%
+
+# Matched ICRA dirs (Table B only)
+output/eval/matched/metaworld_box-close/baseline_n3/  # RUNNING (first matched run)
 # output/eval/metaworld_disassemble_bon_n8_n3/     # TBD
 # output/eval/metaworld_disassemble_awr_n3/        # TBD
 ```
@@ -651,8 +809,8 @@ All four RoboMimic/MT4 AWR ckpts are on cluster under `my_models/` (Lift/Can res
 | Can | `my_datasets/awr_can_bon.npz` | `my_models/policy_awr_can.ckpt` (464M) |
 | Square | `my_datasets/awr_square_bon.npz` | `my_models/policy_awr_square.ckpt` (464M) |
 | MT4 multitask | `my_datasets/awr_mt4_bon.npz` | `my_models/policy_awr_mt4.ckpt` (806M) |
-| MW coffee-pull | `my_datasets/awr_mw_coffee_pull_bon.npz` (TBD) | `my_models/policy_awr_mw_coffee_pull.ckpt` (TBD) |
-| MW stick-pull | `my_datasets/awr_mw_stick_pull_bon.npz` (TBD) | `my_models/policy_awr_mw_stick_pull.ckpt` (TBD) |
+| MW coffee-pull | `my_datasets/awr_mw_coffee_pull_bon.npz` | `my_models/policy_awr_mw_coffee_pull.ckpt` (29.3 ± 2.3%) |
+| MW stick-pull | `my_datasets/awr_mw_stick_pull_bon.npz` | `my_models/policy_awr_mw_stick_pull.ckpt` (39.3 ± 7.6%) |
 | MW box-close | TBD | TBD |
 | MW disassemble | TBD | TBD |
 
@@ -667,11 +825,12 @@ All four RoboMimic/MT4 AWR ckpts are on cluster under `my_models/` (Lift/Can res
 | MT4 data regen (single) | `logs/metaworld_single_data_regen.log` | DONE |
 | MW coffee chain5 | `logs/eval_mw_coffee_pull_chain5.log` | DONE |
 | MW stick chain5 | `logs/eval_mw_stick_pull_chain5.log` | DONE |
-| MW disassemble chain5 | `logs/eval_mw_disassemble_chain5.log` | IN PROGRESS |
-| MW coffee BoN→AWR | `logs/mw_coffee_pull_bon_awr_pipeline.log` | IN PROGRESS |
-| MW stick BoN→AWR | `logs/mw_stick_pull_bon_awr_pipeline.log` | IN PROGRESS |
-| MW box-close policy train | `logs/train_oatpolicy_mw-box-close_st_N50_s0.log` | IN PROGRESS |
+| MW disassemble chain5 | `logs/eval_mw_disassemble_chain5.log` | DONE |
+| MW coffee BoN→AWR | `logs/mw_coffee_pull_bon_awr_pipeline.log` + `logs/mw_coffee_pull_awr_resume.log` | DONE (AWR 29.3 ± 2.3%) |
+| MW stick BoN→AWR | `logs/mw_stick_pull_bon_awr_pipeline.log` + `logs/mw_stick_pull_awr_resume.log` | DONE (AWR 39.3 ± 7.6%) |
+| MW box-close policy train | `logs/train_oatpolicy_mw-box-close_st_N50_s0.log` | STOPPED plateau (best 55.2% @ep-2000) |
+| MW box-close matched baseline | `logs/eval_mw_box_close_matched_baseline.log` | RUNNING |
 
 ---
 
-*Last updated: 2026-07-13 ~23:06 MSK. Re-sync after disassemble chain5 + coffee/stick BoN finishes.*
+*Last updated: 2026-07-15 ~01:05 MSK. coffee/stick AWR DONE; Table B (matched) added; box matched baseline running.*
