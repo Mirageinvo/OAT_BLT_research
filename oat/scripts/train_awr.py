@@ -47,14 +47,21 @@ import tqdm
 @click.option('--batch_size', default=256, type=int)
 @click.option('--ordering', default='uniform', type=click.Choice(['uniform', 'early', 'late']),
               help='per-token credit w_t (prefix-probe): early=1/t weights the mode tokens')
+@click.option('--seed', default=0, type=int,
+              help='RNGs for DataLoader shuffle / torch init path. Default 0 matches collect_awr '
+                   '--seed and train_chunk_q (paper Wave2). Does NOT affect eval Δ honesty.')
 @click.option('--critic', default=None, type=str,
               help='path to a ChunkQ critic .ckpt; if set, the AWR baseline becomes the learned '
                    'state-value V(s)=Q(s,executed_chunk) (real AWR, Peng 2019) instead of the '
                    'constant mean SR -> lower-variance per-state advantage. chunk-Q is ~flat in '
                    'the action (within-state std 0.014) so Q(s,a)~=V(s) is a valid baseline.')
 def main(inp, checkpoint, output, device, beta, beta_kl, w_max, epochs, lr, batch_size, ordering,
-         critic):
+         seed, critic):
     device = torch.device(device)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    if device.type == 'cuda':
+        torch.cuda.manual_seed_all(seed)
 
     # --- load workspace + policy (so we can save_checkpoint back) ---
     payload = torch.load(open(checkpoint, 'rb'), pickle_module=dill)
@@ -114,8 +121,13 @@ def main(inp, checkpoint, output, device, beta, beta_kl, w_max, epochs, lr, batc
     bos_t = torch.full((1, 1), bos_id, dtype=torch.long)
 
     ds = torch.utils.data.TensorDataset(feats, toks, weight)
-    loader = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=True, drop_last=False)
+    g = torch.Generator()
+    g.manual_seed(seed)
+    loader = torch.utils.data.DataLoader(
+        ds, batch_size=batch_size, shuffle=True, drop_last=False, generator=g)
     opt = torch.optim.AdamW(model.parameters(), lr=lr)
+
+    print(f"train_awr seed={seed} (shuffle reproducible; eval Δ still set by test_start_seed)")
 
     model.train()
     for ep in range(epochs):

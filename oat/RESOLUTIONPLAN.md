@@ -1,122 +1,161 @@
 # Resolution plan — ICRA 2027 (RoboMimic / MetaWorld track)
 
-**Goal (this track):** paper-ready **matched evaluation** of BoN/AWR on our fixed OAT checkpoints for **RoboMimic + MetaWorld**, so RM/MW numbers can enter the paper without protocol lies.  
-**Primary fix:** comparison protocol + claims text — **not** retrain (unless matched runs force a selector/ckpt change on a suite we need in main text).
+**Paper rule:** в статью только `output/eval/matched_s10000/...`  
+(сид отчёта `10000–10049`).
 
-**Ownership**
+Старое `output/eval/matched/` (seed 1000) = лабораторный черновик, **не paper**.
 
-| Owner | Scope |
-|-------|--------|
-| **This track (us)** | RoboMimic (Lift / Can / Square), MetaWorld MT4 + single-task specialists; matched eval scripts; RM/MW tables; coffee controlled-negative writeup; RM/MW latency |
-| **Scientific lead (LIBERO)** | LIBERO load-bearing story, adaptive K/R nulls, BoN/AWR on LIBERO, suite breadth / DP / contact-rich as they assign |
-
-LIBERO in §0 is **paper context / protocol example**, not our TODO. We mirror the **matched** estimator the LIBERO track used (`same seeds`, `same n_test`, `-n` stochastic repeats for baseline and BoN/AWR), with suite-native `n_test` (RM/MW matched table: **50**).
-
-Related: [`RESULTS.md`](RESULTS.md) (artifacts + limitations). Executable recipe: Cursor plan `icra_matched_paper_plan` (keep in sync with this file).
-
----
-
-## 0. Paper summary (сводка — context only; Owner: PI / full paper)
-
-### Context
-
-OAT = closed-loop chunk policy. Per replan: observe → action chunk → execute prefix → replan.  
-Levers: **K** (action tokens), **R** (exec horizon before replan).  
-Question: spend budget on **saving** compute (adaptive K/R) or on **selection** (BoN)?  
-Metric: episode SR. LIBERO base OAT ≈ **0.581** (lead track).
-
-### Story axis (whole paper)
-
-1. **Compounding** — single-chunk budget choices wash out under closed-loop replan; fixed-budget gaps accumulate over the episode.  
-2. **Adaptive K/R fails** at matched cost (oracle + random controls) on forgiving settings.  
-3. **Wrong signals** — reconstruction / phase / uncertainty decouple from task value.  
-4. **Selection** — BoN (+ AWR distill) can exceed the base policy by accumulating a small per-replan edge.
-
-**Slogan:** spend compute on **selection**, not per-step **savings**.
-
-LIBERO key numbers, adaptive nulls, DP / contact-rich breadth → **lead track**. Our job is to make RM/MW evidence **protocol-clean** under the same story (including honest negatives).
-
-### Related RL refs
-
-- AWR: https://arxiv.org/abs/1910.00177  
-- Q-chunking: https://arxiv.org/abs/2507.07969  
-
----
-
-## 1. Methodology (what was wrong; how we fix it)
-
-### Problem
-
-RM/MW BoN/AWR were compared to **chain5 mean** (5 disjoint env-seed blocks × 50 = 250 inits, `num_exp=1` per block), while BoN/AWR used **3 stochastic repeats on one seed block** (`test_start_seed=1000`, `n_test=50`). Different variance, episodes, and init sets → **exploratory only**, not a paper causal Δ. Sign/magnitude can flip (Can, MT4, coffee).
-
-### Fix (no retrain)
-
-Re-run **inference only** for baseline, BoN, and AWR on one **shared fixed init set**:
+## Протокол paper
 
 | Param | Value |
 |-------|--------|
-| `test_start_seed` | `1000` (episodes `1000 … 1000+n_test-1`) |
-| `n_test` | `50` |
-| `-n` / `num_exp` | `3` for **all three** methods |
-| Policy | OAT8: `--use_k_tokens 8 --entropy_threshold 0` |
+| `test_start_seed` | **10000** |
+| `n_test` | 50 |
+| `-n` | **5** |
+| OAT8 | `--use_k_tokens 8 --entropy_threshold 0` |
+| sampling | `--temperature 1.0 --topk 10` |
 | BoN | `--bon_free 8 --bon_signal vote` |
+| Δ | method − matched baseline на **том же** seed pool |
+| OUT | `output/eval/matched_s10000/<suite>/` |
 
-**Terminology (paper-correct):**
+## Seed pools — anti-leak (зафиксировано 2026-07-16, уточнено RM vs MW)
 
-- Say **shared fixed init set** / **matched-seed estimator** — **not** “held-out / unused seeds” (`1000–1049` is often the same pool as train-time ckpt selection).  
-- Say **matched** — **not** classic per-episode paired test (unless we store and pair per-ep successes).
+Оба раннера (`RoboMimicRunner` / `MetaworldRunner`) default **`test_start_seed=1000`**.  
+В сохранённых paper-ckpt **нет** override `test_start_seed` — TopK на фите у всех с 1000.  
+Разные фиты (RM `cfg.seed=42`, MW `cfg.seed=0`) = torch/dataloader RNG, **не** env-episode seeds.
 
-**Claim:** relative Δ of BoN/AWR vs **matched baseline** on a fixed OAT ckpt. Chain5 absolute SR = **sanity / appendix**, not the BoN comparator.
+| Пул | Seeds | Роль | Eval (report) | AWR collect |
+|-----|-------|------|---------------|-------------|
+| **selection RM** | `1000–1049` (`n_test=50`) | TopK train-time | ❌ | ❌ |
+| **selection MW** | `1000–1249` (`n_test=250`) | TopK train-time | ❌ | ❌ |
+| **paper report** | `10000–10049` | Table P / matched Δ | ✅ только сюда | ❌ |
+| **collect** | `0` (+ worker offsets) | offline AWR data | — | ✅ Wave 2 |
 
-### Suite status after rematch (decision rules)
+Правила:
+1. **Все** paper eval (baseline / BoN / AWR) → `test_start_seed=10000` (вне RM и MW selection).
+2. AWR collect → `--seed 0`; **не** `1000…1249`, **не** `10000`.
+3. Paper-артефакты Wave1 = `baseline_n5/eval_log.json` + `bon_n8_n5/eval_log.json` + `summary.json` (+ Wave1 log с `DONE bon`). Отсутствие строки `ALL DONE` в логе (bash mid-edit) **не** инвалидирует eval_logs.
 
-| Suite | Role |
-|-------|------|
-| Lift / Square | Likely main positives if matched Δ holds |
-| Can / MT4 | Out of central claim until matched; then include or appendix |
-| coffee-pull | **Controlled negative** if matched BoN ≲ baseline (vote / selection limit) — not a pipeline bug; do **not** claim “short episode ⇒ weak compounding” without analysis |
-| stick-pull | Matched so any gain is clean |
-| box / disassemble | Same matched recipe only if they enter the paper (disassemble chain5 **DONE** 66.4%; box train still in progress) |
+В тексте: *selected on train-time pool starting at 1000 (RM …1049 / MW …1249), reported on 10000–10049*.
 
----
+## Что ещё открыто (не seed-leak)
 
-## 2. Our checklist (RM / MetaWorld only)
+| Item | Статус | В статье |
+|------|--------|----------|
+| **MetaWorld demo port** (regen Zarr vs paper sim/success) | контролируемый limitation | да, Limitations: MW interpret within our port |
+| **Lift** | нужен retrain → потом Wave 1–2 @ s10000 | TBD |
+| **Square** | Wave 1 @ ep-1500; если BoN flat → rematch ep-0600 @ s10000 | TBD |
+| **MT4 multitask** | exploratory only | **не в paper** |
 
-### A. Protocol
+Can + MW specialists (coffee/stick/disassemble/box) при закрытом Wave 1 — seed-чистые для Table P.
 
-1. Force `--n_test 50 --test_start_seed 1000` on baseline, BoN, **and** AWR (do not rely on Hydra defaults — MT4 yaml is 250).  
-2. Δ = method − **matched baseline mean** only.  
-3. Prefer clean dirs under `output/eval/matched/<suite>/`; reuse old BoN/AWR `eval_log.json` only after verifying `num_exp=3` and same init protocol.  
-4. Do not mix RM/MW (`n_test=50`) with LIBERO (`n_test=500`) into one pooled causal claim.
+## Запуск
 
-### B. Text
-
-1. Exploratory (current chain5↔quick Δ) vs paper (matched Δ) — never confuse.  
-2. Coffee = controlled negative under matched eval (+ optional `medoid` ablation).  
-3. Cost/latency next to RM/MW selection claims.  
-4. Limitations stay aligned with this file + `RESULTS.md`.
-
-### C. Execution order
-
-```text
-0. Docs freeze (exploratory labels) — done / keep sync
-1. scripts/cluster_matched_triplet.sh
-2. Wait for free GPU if coffee/stick AWR collect still running
-3. Matched runs: Can → MT4 → coffee → stick → Lift → Square
-   then box/disassemble BoN+matched when policies ready
-4. Coffee writeup; gate Can/MT4 into main vs appendix
-5. Matched summary table in RESULTS; chain5 appendix
-6. Latency single vs BoN N=8 on RM/MW (verify CLI supports BoN)
+```bash
+# с хоста — все NOW suite параллельно (baseline+BoN, без старого AWR):
+bash oat/scripts/cluster_launch_matched_paper_wave.sh
 ```
 
-**Out of scope here:** LIBERO re-eval, LIBERO ordering ablation, other LIBERO suites, Diffusion Policy, contact-rich PACE contrast — **PI / lead track**.
+## ⛔ GATE перед Wave 2 (AWR) — зафиксировано 2026-07-16
 
-**Retrain only if:** a suite we need in main text has matched Δ broken by a bad AWR/BoN source or vote is anti-informative and we need another selector for the positive claim.
+**Не стартовать AWR, пока Wave 1 paper не закрыт.** В Wave 2 **запрещены** ранние/exploratory раны.
 
----
+### Обязательно до Wave 2
 
-## 3. Short verdict
+1. У suite есть `output/eval/matched_s10000/<suite>/summary.json` с **baseline_n5 + bon_n8_n5** (оба `eval_log.json`).
+2. Числа вписаны в **Table P** (`RESULTS.md`) — baseline, BoN, Δ_BoN. Источник **только** `matched_s10000`, не seed-1000, не chain5, не exploratory.
+3. Решение по suite: BoN дал смысл → идём в AWR; flat/анти → AWR пропускаем или (Square) fallback ckpt, см. ниже.
+4. Старые артефакты **не** переиспользовать:
+   - ❌ `my_models/policy_awr_*.ckpt` (exploratory)
+   - ❌ `my_datasets/awr_*.npz` со старых пайплайнов
+   - ❌ `cluster_*_bon_awr*.sh` как paper-path (у них eval/seed не paper)
+   - ❌ Table B / exploratory SR в текст или как baseline для Δ_AWR
 
-For **this track**, paper-ready = matched RM/MW eval + honest tables/claims (incl. coffee negative).  
-Checkpoints stay. LIBERO numbers and breadth are not our build blockers.  
-See Limitations in `RESULTS.md`.
+### Wave 2 правила (свежий AWR only)
+
+| Этап | Правило |
+|------|---------|
+| Collect | `--seed 0` явно (лог в RESULTS). ❌ `1000` (selection), ❌ `10000` (report) |
+| Train | новый `my_models/awr_s10000_<suite>.ckpt` |
+| Eval | только через triplet: `AWR_CKPT=... SKIP_AWR=0 TEST_START_SEED=10000` → `awr_n5/` |
+| Δ_AWR | AWR − **тот же** paper baseline из Wave 1 |
+
+```bash
+# после GATE — один suite, anti-leak names + seed 0 collect + eval @10000:
+SUITE=box-close GPU=0 bash scripts/cluster_matched_paper_wave2_awr.sh
+# пишет: my_datasets/awr_s10000_<suite>.npz
+#         my_models/awr_s10000_<suite>.ckpt
+#         matched_s10000/<suite>/awr_n5/  (SKIP_BASELINE_BON=1 — не трёт Wave1)
+```
+
+### Square contingency
+
+- Paper first-try: **ep-1500**. Если BoN@s10000 flat → rematch **ep-0600** тем же paper-протоколом; в Table P — один победивший ckpt.
+- Exploratory BoN/AWR @ ep-0600 **не** подставлять в Table P.
+
+### OAT Table VI (оригинал) = sanity only
+
+Lift 99.2 / Can 80.8 / Square 39.2; MW box 44.4 / coffee 26.4 / disassemble 17.2 / stick 9.6.  
+**Не** comparator для Δ; absolute parity не claim.
+
+## ⛔ Latency / Table C — протокол репрезентативности (зафиксировано 2026-07-17)
+
+Latency **нужна для статьи** (BoN = N× AR на replan; AWR = single-forward).  
+Это **отдельный** policy-forward замер — **не** перепрогон matched SR. Table P SR остаётся из `matched_s10000/.../eval_log.json`.
+
+**Когда:** после Wave 1–2 SR для suite’ов, которые идут в paper (Phase 5).  
+**Что мерим:** Single (baseline OAT8) / BoN N=8 vote / AWR — wall-clock **ms per policy call**, batch=1.  
+**Куда:** `output/eval/matched_s10000/<suite>/latency.json` → Table C (SR из Table P × ms × ΔSR × cost).  
+**Скрипт:** `scripts/measure_latency_paper.py` + `scripts/cluster_latency_paper_done.sh` (тот же docker/кластер, что paper eval). Docker без `.git` → launch с `OAT_GIT_COMMIT`/`OAT_GIT_BRANCH`/`OAT_GIT_DIRTY` с host. Paper-proof refuse если `git_commit` пустой.
+
+### Обязательные условия (иначе не в статью)
+
+1. **Тот же hardware / окружение**, на котором интерпретируем SR  
+   Один GPU (тот же тип, что paper eval: cluster V100 / тот же docker image), тот же CUDA/driver stack.  
+   ❌ Не мерить latency на Mac/другой машине и стыковать с cluster SR.  
+   ❌ Не менять TensorRT/ONNX/compile path относительно того, как реально крутится `eval_policy_sim` (сейчас = обычный PyTorch forward; если позже появится TRT — мерить **и** SR-путь, **и** latency на нём же).
+
+2. **Batch=1 + максимально deterministic**  
+   `batch_size=1`. Где возможно: `torch.backends.cudnn.deterministic` / fixed seeds для timing-loop (не путать с env `test_start_seed` Table P).  
+   Warmup forward’ы **исключить** из статистики (отдельный warmup, потом timed reps).
+
+3. **Несколько повторов → median и mean±std**  
+   ≥ **5–10** timed runs на режим (Single / BoN / AWR). В Table C: **median** как основная цифра + **mean±std** (или IQR) в скобках/appendix.  
+   ❌ Один «случайный» прогон в paper не годится.
+
+4. **Тот же input pipeline, что sim-eval**  
+   Та же предобработка obs (resize, нормализация, To-stack, dtype/device), что `obs_encoder` видит в `eval_policy_sim` / runner.  
+   Obs брать из checkpoint dataset / реальных val-батчей (как `--obs_from_checkpoint_dataset` в adaptive latency), не «пустой» dummy random, если он меняет путь/entropy.  
+   Режим генерации: Single = тот же OAT8 (`use_k_tokens=8`, `entropy_threshold=0`, T=1, topk=10); BoN = `bon_free=8`, `bon_signal=vote`; AWR = single-sample на `awr_s10000_<suite>.ckpt`.
+
+5. **AWR ckpt = тот же Wave 2 артефакт, та же архитектура**  
+   Путь AWR для latency = ровно `my_models/awr_s10000_<suite>.ckpt`, который дал `matched_s10000/<suite>/awr_n5/` (сверить path + mtime/sha с Wave2 log / `summary.json`).  
+   Baseline/BoN latency — с того же `BASE_CKPT`, что Wave1.  
+   ❌ Не подставлять exploratory `policy_awr_*`, другой epoch, или ckpt после рефактора policy/encoder/tokenizer — иначе ms не из того же семейства, что Table P SR.  
+   Если код модели менялся после Wave2 eval — либо откат к commit Wave2, либо **пересчёт SR** на новом коде (не смешивать).
+
+6. **Воспроизводимость: версия кода в `latency.json`**  
+   В каждый `matched_s10000/<suite>/latency.json` писать как минимум:  
+   `git_commit` (полный hash), `git_dirty` (bool), `git_branch`, `measured_at` (ISO), `host` / `gpu_name`, `torch_version` / `cuda_version`, пути `base_ckpt` / `awr_ckpt` (+ optional sha256), режимы и N reps / median / mean / std, `paper_proof: true`, `fairness.obs_counter_reset_per_mode`.  
+   Цель — точно воспроизвести замер; без commit latency не считать paper-final.  
+   **Fairness:** перед каждым режимом (Single / BoN / AWR) сбрасывать obs-counter и делать свой warmup — иначе BoN «наследует» прогретый Single.
+
+### Явно не делать
+
+- ❌ Не пересчитывать Table P SR ради latency.  
+- ❌ Не подмешивать sim wall-clock (MuJoCo/render) в «policy latency» — Table C = **inference / policy-forward cost**, с оговоркой что episode wall-clock доминирует sim.  
+- ❌ Не сравнивать latency между suite’ами как абсолютный SOTA без одной машины/одного протокола.  
+- ❌ Не мерить AWR latency на другом ckpt/архитектуре, чем Wave2 Table P.
+
+В тексте статьи: *latency measured on the same cluster GPU/stack as matched eval; batch=1; median over N timed forwards; same obs pipeline as sim-eval; same Wave2 AWR ckpt; code commit recorded in latency.json; SR from Table P unchanged.*
+
+## Suite статус
+
+| Suite | Paper now |
+|-------|-----------|
+| Can, coffee, stick, disassemble, box-close | Wave1 BoN DONE → **Wave2 AWR running** (`paper_w2_*`) |
+| Square | Wave1 BoN @ ep-1500 running |
+| Lift | после retrain |
+| MT4 | не в paper |
+
+См. Table P в [`RESULTS.md`](RESULTS.md).
