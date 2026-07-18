@@ -168,9 +168,28 @@ def _time_calls(
 @click.option(
     "--out",
     default=None,
-    help="default: output/eval/matched_s10000/<suite>/latency.json",
+    help="default: matched_s10000/<suite>/latency.json (or latency_fair_kv.json with --fair_kv)",
 )
-def main(suite: str, device: str, reps: int, warmup: int, n_obs: int, seed: int, out: Optional[str]):
+@click.option(
+    "--fair_kv/--deployed",
+    default=False,
+    show_default=True,
+    help=(
+        "fair apples-to-apples: Single+AWR use predict_action (KV-cache generate); "
+        "BoN unchanged (already generate+KV). Writes latency_fair_kv.json; does NOT "
+        "overwrite paper Table C latency.json."
+    ),
+)
+def main(
+    suite: str,
+    device: str,
+    reps: int,
+    warmup: int,
+    n_obs: int,
+    seed: int,
+    out: Optional[str],
+    fair_kv: bool,
+):
     if reps < 5:
         raise click.ClickException("protocol requires >=5 timed reps")
 
@@ -187,7 +206,12 @@ def main(suite: str, device: str, reps: int, warmup: int, n_obs: int, seed: int,
     if not awr_eval.is_file():
         raise click.ClickException(f"Wave2 AWR eval missing ({awr_eval}) — refuse latency without Table P AWR")
 
-    out_path = Path(out) if out else ROOT / f"output/eval/matched_s10000/{suite}/latency.json"
+    if out:
+        out_path = Path(out)
+    elif fair_kv:
+        out_path = ROOT / f"output/eval/matched_s10000/{suite}/latency_fair_kv.json"
+    else:
+        out_path = ROOT / f"output/eval/matched_s10000/{suite}/latency.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Deterministic timing stack (protocol §2)
@@ -203,7 +227,8 @@ def main(suite: str, device: str, reps: int, warmup: int, n_obs: int, seed: int,
         gpu_name = torch.cuda.get_device_name(device_t)
         cuda_version = getattr(torch.version, "cuda", "") or ""
 
-    print(f"=== PAPER LATENCY {suite} ===")
+    mode_tag = "FAIR_KV" if fair_kv else "DEPLOYED"
+    print(f"=== PAPER LATENCY {suite} [{mode_tag}] ===")
     print(f"base_ckpt={base_ckpt}")
     print(f"awr_ckpt={awr_ckpt}")
     print(f"device={device} gpu={gpu_name} reps={reps} warmup={warmup}")
@@ -232,22 +257,39 @@ def main(suite: str, device: str, reps: int, warmup: int, n_obs: int, seed: int,
             torch.cuda.synchronize(device_t)
         print(f"Timing {label} (obs reset + {warmup} warmup + {reps} reps)...")
 
-    def run_single():
-        base_policy.predict_action_adaptive(
-            next_obs(),
-            use_k_tokens=8,
-            entropy_threshold=0.0,
-            temperature=1.0,
-            topk=10,
-        )
+    if fair_kv:
+        def run_single():
+            base_policy.predict_action(
+                next_obs(),
+                use_k_tokens=8,
+                temperature=1.0,
+                topk=10,
+            )
 
-    _prep_mode("single (OAT8)")
-    modes["single"] = {
-        "method": "predict_action_adaptive",
-        "ckpt": base_ckpt,
-        "kwargs": {"use_k_tokens": 8, "entropy_threshold": 0.0, "temperature": 1.0, "topk": 10},
-        **_stats(_time_calls(run_single, warmup=warmup, reps=reps, device=device_t)),
-    }
+        _prep_mode("single predict_action (KV-cache)")
+        modes["single"] = {
+            "method": "predict_action",
+            "ckpt": base_ckpt,
+            "kwargs": {"use_k_tokens": 8, "temperature": 1.0, "topk": 10},
+            **_stats(_time_calls(run_single, warmup=warmup, reps=reps, device=device_t)),
+        }
+    else:
+        def run_single():
+            base_policy.predict_action_adaptive(
+                next_obs(),
+                use_k_tokens=8,
+                entropy_threshold=0.0,
+                temperature=1.0,
+                topk=10,
+            )
+
+        _prep_mode("single (OAT8 deployed adaptive)")
+        modes["single"] = {
+            "method": "predict_action_adaptive",
+            "ckpt": base_ckpt,
+            "kwargs": {"use_k_tokens": 8, "entropy_threshold": 0.0, "temperature": 1.0, "topk": 10},
+            **_stats(_time_calls(run_single, warmup=warmup, reps=reps, device=device_t)),
+        }
     print(f"  single median={modes['single']['median_ms']:.2f} ms")
 
     def run_bon():
@@ -298,22 +340,39 @@ def main(suite: str, device: str, reps: int, warmup: int, n_obs: int, seed: int,
         obs_i["i"] += 1
         return o
 
-    def run_awr():
-        awr_policy.predict_action_adaptive(
-            next_obs_awr(),
-            use_k_tokens=8,
-            entropy_threshold=0.0,
-            temperature=1.0,
-            topk=10,
-        )
+    if fair_kv:
+        def run_awr():
+            awr_policy.predict_action(
+                next_obs_awr(),
+                use_k_tokens=8,
+                temperature=1.0,
+                topk=10,
+            )
 
-    _prep_mode("awr (single-sample)")
-    modes["awr"] = {
-        "method": "predict_action_adaptive",
-        "ckpt": awr_ckpt,
-        "kwargs": {"use_k_tokens": 8, "entropy_threshold": 0.0, "temperature": 1.0, "topk": 10},
-        **_stats(_time_calls(run_awr, warmup=warmup, reps=reps, device=device_t)),
-    }
+        _prep_mode("awr predict_action (KV-cache)")
+        modes["awr"] = {
+            "method": "predict_action",
+            "ckpt": awr_ckpt,
+            "kwargs": {"use_k_tokens": 8, "temperature": 1.0, "topk": 10},
+            **_stats(_time_calls(run_awr, warmup=warmup, reps=reps, device=device_t)),
+        }
+    else:
+        def run_awr():
+            awr_policy.predict_action_adaptive(
+                next_obs_awr(),
+                use_k_tokens=8,
+                entropy_threshold=0.0,
+                temperature=1.0,
+                topk=10,
+            )
+
+        _prep_mode("awr (single-sample deployed adaptive)")
+        modes["awr"] = {
+            "method": "predict_action_adaptive",
+            "ckpt": awr_ckpt,
+            "kwargs": {"use_k_tokens": 8, "entropy_threshold": 0.0, "temperature": 1.0, "topk": 10},
+            **_stats(_time_calls(run_awr, warmup=warmup, reps=reps, device=device_t)),
+        }
     print(f"  awr median={modes['awr']['median_ms']:.2f} ms")
 
     sr = {
@@ -331,13 +390,22 @@ def main(suite: str, device: str, reps: int, warmup: int, n_obs: int, seed: int,
         )
 
     payload = {
-        "protocol": "RESOLUTIONPLAN Latency/Table C paper-proof 2026-07-17",
-        "paper_proof": True,
+        "protocol": (
+            "RESOLUTIONPLAN Latency fair-KV 2026-07-18"
+            if fair_kv
+            else "RESOLUTIONPLAN Latency/Table C paper-proof 2026-07-17"
+        ),
+        "paper_proof": not fair_kv,
+        "fair_kv": fair_kv,
+        "fair_single": fair_kv,  # alias for rebuttal naming
         "fairness": {
             "obs_counter_reset_per_mode": True,
             "warmup_per_mode": True,
             "cudnn_deterministic": True,
             "mode_order": ["single", "bon", "awr"],
+            "single_path": "predict_action (KV)" if fair_kv else "predict_action_adaptive (no KV)",
+            "awr_path": "predict_action (KV)" if fair_kv else "predict_action_adaptive (no KV)",
+            "bon_path": "predict_action_bon_free / generate (KV)",
         },
         "suite": suite,
         "measured_at": datetime.now(timezone.utc).isoformat(),
@@ -366,7 +434,12 @@ def main(suite: str, device: str, reps: int, warmup: int, n_obs: int, seed: int,
         "modes": modes,
         "cost_note": (
             "ms = policy-forward only (vision+AR[+BoN select]); "
-            "episode wall-clock dominated by MuJoCo/render — not included"
+            "episode wall-clock dominated by MuJoCo/render — not included. "
+            + (
+                "FAIR_KV: Single/AWR use predict_action KV-cache (apples-to-apples with BoN generate)."
+                if fair_kv
+                else "DEPLOYED: Single/AWR use predict_action_adaptive (Table C main)."
+            )
         ),
     }
     out_path.write_text(json.dumps(payload, indent=2) + "\n")

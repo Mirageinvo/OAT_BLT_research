@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 # Paper Table C latency for Wave2-done suites (RESOLUTIONPLAN § Latency).
 # Paper-proof: requires OAT_GIT_* (docker has no .git). Does NOT touch Square collect.
-# Uses GPU0 by default (Square often on GPU1).
+#
+# FAIR_KV=1 → apples-to-apples KV-cache Single/AWR (writes latency_fair_kv.json;
+#             does NOT overwrite Table C latency.json). Default = deployed Table C.
+#
+# Usage:
+#   SUITES="can coffee-pull ..." GPU=0 bash scripts/cluster_latency_paper_done.sh
+#   FAIR_KV=1 SUITES="can coffee-pull stick-pull disassemble box-close square" GPU=0 \
+#     bash scripts/cluster_latency_paper_done.sh
 set -euo pipefail
 cd /workspace/oat
 source .venv/bin/activate
@@ -16,7 +23,16 @@ bash scripts/patch_robosuite_egl_assert.sh
 SUITES="${SUITES:-can coffee-pull stick-pull disassemble box-close}"
 REPS="${REPS:-10}"
 WARMUP="${WARMUP:-20}"
-LOG="logs/latency_paper_s10000_gpu${GPU}.log"
+FAIR_KV="${FAIR_KV:-0}"
+if [[ "${FAIR_KV}" == "1" ]]; then
+  LOG="logs/latency_fair_kv_s10000_gpu${GPU}.log"
+  EXTRA_FLAGS=(--fair_kv)
+  LABEL="fair-KV"
+else
+  LOG="logs/latency_paper_s10000_gpu${GPU}.log"
+  EXTRA_FLAGS=()
+  LABEL="paper-proof deployed"
+fi
 mkdir -p logs
 
 if [[ -z "${OAT_GIT_COMMIT:-}" ]]; then
@@ -29,8 +45,8 @@ export OAT_GIT_BRANCH="${OAT_GIT_BRANCH:-unknown}"
 export OAT_GIT_DIRTY="${OAT_GIT_DIRTY:-0}"
 
 {
-  echo "=== PAPER LATENCY paper-proof $(date -Iseconds) gpu=${CUDA_VISIBLE_DEVICES} device=${OAT_DEVICE} ==="
-  echo "suites=${SUITES} reps=${REPS} warmup=${WARMUP}"
+  echo "=== PAPER LATENCY ${LABEL} $(date -Iseconds) gpu=${CUDA_VISIBLE_DEVICES} device=${OAT_DEVICE} ==="
+  echo "suites=${SUITES} reps=${REPS} warmup=${WARMUP} FAIR_KV=${FAIR_KV}"
   echo "OAT_GIT_COMMIT=${OAT_GIT_COMMIT} branch=${OAT_GIT_BRANCH} dirty=${OAT_GIT_DIRTY}"
 } | tee "${LOG}"
 
@@ -44,8 +60,13 @@ for s in ${SUITES}; do
       -d "${OAT_DEVICE}" \
       --reps "${REPS}" \
       --warmup "${WARMUP}" \
+      "${EXTRA_FLAGS[@]}" \
       2>&1 | tee -a "${LOG}"
 done
 
 echo "=== LATENCY ALL DONE $(date -Iseconds) ===" | tee -a "${LOG}"
-python scripts/build_table_c.py 2>&1 | tee -a "${LOG}"
+if [[ "${FAIR_KV}" == "1" ]]; then
+  python scripts/build_table_c.py --fair_kv 2>&1 | tee -a "${LOG}"
+else
+  python scripts/build_table_c.py 2>&1 | tee -a "${LOG}"
+fi

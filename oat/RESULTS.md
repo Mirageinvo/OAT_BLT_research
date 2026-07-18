@@ -100,7 +100,7 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 5. Оригинал OAT Table VI — **sanity only**, не comparator.
 6. **RM vs MW фиты разные** (`cfg.seed` 42 vs 0), но env TopK у обоих default `test_start_seed=1000` (MW длиннее до 1249). Paper `10000` вне обоих.
 
-**После anti-leak seeds:** остаётся (a) **MW demo port** = controlled limitation; (b) **Lift** retrain; (c) **Square** Wave1/fallback. MT4 — не в paper.
+**После anti-leak seeds:** остаётся (a) **MW demo port** = controlled limitation; (b) **Lift** retrain. Square Wave1/2 + latency **DONE** (Table P/C). MT4 — не в paper.
 
 | Suite | Base ckpt | Paper baseline | BoN N=8 | AWR | Δ_BoN | Δ_AWR | Artifacts |
 |-------|-----------|----------------|---------|-----|-------|-------|-----------|
@@ -109,7 +109,7 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 | MW stick-pull | ep-0800 | **15.6±6.2%** | **25.6±2.6%** | **26.8±5.2%** | **+10.0** | **+11.2** | `matched_s10000/stick-pull/` · `awr_s10000_stick-pull.*` |
 | MW disassemble | ep-1400 | **62.4±5.2%** | **63.2±6.3%** | **69.6±5.7%** | **+0.8** | **+7.2** | `matched_s10000/disassemble/` · `awr_s10000_disassemble.*` |
 | MW box-close | ep-2000 | **59.6±7.5%** | **66.4±3.0%** | **72.8±4.1%** | **+6.8** | **+13.2** | `matched_s10000/box-close/` · `awr_s10000_box-close.*` |
-| Square | **ep-0600** | **29.6±7.3%** | **31.2±9.0%** | Wave2 RUN | **+1.6** | — | `matched_s10000/square/` · `paper_w2_square` · base=`ep-0600_sr-0.420` |
+| Square | **ep-0600** | **29.6±7.3%** | **31.2±9.0%** | **24.8±2.3%** | **+1.6** | **−4.8** | `matched_s10000/square/` · `awr_s10000_square.*` (AWR < base; BoN flat) |
 | Square ep-1500 (archived) | ep-1500 | **27.2±6.9%** | **26.0±7.5%** | — | **−1.2** | — | `matched_s10000/square_ep1500/` — BoN flat, not paper primary |
 | Lift | retrain | — | — | — | — | — | later |
 
@@ -119,9 +119,7 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 
 **Wave2 DONE (2026-07-17):** box-close AWR 72.8±4.1 (Δ_AWR +13.2); disassemble AWR 69.6±5.7 (Δ_AWR +7.2); can AWR 79.2±7.7 (Δ_AWR +2.8, below BoN 80.8); coffee-pull AWR 41.2±3.3 (Δ_AWR −0.4, flat); stick-pull AWR 26.8±5.2 (Δ_AWR +11.2). Sources: `awr_n5/eval_log.json` @ `matched_s10000/`.
 
-**Wave 2 in flight (2026-07-17):** **square ep-0600** collect ~93% (18.6k/20k) → потом train→eval@10000.  
-Collect `--seed 0` · train `--seed 0` · eval `@10000` · `scripts/cluster_matched_paper_wave2_awr.sh`.  
-❌ not using exploratory `policy_awr_*` / old `awr_*.npz` / ep-1500 / seed-1000.
+**Wave 2 Square ep-0600 DONE (2026-07-18):** AWR **24.8±2.3%** (Δ_AWR **−4.8**; collect per-ep SR~0.35, BoN headroom tiny). Anti-leak OK (`collect/train seed 0`, eval `@10000`). Paper-proof latency DONE → Table C.
 
 **Why Wave2 collect is slow (not stuck):** parallel BoN-distill collects (`n_chunks=20000`, `--bon_n 8`) on **2 GPUs / shared CPU+EGL**. Sim-bound (~4–6 s/chunk); GPU util often ~0%. Do **not** interpret as hung.
 
@@ -185,11 +183,15 @@ Latency **нужна для статьи** (BoN = N× AR/replan; AWR = single-fo
 
 В тексте: *latency on same cluster GPU/stack as matched eval; batch=1; median over N timed forwards; same obs pipeline; same Wave2 AWR ckpt; code commit in latency.json; SR from Table P unchanged.*
 
-### Table C — PAPER latency (paper-proof remasure, 2026-07-17)
+### Table C — PAPER latency (paper-proof, 2026-07-17/18)
 
 Источник: `output/eval/matched_s10000/<suite>/latency.json` + сводка `matched_s10000/table_c.json` (`paper_proof: true`).  
-Кластер **Tesla V100-SXM2-32GB**, torch **2.5.1+cu124**, batch=1, warmup=20 excluded, **10 reps**, median; obs = val dataset; **obs counter reset + warmup per mode** (fair Single↔BoN); `git_commit=643bca01…` via `OAT_GIT_*` (docker без `.git`); `git_dirty=true` (uncommitted scripts at measure).  
-**Не** MuJoCo wall-clock. Square — после Wave2. Pre-proof archive: `matched_s10000/_latency_pre_paperproof/`.
+**Специфика замера (2-й / paper-proof прогон):** batch=1; warmup=20 excluded; **10 timed reps** → median; obs = val dataset; **obs counter reset + warmup per mode** (fair Single↔BoN↔AWR); `cudnn.deterministic`; policy-forward only (**не** MuJoCo).  
+HW: **Tesla V100-SXM2-32GB**, torch **2.5.1+cu124**.  
+**Git в артефакте:** docker без `.git` → `OAT_GIT_*` env при запуске (метка кода, не commit/push).  
+- 5 MW/Can suites: `git_commit=643bca01…` (2026-07-17 remasure)  
+- Square: `git_commit=6bc12d6…` (2026-07-18; только `SUITES=square`, остальные не перезамерялись)  
+`git_dirty=true` на обоих. Pre-proof (1-й прогон, не в статью): `matched_s10000/_latency_pre_paperproof/` (только 5 suite до Square).
 
 | Suite | Single median | BoN N=8 median | AWR median | SR (Table P) base→BoN→AWR |
 |-------|---------------|----------------|------------|---------------------------|
@@ -198,23 +200,38 @@ Latency **нужна для статьи** (BoN = N× AR/replan; AWR = single-fo
 | stick-pull | **47.2** | **46.2** | **49.9** | 15.6 → 25.6 → 26.8 |
 | disassemble | **47.6** | **49.1** | **49.2** | 62.4 → 63.2 → 69.6 |
 | box-close | **48.8** | **48.1** | **48.0** | 59.6 → 66.4 → 72.8 |
+| Square | **40.7** | **40.2** | **40.8** | 29.6 → 31.2 → 24.8 |
 
 **Table C artifacts** (paper latency sources; все под `output/eval/matched_s10000/`):
 
 | Suite | `latency.json` | AWR ckpt (timed) | Base ckpt (Single/BoN) | note |
 |-------|----------------|------------------|------------------------|------|
-| Can | `can/latency.json` | `my_models/awr_s10000_can.ckpt` | Wave1 `base_ckpt` in json / `summary.json` | `paper_proof: true` |
+| Can | `can/latency.json` | `my_models/awr_s10000_can.ckpt` | Wave1 `base_ckpt` in json | `paper_proof: true`, git `643bca01` |
 | coffee-pull | `coffee-pull/latency.json` | `my_models/awr_s10000_coffee-pull.ckpt` | idem | |
 | stick-pull | `stick-pull/latency.json` | `my_models/awr_s10000_stick-pull.ckpt` | idem | |
 | disassemble | `disassemble/latency.json` | `my_models/awr_s10000_disassemble.ckpt` | idem | |
 | box-close | `box-close/latency.json` | `my_models/awr_s10000_box-close.ckpt` | idem | |
-| Square | — | `my_models/awr_s10000_square.ckpt` (после Wave2) | ep-0600 | **TBD** after AWR eval |
-| **сводка** | `table_c.json` | — | — | rebuild: `scripts/build_table_c.py` |
-| pre-proof archive | `_latency_pre_paperproof/<suite>_latency.json` | — | — | не в статью |
+| Square | `square/latency.json` | `my_models/awr_s10000_square.ckpt` | `ep-0600_sr-0.420.ckpt` | `paper_proof: true`, git `6bc12d6` |
+| **сводка** | `table_c.json` | — | — | n=6; rebuild: `scripts/build_table_c.py` |
+| fair-KV rebuttal | `<suite>/latency_fair_kv.json` | same AWR ckpts | same bases | `fair_kv: true`; сводка `table_c_fair_kv.json` |
+| pre-proof archive | `_latency_pre_paperproof/<suite>_latency.json` | — | — | **не в статью** (1-й прогон) |
 
 Scripts: `scripts/measure_latency_paper.py`, `scripts/cluster_latency_paper_done.sh` (requires `OAT_GIT_COMMIT`), `scripts/build_table_c.py`.
 
-**Read for paper:** BoN median ≈ Single на всех 5 suite (~41–49 ms) — ожидаемо: vision encode **один раз** (amortized), AR дешёвый → N=8 почти не бьёт policy-forward cost. Это и есть OAT-substrate win рядом с +SR. AWR ≈ Single. Episode time всё ещё доминирует sim — Table C = inference cost only.
+**Read for paper:** BoN median ≈ Single на всех 6 suite (~40–49 ms) — vision encode **один раз** (amortized), AR дешёвый → N=8 почти не бьёт policy-forward cost. Square ≈ Can (~41 ms; оба RoboMimic, 2 cams). AWR ≈ Single. Table C = inference cost only.
+
+**Table C′ — fair-KV rebuttal** (опциональная страховка; **не** заменяет Table C): Single/AWR = `predict_action` (KV-cache), BoN = `generate` (KV). Артефакты: `matched_s10000/<suite>/latency_fair_kv.json` + `table_c_fair_kv.json` (`fair_kv: true`). На всех 6 suite **BoN ≥ Single** (+0.8…+2.4 ms) — ожидаемый AR overhead при apples-to-apples; абсолют всё ещё ≈40–48 ms.
+
+| Suite | Single (KV) | BoN N=8 | AWR (KV) | BoN−Single |
+|-------|-------------|---------|----------|------------|
+| Can | **37.6** | **39.1** | **38.9** | **+1.6** |
+| coffee-pull | **43.7** | **46.1** | **47.9** | **+2.4** |
+| stick-pull | **43.3** | **45.2** | **44.6** | **+1.8** |
+| disassemble | **45.1** | **47.3** | **44.4** | **+2.2** |
+| box-close | **45.3** | **46.2** | **47.8** | **+0.8** |
+| Square | **38.3** | **40.0** | **40.0** | **+1.8** |
+
+В тексте: main = Table C (deployed paths, comparable); appendix/rebuttal = Table C′ (fair KV, BoN overhead ≲2.5 ms). `FAIR_KV=1 bash scripts/cluster_latency_paper_done.sh`.
 
 ### Table B — LAB ONLY (seed 1000, selection pool) — не paper
 
@@ -402,6 +419,31 @@ Per-environment-block (ep1500): 0.32, 0.26, 0.30, 0.34, 0.34. Paper target: **39
 Δ vs ep-0600 chain5: **+5.9 pp**. BoN > AWR on this ckpt (+7.2 vs +5.9).
 
 > ep-1500 chain5 (31.2%) is the **best single-sample** checkpoint; BoN/AWR were **not** re-run from ep-1500.
+> Exploratory / seed-1000 numbers above are **lab only** — paper Δ = Table P below.
+
+### Eval — PAPER matched (`matched_s10000`, anti-leak) — **DONE**
+
+Protocol: `test_start_seed=10000`, `n_test=50`, `-n 5`, episodes `10000–10049`. TopK selection was on seed 1000 (disjoint). Base = **`ep-0600_sr-0.420.ckpt`** (ep-1500 archived: BoN flat @ s10000).
+
+| Mode | SR | Δ vs base | Artifact |
+|------|-----|-----------|----------|
+| baseline | **29.6±7.3%** | — | `output/eval/matched_s10000/square/baseline_n5/eval_log.json` |
+| BoN N=8 vote | **31.2±9.0%** | **+1.6** | `.../bon_n8_n5/eval_log.json` |
+| AWR | **24.8±2.3%** | **−4.8** | `.../awr_n5/eval_log.json` |
+
+| Item | Path |
+|------|------|
+| summary | `output/eval/matched_s10000/square/summary.json` |
+| Wave1 log | `logs/matched_s10000_square_ep0600_gpu1.log` |
+| AWR dataset | `my_datasets/awr_s10000_square.npz` (collect `--seed 0`; per-ep SR ~0.35) |
+| AWR ckpt | `my_models/awr_s10000_square.ckpt` (train `--seed 0`) |
+| Wave2 log | `logs/awr_s10000_square_wave2_gpu1.log` |
+| Wave2 eval log | `logs/awr_s10000_square_wave2_eval_gpu1.log` |
+| latency (Table C) | `output/eval/matched_s10000/square/latency.json` — Single/BoN/AWR **40.7 / 40.2 / 40.8** ms |
+| fair-KV (Table C′) | `.../latency_fair_kv.json` — **38.3 / 40.0 / 40.0** ms (BoN−Single **+1.8**) |
+| ep-1500 archive | `output/eval/matched_s10000/square_ep1500/` — base 27.2±6.9 / BoN 26.0±7.5 (not paper primary) |
+
+**Read:** paper pool BoN almost flat (+1.6); AWR distill hurts (−4.8) — weak BoN source (collect SR~0.35). Latency still BoN≈Single (~41 ms). Same protocol as Can/MW; do **not** cite exploratory 38% BoN / `policy_awr_square.ckpt` in paper.
 
 ---
 

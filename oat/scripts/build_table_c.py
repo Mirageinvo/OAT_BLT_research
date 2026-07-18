@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Build output/eval/matched_s10000/table_c.json from per-suite latency.json."""
+"""Build table_c.json (or table_c_fair_kv.json) from per-suite latency artifacts."""
 from __future__ import annotations
 
+import argparse
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,8 +25,18 @@ def sr_pct(block):
 
 
 def main():
-    # backfill iqr into existing latency.json
-    for p in MATCHED.glob("*/latency.json"):
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--fair_kv",
+        action="store_true",
+        help="aggregate latency_fair_kv.json → table_c_fair_kv.json (rebuttal)",
+    )
+    args = ap.parse_args()
+    fname = "latency_fair_kv.json" if args.fair_kv else "latency.json"
+    out_name = "table_c_fair_kv.json" if args.fair_kv else "table_c.json"
+
+    # backfill iqr
+    for p in MATCHED.glob(f"*/{fname}"):
         d = json.loads(p.read_text())
         changed = False
         for mode in d.get("modes", {}).values():
@@ -42,7 +53,7 @@ def main():
 
     rows = {}
     for s in SUITES:
-        p = MATCHED / s / "latency.json"
+        p = MATCHED / s / fname
         if not p.is_file():
             continue
         d = json.loads(p.read_text())
@@ -62,6 +73,7 @@ def main():
             },
             "latency_json": str(p.relative_to(ROOT)),
             "paper_proof": d.get("paper_proof", False),
+            "fair_kv": d.get("fair_kv", False),
             "git_commit": d.get("git_commit"),
             "git_source": d.get("git_source"),
             "gpu_name": d.get("gpu_name"),
@@ -70,26 +82,39 @@ def main():
             "measured_at": d.get("measured_at"),
             "base_ckpt": d.get("base_ckpt"),
             "awr_ckpt": d.get("awr_ckpt"),
+            "bon_minus_single_ms": modes["bon"]["median_ms"] - modes["single"]["median_ms"],
         }
 
     out = {
-        "protocol": "RESOLUTIONPLAN Latency/Table C paper-proof 2026-07-17",
+        "protocol": (
+            "RESOLUTIONPLAN Latency fair-KV 2026-07-18"
+            if args.fair_kv
+            else "RESOLUTIONPLAN Latency/Table C paper-proof 2026-07-17"
+        ),
+        "fair_kv": args.fair_kv,
         "built_at": datetime.now(timezone.utc).isoformat(),
         "note": (
-            "policy-forward ms only; SR from Table P. "
-            "BoN often ≈ single when vision dominates (amortized encode once) — expected on OAT. "
-            "paper_proof requires non-empty git_commit + per-mode obs reset."
+            "FAIR_KV rebuttal: Single/AWR = predict_action (KV-cache); BoN = generate (KV). "
+            "Does not replace Table C deployed paths."
+            if args.fair_kv
+            else (
+                "policy-forward ms only; SR from Table P. "
+                "BoN often ≈ single when vision dominates (amortized encode once). "
+                "paper_proof requires non-empty git_commit + per-mode obs reset."
+            )
         ),
         "suites": rows,
     }
-    out_path = MATCHED / "table_c.json"
+    out_path = MATCHED / out_name
     out_path.write_text(json.dumps(out, indent=2) + "\n")
     print(f"wrote {out_path} n={len(rows)}")
     for s, r in rows.items():
         L = r["latency"]
+        dbs = r["bon_minus_single_ms"]
         print(
             f"  {s:12} single={L['single']['median_ms']:.1f} "
-            f"bon={L['bon']['median_ms']:.1f} awr={L['awr']['median_ms']:.1f}"
+            f"bon={L['bon']['median_ms']:.1f} awr={L['awr']['median_ms']:.1f} "
+            f"bon-single={dbs:+.2f}ms"
         )
 
 
