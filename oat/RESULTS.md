@@ -111,7 +111,7 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 | MW box-close | ep-2000 | **59.6±7.5%** | **66.4±3.0%** | **72.8±4.1%** | **+6.8** | **+13.2** | `matched_s10000/box-close/` · `awr_s10000_box-close.*` |
 | Square | **ep-0600** | **29.6±7.3%** | **31.2±9.0%** | **24.8±2.3%** | **+1.6** | **−4.8** | `matched_s10000/square/` · `awr_s10000_square.*` (AWR < base; BoN flat) |
 | Square ep-1500 (archived) | ep-1500 | **27.2±6.9%** | **26.0±7.5%** | — | **−1.2** | — | `matched_s10000/square_ep1500/` — BoN flat, not paper primary |
-| Lift | retrain | — | — | — | — | — | later |
+| Lift | **retrain → matched ~90%** | — | — | — | — | — | same as Can/Square: TopK → `matched_s10000` Wave1/2 (❌ chain5 gate); `cluster_policy_lift_retrain.sh` |
 
 **Wave1 BoN verified (2026-07-16):** can / coffee / stick — `eval_log.json` ↔ `summary.json` match; Wave1 logs contain `DONE baseline` + `DONE bon`. Missing `ALL DONE` only (triplet.sh edited mid-run) — **не** invalidates paper numbers. Primary artifacts = eval_logs under `matched_s10000/`.
 

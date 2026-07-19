@@ -43,7 +43,7 @@
 | Item | Статус | В статье |
 |------|--------|----------|
 | **MetaWorld demo port** (regen Zarr vs paper sim/success) | контролируемый limitation | да, Limitations: MW interpret within our port |
-| **Lift** | нужен retrain → потом Wave 1–2 @ s10000 | TBD |
+| **Lift** | **RETRAIN (C):** same paper path as Can/Square — TopK → **matched_s10000** Wave1/2 (❌ chain5 as gate). Target matched baseline **~90%** (not Table VI 99.2). Tok `ep-1970`; seed≠42; train `n_test=100` TopK. Script: `cluster_policy_lift_retrain.sh`. Gate: matched base @10000 ≳0.88–0.90; else 2nd seed; still <0.85 → omit | TBD |
 | **Square** | Wave 1 @ ep-1500; если BoN flat → rematch ep-0600 @ s10000 | TBD |
 | **MT4 multitask** | exploratory only | **не в paper** |
 
