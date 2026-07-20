@@ -86,3 +86,42 @@ class ChunkQ(nn.Module):
         model.load_state_dict(ckpt['model_state'])
         model.eval()
         return model
+
+
+class ChunkV(nn.Module):
+    """State-value V(features) head for IQL (scripts/train_iql.py). Same feature handling as
+    ChunkQ (flatten To*d, z-score buffers) but takes ONLY the observation features (no action) —
+    IQL regresses V toward the upper expectile of Q(s,a) over data actions, so V is a proper
+    action-independent state value used both as the TD-bootstrap target and the AWR baseline."""
+
+    def __init__(
+        self,
+        in_dim: int,
+        n_obs_steps: int,
+        hidden_dims: Tuple[int, ...] = (256, 256),
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.in_dim = in_dim
+        self.n_obs_steps = n_obs_steps
+        self.feat_flat = in_dim * n_obs_steps
+
+        self.register_buffer("feat_mean", torch.zeros(self.feat_flat))
+        self.register_buffer("feat_std", torch.ones(self.feat_flat))
+
+        layers: List[nn.Module] = []
+        prev = self.feat_flat
+        for h in hidden_dims:
+            layers += [nn.Linear(prev, h), nn.LayerNorm(h), nn.GELU(), nn.Dropout(dropout)]
+            prev = h
+        layers.append(nn.Linear(prev, 1))
+        self.net = nn.Sequential(*layers)
+
+    def set_feature_stats(self, mean: torch.Tensor, std: torch.Tensor, eps: float = 1e-6):
+        self.feat_mean.copy_(mean.reshape(-1))
+        self.feat_std.copy_(std.reshape(-1).clamp_min(eps))
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        """features [B,To,d] -> V [B] (raw scalar, no sigmoid)."""
+        x = (features.reshape(features.shape[0], -1) - self.feat_mean) / self.feat_std
+        return self.net(x).squeeze(-1)
