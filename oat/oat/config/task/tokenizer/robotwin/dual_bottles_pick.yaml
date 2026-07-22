@@ -1,0 +1,26 @@
+# OAT tokenizer task config — single RoboTwin (bimanual) task.
+# Mirror of oat/config/task/tokenizer/libero/libero10.yaml. Tokenizer is ACTION-ONLY.
+# Only RoboTwin-specific change vs LIBERO: action_dim 7 -> 14 (dual-arm). Copy per task.
+name: dual_bottles_pick
+
+task_name: dual_bottles_pick_easy   # a RoboTwin task id (verify against ROBOTWIN_TASKS). CHANGE per task.
+
+shape_meta: &shape_meta
+  action:
+    shape: [14]                     # RoboTwin Aloha-AgileX = 14-DOF JOINT-space, [-1,1] (7/arm).
+                                    # Uniform across all episodes/tasks (single embodiment).
+
+dataset:
+  _target_: oat.dataset.zarr_dataset.ZarrDataset
+  zarr_path: data/robotwin/dual_bottles_pick_easy_N${training.num_demo}.zarr   # converter output
+  obs_keys: []                      # tokenizer ignores observations
+  action_key: action
+  n_obs_steps: 0
+  n_action_steps: ${horizon}
+  seed: ${seed}
+  val_ratio: 0.1
+
+# NOTE (tokenizer capacity, decision D2): 8 tokens now compress 32x14=448 values (vs 224 for
+# LIBERO). After training, CHECK recon-MSE. If poor, override at launch:
+#   tokenizer.encoder.num_registers=16   (propagates to policy max_seq_len; config-only)
+# Keep token_dropout_mode='pow2'.

@@ -1,0 +1,49 @@
+# OAT policy task config — single RoboTwin (bimanual) task.
+# Mirror of oat/config/task/policy/libero/libero10.yaml. RoboTwin-specific: dual-arm proprio,
+# 14D action, SAPIEN RoboTwinRunner, 2 chosen cameras. VERIFY all dims/keys against RoboTwin.
+name: dual_bottles_pick
+
+task_name: dual_bottles_pick_easy
+lazy_eval: true
+
+# RoboTwin unified = Aloha-AgileX bimanual, 14-DOF JOINT-space action in [-1,1]; obs =
+# pixels_agent_pos (cameras + 14D agent_pos joint positions). Single embodiment -> all dims fixed.
+shape_meta: &shape_meta
+  obs:
+    agentview_rgb:          {shape: [128, 128, 3], type: rgb}   # <- head_camera (resized 240x320->128^2)
+    robot0_eye_in_hand_rgb: {shape: [128, 128, 3], type: rgb}   # <- left_camera (wrist)
+    agent_pos:              {shape: [14], type: state}          # 14D joint positions (both arms)
+    task_uid:               {shape: [1], type: state}
+  action:
+    shape: [14]                                                 # 14D joint-space command in [-1,1]
+
+env_runner:
+  _target_: oat.env_runner.robotwin_runner.RoboTwinRunner   # build by wrapping RoboTwin/LeRobot env
+  task_name: pick_dual_bottles                              # RoboTwin CLI task id (verify)
+  n_test: 100                                               # RoboTwin protocol: 100 episodes/task
+  n_test_vis: 10
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  fps: 25                                                   # RoboTwin default
+  n_parallel_envs: 10
+  image_size: 128                                           # resize from RoboTwin 240x320
+  camera_names:                                             # 2 of {head,left,right}
+    - head_camera            #   -> agentview_rgb
+    - left_camera            #   -> robot0_eye_in_hand_rgb
+  state_ports:
+    - agent_pos
+  max_episode_steps: 300     # RoboTwin episode_length -> H ~= 300/16 ~= 19 replans
+
+dataset:
+  _target_: oat.dataset.zarr_dataset.ZarrDataset
+  zarr_path: data/robotwin/dual_bottles_pick_easy_N${training.num_demo}.zarr
+  obs_keys:
+    - agentview_rgb
+    - robot0_eye_in_hand_rgb
+    - agent_pos
+    - task_uid
+  action_key: action
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${horizon}
+  seed: ${seed}
+  val_ratio: 0.1
