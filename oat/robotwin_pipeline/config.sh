@@ -12,9 +12,12 @@ export DEVICE="${DEVICE:-cuda:0}"
 export TASK="dual_bottles_pick_easy"          # RoboTwin task id (verify with 02_inspect)
 export TASK_CFG="dual_bottles_pick"           # the config filename under config/task/*/robotwin/
 export NDEMO=500                              # demos to use
-export SRC_DIR="${OAT_DIR}/data/robotwin_src"           # where the LeRobot dataset lands (01_download)
-export DATA_FORMAT="lerobot"                  # lerobot (recommended, unified) | hdf5 (native collect)
-export HF_REPO="lerobot/robotwin_unified"     # HF dataset id (LeRobot v3.0, 79.6GB, all 50 tasks)
+export SRC_DIR="${OAT_DIR}/data/robotwin_src/${TASK}"   # where generated HDF5 demos land
+export DATA_FORMAT="hdf5"                     # hdf5 = generate locally with collect_data.py (small,
+                                              # disk-safe). lerobot = 80GB unified download (AVOID on
+                                              # the 99%-full shared disk).
+export HF_REPO="lerobot/robotwin_unified"     # (only if you ever use --include one-task slice)
+export N_COLLECT="${N_COLLECT:-200}"          # demos to GENERATE for the task (few GB)
 
 # --- outputs ---
 export ZARR="${OAT_DIR}/data/robotwin/${TASK}_N${NDEMO}.zarr"
@@ -22,7 +25,10 @@ export TOK_CKPT="${OAT_DIR}/my_models/tokenizer_robotwin_${TASK}.ckpt"   # set f
 export POLICY_CKPT="${OAT_DIR}/my_models/policy_robotwin_${TASK}.ckpt"   # set from 06 output
 export AWR_CKPT="${OAT_DIR}/my_models/policy_robotwin_${TASK}_awr.ckpt"
 
-# --- render backend (SAPIEN has its own; keep egl for any mujoco bits) ---
+# --- render backend ---
 export MUJOCO_GL=egl
+# SAPIEN Vulkan ICD (fix for docker: points the loader at nvidia driver via SAPIEN's ICD).
+# Needed because the container's /usr/share/vulkan/icd.d was empty; harmless if not.
+export VK_ICD_FILENAMES="${VK_ICD_FILENAMES:-/home/docker_user/.local/lib/python3.11/site-packages/sapien/vulkan_library/nvidia_icd.json}"
 cd "${OAT_DIR}"
 echo "[config] TASK=${TASK} NDEMO=${NDEMO} OAT_DIR=${OAT_DIR}"
