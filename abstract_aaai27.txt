@@ -1,0 +1,74 @@
+================================================================================
+AAAI-27 SUBMISSION — TITLE + ABSTRACT (draft, 2026-07-21)
+================================================================================
+
+TITLE (recommended):
+  Spend Compute on Selection, Not Reduction:
+  Rethinking Efficient Inference for Action-Chunking Policies
+
+Alternatives:
+  - Compounding Washes Out Per-Observation Adaptivity:
+    A Counterfactual Study of Action-Chunking Policies
+  - When Adaptive Inference Fails and Selection Wins:
+    A Counterfactual Study of Closed-Loop Action-Chunking Policies
+
+--------------------------------------------------------------------------------
+ABSTRACT (~215 words) — v4, natural voice (final)
+--------------------------------------------------------------------------------
+Action-chunking policies reduce decision frequency by predicting a short sequence
+of future actions, but most of them use the same compute budget at every
+observation: a fixed number of action tokens and a fixed replanning horizon. We
+study whether this budget can be allocated adaptively in OAT, a prefix-decodable
+action tokenizer. Through counterfactual simulation under matched average budgets,
+we estimate the oracle value of changing token depth and replanning horizon on a
+per-observation basis. The value is surprisingly small: even an oracle assigns
+little exploitable per-state benefit to either choice, and learned or heuristic
+controllers do not outperform budget-matched random allocation. Our analysis
+indicates that closed-loop replanning washes out many single-chunk compute
+decisions.
+
+This failure mode suggests a different use of extra computation. Instead of trying
+to reduce the budget of each observation, we sample several action chunks and
+select the candidate most consistent with the others in action space, while reusing
+a single perception pass across candidates. This simple best-of-N procedure
+improves success over the base OAT policy by up to 11 absolute points. We then
+distill the selected behavior into a single-forward policy, retaining the gain
+without additional inference cost. The effect holds across LIBERO, robomimic, and
+MetaWorld. Overall, our results argue that for action-chunking policies, candidate
+selection is a more effective use of compute than per-observation budget reduction.
+
+[OPTIONAL sentence — ADD ONLY IF beam-search is measured before Jul 28, after
+"...at no added inference cost.": "A single round of this selection suffices --
+richer tree search over the ordered tokens does not improve on it, in contrast to
+its benefit for open-loop generation." (SoTo contrast; do NOT include unmeasured.)]
+
+[FUTURE-PROOF: to add benchmarks at camera-ready, just append to the list:
+"...LIBERO, robomimic, MetaWorld, and RoboCasa" (or + RoboTwin).]
+
+--------------------------------------------------------------------------------
+PENDING UPGRADES (before/at deadlines)
+--------------------------------------------------------------------------------
+- LATENCY (before full paper, Jul 28): run batch=1 latency N-sweep
+  (measure_latency_adaptive.py). If BoN latency is ~flat -> upgrade
+  "reuses a single perception pass across all candidates" to
+  "at negligible added latency" + a table in the body.
+- BENCHMARKS (camera-ready, Dec 14, if accepted): RoboCasa (robosuite) and/or
+  RoboTwin (SAPIEN, bimanual) strengthen the SAME claim. Then edit the benchmark
+  sentence: "...spanning two simulators -- LIBERO, robomimic, MetaWorld, and
+  RoboCasa" or "...spanning three simulators and a bimanual embodiment -- ...,
+  RoboTwin." No claim of these until measured.
+
+--------------------------------------------------------------------------------
+HONESTY NOTES (why each claim is defensible)
+--------------------------------------------------------------------------------
+- "little EXPLOITABLE per-state value" -- not zero (oracle value_k ~+0.04 small,
+  value_R ~0); controllers can't exploit it.
+- "controllers do no better than RANDOM" -- covers "worse" too (convergence-R,
+  PACE < random at matched cost).
+- "reuses a single perception pass across all candidates" -- architectural fact
+  (vision encoded once), no unmeasured latency number claimed.
+- "up to +11 success points" -- LIBERO best-of-N (0.581 -> 0.690).
+- "selection gain replicates across ... two simulators" -- the SELECTION positive
+  is confirmed multi-suite; the adaptivity-negative is LIBERO-centric (not claimed
+  as multi-suite here).
+================================================================================

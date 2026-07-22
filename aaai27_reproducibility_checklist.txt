@@ -1,0 +1,73 @@
+================================================================================
+AAAI-27 REPRODUCIBILITY CHECKLIST — answered for
+"Spend Compute on Selection, Not Reduction: ..." (draft)
+NOTE: match wording against the exact AAAI-2027 Author Kit; items flagged [DECIDE]
+need your call (code release, exact hardware).
+================================================================================
+
+--- THIS PAPER ---
+1. Includes a conceptual outline and/or pseudocode description of AI methods
+   introduced:                                                          YES
+   (best-of-N consensus selection; AWR distillation; the counterfactual oracle
+   procedure for per-state value — give pseudocode for selection + oracle.)
+2. Clearly delineates statements that are opinions/hypothesis/speculation from
+   objective facts and results:                                         YES
+3. Provides well-marked pedagogical references for less-familiar readers: YES
+   (OAT; best-of-N / test-time selection; AWR; IQL; LIBERO/robomimic/MetaWorld.)
+
+--- THEORETICAL CONTRIBUTIONS? ---   NO
+   (Empirical/analysis paper — no formal theorems. Skip the theory sub-items → NA.)
+
+--- RELIES ON DATASET(S)? ---   YES
+- Motivation for the chosen datasets is given:                          YES
+  (standard manipulation benchmarks across distinct simulators; diversity test.)
+- All NOVEL datasets are included in a data appendix:                   NA
+  (no novel datasets introduced.)
+- All novel datasets will be public with a license:                     NA
+- Datasets from prior literature are accompanied by citations:          YES
+  (LIBERO, robomimic, MetaWorld.)
+- Datasets from prior literature are publicly available:                YES
+- Non-public datasets described in detail w/ justification:             NA
+
+--- INCLUDES COMPUTATIONAL EXPERIMENTS? ---   YES
+- Code for data pre-processing is included:                             YES [DECIDE]
+  (dataset conversion + collection scripts; conditional on code release.)
+- All source code for experiments is included in a code appendix:       YES [DECIDE]
+  (policy/selection/AWR/IQL scripts + eval; conditional on release.)
+- Source code will be public with a license upon publication:           YES [DECIDE]
+  (recommend YES; confirm you will release the repo.)
+- New-method code has comments detailing implementation, referencing the
+  paper for each step:                                                  YES
+- If randomness is used, the seed-setting method is described:          YES
+  (fixed seeds; each reported number is N independent runs with distinct seeds.)
+- Specifies computing infrastructure (GPU/CPU model, memory, OS, library
+  versions):                                                            YES [FILL]
+  (state exact GPU model, CUDA/PyTorch versions, MuJoCo/robosuite versions,
+   MUJOCO_GL=egl. -> fill the exact hardware you ran on.)
+- Formally describes evaluation metrics and motivates them:             YES
+  (episode success rate; matched-cost / matched-average-budget comparisons;
+   budget-matched random-allocation control.)
+- States the number of runs used to compute each reported result:       YES
+  (n = 3-5 experiments per configuration; stated per table.)
+- Analysis goes beyond single-number summaries (variation/confidence):  YES
+  (report mean +/- standard deviation; discuss effect sizes in sigma.)
+- Significance judged with appropriate statistical tests:               PARTIAL
+  (we report std and reason about effect sizes in sigma / overlapping CIs across
+   n runs; we do NOT run a formal test such as Wilcoxon signed-rank. -> optionally
+   add a paired test in revision to upgrade to YES.)
+- Lists all final (hyper-)parameters for each model/algorithm:          YES
+  (selection N; AWR beta, beta_kl, epochs; IQL gamma, expectile, beta; etc.)
+- States number/range of hyper-parameters tried + selection criterion:  YES
+  (N-sweep {1,4,8,16,32}; AWR beta/epochs sweeps; IQL beta {1,3}; selection by
+   validation/simulation success rate.)
+
+================================================================================
+ITEMS NEEDING YOUR DECISION BEFORE SUBMISSION
+- Code release (3 experiment items + preprocessing): confirm YES and prepare a
+  cleaned repo + license (MIT/Apache) by camera-ready. If undecided now, you may
+  answer "yes" (release upon publication) — standard and expected.
+- Exact computing infrastructure line: GPU model, RAM, OS, CUDA/PyTorch/MuJoCo/
+  robosuite versions (fill from your docker/cluster).
+- Statistical test: currently PARTIAL. To make YES, add a paired significance
+  test (e.g., Wilcoxon/paired t) on the per-run success rates.
+================================================================================

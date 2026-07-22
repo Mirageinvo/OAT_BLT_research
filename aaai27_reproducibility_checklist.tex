@@ -1,0 +1,77 @@
+% AAAI-27 Reproducibility Checklist (standalone, answered).
+% Self-contained: compiles with pdflatex, no aaai27.sty needed.
+% VERIFY item wording against the official checklist in AuthorKit27.zip; if it uses
+% \answerYes / \answerNo / \answerNA macros, copy these answers into that file instead.
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{enumitem}
+\newcommand{\ans}[1]{\textbf{[#1]}}
+\setlist{leftmargin=1.5em}
+\title{Reproducibility Checklist \\ \large ``Spend Compute on Selection, Not Reduction:
+Rethinking Efficient Inference for Action-Chunking Policies''}
+\date{}
+\begin{document}
+\maketitle
+
+\noindent This paper:
+\begin{itemize}
+  \item Includes a conceptual outline and/or pseudocode description of AI methods
+        introduced. \ans{yes}
+  \item Clearly delineates statements that are opinions, hypothesis, and speculation
+        from objective facts and results. \ans{yes}
+  \item Provides well-marked pedagogical references for less-familiar readers to gain
+        background necessary to replicate the paper. \ans{yes}
+\end{itemize}
+
+\noindent\textbf{Does this paper make theoretical contributions?} \ans{no}
+\\(Empirical/analysis paper; no formal theorems. Remaining theory items: NA.)
+
+\bigskip
+\noindent\textbf{Does this paper rely on one or more datasets?} \ans{yes}
+\begin{itemize}
+  \item A motivation is given for why the experiments are conducted on the selected
+        datasets. \ans{yes}
+  \item All novel datasets introduced in this paper are included in a data appendix. \ans{NA}
+  \item All novel datasets introduced in this paper will be made publicly available upon
+        publication of the paper with a license that allows free usage for research
+        purposes. \ans{NA}
+  \item All datasets drawn from the existing literature (potentially including authors'
+        own previously published work) are accompanied by appropriate citations. \ans{yes}
+  \item All datasets drawn from the existing literature are publicly available. \ans{yes}
+  \item All datasets that are not publicly available are described in detail, with an
+        explanation why publicly available alternatives are not scientifically
+        satisfying. \ans{NA}
+\end{itemize}
+
+\bigskip
+\noindent\textbf{Does this paper include computational experiments?} \ans{yes}
+\begin{itemize}
+  \item Any code required for pre-processing data is included in the appendix. \ans{yes}
+  \item All source code required for conducting and analyzing the experiments is included
+        in a code appendix. \ans{yes}
+  \item All source code required for the experiments will be made publicly available upon
+        publication with a license allowing free research use. \ans{yes}
+  \item All source code implementing new methods has comments detailing the
+        implementation, with references to the paper where each step comes from. \ans{yes}
+  \item If an algorithm depends on randomness, then the method used for setting seeds is
+        described in a way sufficient to allow replication of results. \ans{yes}
+  \item This paper specifies the computing infrastructure used for running experiments
+        (hardware and software), including GPU/CPU models; amount of memory; operating
+        system; names and versions of relevant software libraries and frameworks. \ans{yes}
+  \item This paper formally describes evaluation metrics used and explains the motivation
+        for choosing these metrics. \ans{yes}
+  \item This paper states the number of algorithm runs used to compute each reported
+        result. \ans{yes}
+  \item Analysis of experiments goes beyond single-dimensional summaries of performance
+        (e.g., average; median) to include measures of variation, confidence, or other
+        distributional information. \ans{yes}
+  \item The significance of any improvement or decrease in performance is judged using
+        appropriate statistical tests (e.g., Wilcoxon signed-rank). \ans{partial}
+  \item This paper lists all final (hyper-)parameters used for each model/algorithm in
+        the paper's experiments. \ans{yes}
+  \item This paper states the number and range of values tried per (hyper-)parameter
+        during development, along with the criterion used for selecting the final
+        parameter setting. \ans{yes}
+\end{itemize}
+
+\end{document}

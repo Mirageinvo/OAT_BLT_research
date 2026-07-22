@@ -1,0 +1,149 @@
+% A Model of Compounding — standalone preview (compiles with pdflatex).
+% AWR loss + BoN variance reduction + the compounding model.
+% NOTE: present as a MODEL (first-order approximations), not theorems.
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{bm}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\KL}{\mathrm{KL}}
+\newcommand{\R}{R}
+\title{\vspace{-2em}A Model of Compounding\\ \large (preview: AWR loss, BoN variance reduction)}
+\date{}
+\begin{document}
+\maketitle
+
+\paragraph{Setup and notation.}
+A closed-loop action-chunking policy $\pi_\theta$ acts by, at each replan $k$, observing state
+$s_k$ and sampling an \emph{ordered action chunk} $a=z_{1:K}\sim\pi_\theta(\cdot\mid s_k)$ of $K$
+tokens, executing its first $R$ steps, then replanning. An episode of horizon $T$ therefore
+contains
+\begin{equation}
+  H \;=\; \big\lceil T/R \big\rceil
+  \label{eq:H}
+\end{equation}
+replans. Write the (sparse) episode return as $\R(s,a)\in\{0,1\}$ (task success), and let
+$V(s)=\E_{\pi_\theta}[\R\mid s]$ be the state value and $A(s,a)=\R(s,a)-V(s)$ the advantage. The
+per-token factorization is $\log\pi_\theta(a\mid s)=\sum_{k=1}^{K}\log\pi_\theta(z_k\mid z_{<k},s)$.
+
+%======================================================================
+\section*{1. Per-observation adaptivity has no exploitable signal}
+For a per-observation compute choice $c$ (token depth $K$ or replan horizon $R$), define its
+\emph{single-deviation oracle value} by counterfactual rollout (execute $c$ at $s$, then follow
+the default policy):
+\begin{equation}
+  \Delta(s,c)\;=\;Q(s,c)-Q(s,c_{\text{def}}),\qquad
+  \E_{s}\big[\,\Delta(s,c)\,\big]\;\approx\;0 .
+  \label{eq:oracle}
+\end{equation}
+Equivalently, the per-step failure rate $\rho(s,c)$ (probability the chunk is
+\emph{unrecoverable}) is (nearly) independent of $c$: closed-loop replanning corrects a single
+cheap decision, so $\rho(s,c)\approx\rho(s)$. There is thus no per-state ``where to economize''
+signal to exploit.
+
+%======================================================================
+\section*{2. Selection as mode-seeking / tail-risk removal (best-of-$N$)}
+At a fixed budget, draw $N$ candidate chunks $a_1,\dots,a_N\stackrel{\text{iid}}{\sim}\pi_\theta(\cdot\mid s)$
+and execute the \emph{consensus} candidate (kernel-density vote):
+\begin{equation}
+  \hat a \;=\; \arg\max_{i\in[N]}\ \sum_{j=1}^{N}\kappa\!\left(a_i,a_j\right)
+  \;\xrightarrow{\,N\to\infty\,}\; \arg\max_{a}\ \pi_\theta(a\mid s),
+  \label{eq:vote}
+\end{equation}
+i.e.\ consensus is a \emph{mode-seeking} operator: it converts sampling from $\pi_\theta$ into
+(approximate) selection of its mode. It does \emph{not} seek the ``best'' chunk (by
+\eqref{eq:oracle} there is none) and it does \emph{not} average; it \emph{rejects low-density
+outliers}.
+
+Its benefit is asymmetric, not symmetric noise reduction. Model a sampled chunk as
+\emph{catastrophic} (unrecoverable, outcome $u_-$) with probability $\rho$, else safe (outcome
+$u_+>u_-$); the mode is safe. The single-sample outcome averages the bad tail,
+$\E_{a\sim\pi_\theta}[u]=(1-\rho)u_+ + \rho\,u_-$, whereas the consensus removes it, giving a
+per-step gain equal to the removed tail risk,
+\begin{equation}
+  g \;=\; u(\hat a)-\E_{a\sim\pi_\theta}[u]\;=\;\rho\,(u_+-u_-)\;=\;\rho\,\Delta .
+  \label{eq:gain}
+\end{equation}
+Equivalently, the per-step \emph{failure} rate drops from $\rho$ to
+\begin{equation}
+  \rho_N \;=\; \Pr\big[\hat a \text{ catastrophic}\big]
+        \;\approx\; \Pr\!\big[\mathrm{Binom}(N,\rho)\ge\lceil N/2\rceil\big]
+        \;\approx\; \binom{N}{\lceil N/2\rceil}\,\rho^{\lceil N/2\rceil}
+        \;\ll\; \rho .
+  \label{eq:rhoN}
+\end{equation}
+Thus best-of-$N$ improves outcomes by pruning the rare catastrophic tail
+($\rho\!\to\!\rho_N$), not by averaging and not by ranking quality; the gain \eqref{eq:gain}
+exists precisely because the tail is asymmetrically bad.
+
+%======================================================================
+\section*{3. The compounding law}
+Assuming episode success requires avoiding an unrecoverable chunk at every replan, the
+catastrophe-free success factor is $\prod_{k=1}^{H}(1-\rho)\approx(1-\rho)^{H}$. Comparing a
+single sample ($\rho$) with best-of-$N$ ($\rho_N$):
+\begin{equation}
+  \Delta\mathrm{SR}
+  \;=\;(1-\rho_N)^{H}-(1-\rho)^{H}
+  \;\approx\; H\,(\rho-\rho_N)\qquad(\rho,\rho_N\ \text{small}).
+  \label{eq:compound}
+\end{equation}
+Equation~\eqref{eq:compound} is the \textbf{compounding law}: the tiny per-step benefit
+$(\rho-\rho_N)$ is multiplied by the number of replans $H$, because a \emph{single} catastrophe
+anywhere fails the episode. It yields a falsifiable prediction,
+\begin{equation}
+  \boxed{\ \Delta\mathrm{SR}\ \propto\ H\;=\;\#\text{replans}\ \times\ (\rho-\rho_N)\ }
+  \label{eq:predict}
+\end{equation}
+i.e.\ the selection gain grows with episode length / replan frequency and with per-step
+head-room ($\rho$). \emph{The same $H$ factor explains the asymmetry with adaptivity:} by
+\eqref{eq:oracle} a budget choice leaves $\rho$ unchanged, so it multiplies zero
+($\Delta\mathrm{SR}\approx0$), whereas selection reduces $\rho$, so it compounds.
+
+%======================================================================
+\section*{4. Distilling selection: advantage-weighted regression (AWR)}
+Best-of-$N$ shifts the executed-action distribution toward the consensus mode. We bake this
+shift into a single-forward policy by advantage-weighted regression. AWR solves the
+KL-regularized improvement
+\begin{equation}
+  \max_{\pi}\ \E_{a\sim\pi}\!\big[A(s,a)\big]-\beta\,\KL\!\big(\pi(\cdot\mid s)\,\|\,\pi_{\!D}(\cdot\mid s)\big)
+  \ \Longrightarrow\
+  \pi^\star(a\mid s)\ \propto\ \pi_{\!D}(a\mid s)\,\exp\!\big(A(s,a)/\beta\big),
+  \label{eq:awr-sol}
+\end{equation}
+and projects $\pi^\star$ onto $\pi_\theta$ by weighted maximum likelihood. With a frozen
+reference $\pi_{\text{ref}}$ (anti-collapse) and the per-token factorization, the training loss is
+\begin{equation}
+  \mathcal{L}_{\text{AWR}}(\theta)
+  = -\,\E_{(s,a)\sim\mathcal{D}}
+     \!\left[\, w(s,a)\sum_{k=1}^{K}\log\pi_\theta(z_k\mid z_{<k},s)\right]
+   \;+\;\beta_{\KL}\,\E_{s}\!\big[\KL\!\big(\pi_\theta(\cdot\mid s)\,\|\,\pi_{\text{ref}}(\cdot\mid s)\big)\big],
+  \label{eq:awr-loss}
+\end{equation}
+\begin{equation}
+  w(s,a)=\min\!\Big(\exp\!\big(A(s,a)/\beta\big),\,w_{\max}\Big),\qquad
+  A(s,a)=\R(s,a)-V(s),
+  \label{eq:awr-weight}
+\end{equation}
+with weights normalized to unit mean. Because $w\ge 0$, AWR can only \emph{raise} the likelihood
+of observed chunks: it is imitation-bounded (it reproduces the selected/consensus behavior at a
+single forward pass, but cannot exceed the source), consistent with our empirical ceiling.
+
+%======================================================================
+\section*{5. Cost model (why selection is nearly free)}
+Perception dominates the per-replan cost, $C_{\text{vis}}\gg c_{\text{AR}}$, and is computed once
+per replan and shared across the $N$ candidates:
+\begin{equation}
+  C_{\text{ep}}^{\text{single}} = H\,(C_{\text{vis}}+K\,c_{\text{AR}}),\qquad
+  C_{\text{ep}}^{\text{BoN-}N} = H\,(C_{\text{vis}}+N K\,c_{\text{AR}})
+  \ \xrightarrow[C_{\text{vis}}\gg c_{\text{AR}}]{}\ H\,C_{\text{vis}} .
+  \label{eq:cost}
+\end{equation}
+Thus best-of-$N$ adds cost only on the cheap autoregressive axis; distillation
+\eqref{eq:awr-loss} removes even that, retaining the gain at single-forward cost.
+
+\bigskip
+\noindent\textit{Caveat.} The safe/catastrophic dichotomy and the small-$\rho$ expansions are a
+first-order \emph{model}, not a theorem; it is intended to explain the direction of the effects
+and the prediction~\eqref{eq:predict}, which we test empirically (selection gain vs.\ \#replans).
+
+\end{document}
