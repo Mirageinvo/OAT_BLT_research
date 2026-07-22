@@ -5,18 +5,21 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${ROOT}"
 export PATH="${HOME}/.local/bin:${ROOT}/.venv/bin:${PATH}"
-PYTHON="${ROOT}/.venv/bin/python"
-if [[ ! -x "${PYTHON}" ]]; then
-  PYTHON="$(command -v python3)"
+# Prefer Frameworks 3.12 (has numpy/zarr); oat .venv often lacks them without uv sync.
+PYTHON="${PYTHON:-}"
+if [[ -z "${PYTHON}" ]]; then
+  for c in \
+    /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 \
+    "${ROOT}/.venv/bin/python" \
+    "$(command -v python3)"; do
+    if [[ -x "${c}" ]] && "${c}" -c "import numpy,zarr" 2>/dev/null; then
+      PYTHON="${c}"
+      break
+    fi
+  done
 fi
-UV="$(command -v uv || true)"
-run_py() {
-  if [[ -n "${UV}" ]]; then
-    uv run python "$@"
-  else
-    "${PYTHON}" "$@"
-  fi
-}
+: "${PYTHON:?no python with numpy+zarr}"
+run_py() { "${PYTHON}" "$@"; }
 
 TASK_SNAKE="${1:?usage: $0 <close_drawer|coffee_press_button|turn_off_microwave|turn_off_sink_faucet>}"
 SEED="${SEED:-0}"
@@ -70,6 +73,13 @@ run_py scripts/convert_robocasa_dataset.py \
   --mg-hdf5 "${MG_SLIM}" \
   --n-human 50 --n-machine 150 --seed "${SEED}" \
   "${FORCE_FLAG[@]}"
+
+"${PYTHON}" scripts/validate_robocasa_data.py --task "${TASK_SNAKE}"
+
+if [[ "${KEEP_SLIM:-0}" != "1" ]]; then
+  echo "[rm] slim $(du -h "${MG_SLIM}" 2>/dev/null | awk '{print $1}')"
+  rm -f "${MG_SLIM}"
+fi
 
 echo "=== done ${TASK_SNAKE} → ${ZARR} ==="
 df -h "${ROOT}" | tail -1

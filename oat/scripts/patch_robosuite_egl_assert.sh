@@ -5,7 +5,9 @@
 # which breaks single-GPU isolation on non-zero GPUs.
 set -euo pipefail
 cd /workspace/oat
-source .venv/bin/activate
+VENV="${VENV:-/workspace/oat/.venv}"
+# shellcheck disable=SC1091
+source "${VENV}/bin/activate"
 
 TARGET="$(python - <<'PY'
 import robosuite.utils.binding_utils as m

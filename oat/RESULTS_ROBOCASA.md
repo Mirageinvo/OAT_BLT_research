@@ -34,18 +34,18 @@ bash scripts/g0_robocasa_one_task.sh close_drawer   # or watch_g0_chain.sh for a
 python3 scripts/validate_robocasa_data.py
 ```
 
-Space note: full `mg_im` ≈ **24.3 GB**/task. Pipeline slim→`*_M150_s0.hdf5` then deletes full MG before convert.
+Space note: full `mg_im` ≈ **24 GB**/task. Pipeline: slim→`*_M150_s0.hdf5` → convert → validate → **delete full MG and slim** (retain only `*_N200.zarr`).
 
 ### Status
 
 | task | human HDF5 | mg slim M150 | zarr N200 | validate | sha256 zarr (todo) |
 |------|------------|--------------|-----------|----------|--------------------|
-| close_drawer | OK (54 demos, 372M) | downloading full MG (~24.3G) in `screen robocasa_g0` | pending | pending | — |
-| coffee_press_button | OK (54, 241M) | queued in chain | pending | pending | — |
-| turn_off_microwave | OK (54, 389M) | queued in chain | pending | pending | — |
-| turn_off_sink_faucet | OK (54, 354M) | queued in chain | pending | pending | — |
+| close_drawer | OK (54 demos, 372M) | deleted after zarr | **OK** `close_drawer_N200.zarr` (200 eps, Da=12) | **OK** | pending |
+| coffee_press_button | OK (54, 241M) | deleted after zarr | **OK** `coffee_press_button_N200.zarr` (200 eps, Da=12) | **OK** | pending |
+| turn_off_microwave | OK (54, 389M) | deleted after zarr | **OK** `turn_off_microwave_N200.zarr` (200 eps, Da=12) | **OK** | pending |
+| turn_off_sink_faucet | OK (54, 354M) | deleted after zarr | **OK** `turn_off_sink_faucet_N200.zarr` (200 eps, Da=12) | **OK** | pending |
 
-**In flight (2026-07-19):** `screen -r robocasa_g0` runs `watch_g0_chain.sh` — one MG at a time → slim M150 (seed 0) → delete full → convert `*_N200.zarr` → next task → `validate_robocasa_data.py`. Monitor: `ls -lh data/robocasa/hdf5/*/mg/` and `logs/g0_*.log`.
+**Disk policy:** full MG → slim M150 → convert N200 → validate → **rm slim** (only zarr retained). CloseDrawer slim removed 2026-07-20 after validate OK.
 
 Human inspect (2026-07-19): all `actions.shape[-1]==12`; cams `robot0_agentview_{left,right}_image` + `robot0_eye_in_hand_image` @ 128².
 
@@ -57,10 +57,48 @@ Provenance per zarr: `ROBOCASA_SOURCE.txt` inside the zarr directory.
 
 ### G0b success-parity
 
-Pending env port — required before policy train (`ROBOCASA.md` §1 G0b).
+Pending env port — required before **policy** train (`ROBOCASA.md` §1 G0b). Does **not** block tokenizer.
+
+### Tokenizer (G0 → tok; parallel OK)
+
+| task | config | train | best MSE ckpt |
+|------|--------|-------|---------------|
+| close_drawer | `task/tokenizer=robocasa/close_drawer` | **RUNNING** `tmux rc_tok_close_drawer` GPU1; run `output/20260720/005709_train_oattok_close_drawer_N200` (action-only zarr sync ~900K) | TBD |
+| coffee_press_button | `task/tokenizer=robocasa/coffee_press_button` | **RUNNING** `tmux rc_tok_coffee_press_button` GPU0; run `output/20260720/041753_train_oattok_coffee_press_button_N200` (action-only ~560K) | TBD |
+| turn_off_microwave | `task/tokenizer=robocasa/turn_off_microwave` | **RUNNING** `tmux rc_tok_turn_off_microwave` GPU1; run `output/20260720/061925_train_oattok_turn_off_microwave_N200` | TBD |
+| turn_off_sink_faucet | `task/tokenizer=robocasa/turn_off_sink_faucet` | **RUNNING** `tmux rc_tok_turn_off_sink_faucet` GPU1; run `output/20260720/083055_train_oattok_turn_off_sink_faucet_N200` | TBD |
+
+```bash
+# on cluster (after rsync zarr + configs):
+TASK=close_drawer GPU=1 bash scripts/cluster_tokenizer_robocasa.sh
+```
 
 ---
 
 ## G1+ (tok / policy / matched)
+
+**Eval layout (locked):** literal 5 seeds `10000…10004`, each **one** run `-n 1 --n_test 50`, **same ckpt**, separate dirs `*_seed{seed}/`.
+
+**Aggregation (locked):**
+| | |
+|--|--|
+| cell | `mean ± SEM` over 5 seed SRs (`SEM = SD/√5`; also log SD) |
+| Δ_BoN | `mean(BoN) − mean(baseline)`; `SEM_Δ = √(SEM_BoN² + SEM_base²)` |
+| Δ_AWR | same vs Wave-1 baseline |
+| artifact | `output/eval/matched_s10000/robocasa/<task>/summary_literal5.json` |
+
+Scripts: `cluster_robocasa_literal5_wave1.sh`, `aggregate_robocasa_literal5.py` (see `ROBOCASA.md` §4).  
+❌ Not RM/MW `-n 5` on one start seed.
+
+### Table P template (fill after Wave 1/2)
+
+| task | baseline (mean±SEM) | BoN | AWR | Δ_BoN±SEM_Δ | Δ_AWR±SEM_Δ | notes |
+|------|---------------------|-----|-----|-------------|-------------|-------|
+| close_drawer | | | | | | |
+| coffee_press_button | | | | | | |
+| turn_off_microwave | | | | | | |
+| turn_off_sink_faucet | | | | | | |
+
+Per-seed SRs: paste from `summary_literal5.json` → `methods.*.per_seed_sr`.
 
 TBD after G0 green.

@@ -70,8 +70,19 @@ def validate_one(task: str, n_demo: int = 200) -> bool:
 
 
 def main() -> None:
+    import argparse
+
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument(
+        "--task",
+        action="append",
+        choices=list(TASKS),
+        help="Validate only these tasks (repeatable). Default: all.",
+    )
+    args = p.parse_args()
+    tasks = tuple(args.task) if args.task else TASKS
     ok = True
-    for task in TASKS:
+    for task in tasks:
         ok = validate_one(task) and ok
     raise SystemExit(0 if ok else 1)
 

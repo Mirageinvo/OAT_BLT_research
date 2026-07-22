@@ -31,15 +31,14 @@ Workspace root: `/workspace/oat` (paths below are relative to `oat/`)
 |-----------|--------------------------|-----------------|--------------------|------------------|------------------|
 | **Lift** | **83.6 ± 1.7%** (ep-0600) | 91.3 ± 2.9% | **93.3 ± 1.8%** | +7.7 pp | +9.7 pp |
 | **Can** | **86.0 ± 2.8%** (ep-1700) | 90.7 ± 1.3% | 89.3 ± 1.8% | +4.7 pp | +3.3 pp |
-| **Square** (chain5 best) | **31.2 ± 1.5%** (ep-1500) | — | — | — | — |
-| **Square** (BoN/AWR @ ep-0600) | **30.8 ± 2.7%** (ep-0600) | 38.0 ± 2.0% | **36.7 ± 2.9%** | **+7.2 pp** | **+5.9 pp** |
+| **Square** | rerun pending | — | — | — | — |
 | **MT4 multitask** ‡ | **28.4 ± 3.1%** (ep-0450) | 26.7 ± 2.4% | 18.7 ± 1.8% | −1.7 pp | −9.7 pp |
-| **MW coffee-pull** (specialist) | **43.2 ± 3.3%** (ep-1000) | **28.0 ± 0.0%** | **29.3 ± 2.3%** | exploratory −15.2 pp | exploratory −13.9 pp |
+| **MW coffee-pull** (specialist) | rerun pending | — | — | — | — |
 | **MW stick-pull** (specialist) | **16.4 ± 4.0%** (ep-0800) | **30.7 ± 3.1%** | **39.3 ± 7.6%** | exploratory +14.3 pp | exploratory +22.9 pp |
 | **MW disassemble** (specialist) | **66.4 ± 3.2%** (ep-1400) | TBD | TBD | — | — |
 | **MW box-close** (specialist) | *train best* **55.2%** @ep-2000 (chain5 N/A) | TBD | TBD | — | — |
 
-**Square caveat:** BoN/AWR used **`ep-0600_sr-0.420.ckpt`**, not best chain5 **`ep-1500`**. Quick BoN/AWR = `n_test=50`, 3 exp — same as Lift/Can/MT4 exploratory pipelines.
+**Square note:** old quick BoN/AWR artifacts were deleted on 2026-07-20; suite is being rerun from scratch.
 
 † **Exploratory only — not the paper matched estimator.** Chain5 = 5×50 distinct inits; quick BoN/AWR = 3 stochastic runs on seeds `1000–1049`. Paper Δ requires matched baseline/BoN/AWR on one **shared fixed init set** (`test_start_seed=1000`, `n_test=50`, `-n 3`). See [`RESOLUTIONPLAN.md`](RESOLUTIONPLAN.md).
 
@@ -100,43 +99,46 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 5. Оригинал OAT Table VI — **sanity only**, не comparator.
 6. **RM vs MW фиты разные** (`cfg.seed` 42 vs 0), но env TopK у обоих default `test_start_seed=1000` (MW длиннее до 1249). Paper `10000` вне обоих.
 
-**После anti-leak seeds:** остаётся (a) **MW demo port** = controlled limitation; (b) **Lift** retrain. Square Wave1/2 + latency **DONE** (Table P/C). MT4 — не в paper.
+**После anti-leak seeds:** остаётся (a) **MW demo port** = controlled limitation; (b) **Lift run B** AWR eval + coffee/square Wave2; (c) RoboCasa policies serial. MT4 — не в paper.
 
 | Suite | Base ckpt | Paper baseline | BoN N=8 | AWR | Δ_BoN | Δ_AWR | Artifacts |
 |-------|-----------|----------------|---------|-----|-------|-------|-----------|
 | Can | ep-1700 | **76.4±3.0%** | **80.8±1.1%** | **79.2±7.7%** | **+4.4** | **+2.8** | `matched_s10000/can/` · `awr_s10000_can.*` (AWR < BoN) |
-| MW coffee-pull | ep-1000 | **41.6±4.1%** | **42.8±2.3%** | **41.2±3.3%** | **+1.2** | **−0.4** | `matched_s10000/coffee-pull/` · `awr_s10000_coffee-pull.*` (AWR ≈ base, flat) |
+| MW coffee-pull | **ep-1000** TopK lock `090816` | **40.8±2.3%** | **43.2±4.8%** | Wave2 collect **RUNNING** (~20%) | **+2.4** | — | Wave1 **DONE** · `matched_s10000/coffee-pull/` · replan **12.3** · tmux `coffee_w2` |
 | MW stick-pull | ep-0800 | **15.6±6.2%** | **25.6±2.6%** | **26.8±5.2%** | **+10.0** | **+11.2** | `matched_s10000/stick-pull/` · `awr_s10000_stick-pull.*` |
 | MW disassemble | ep-1400 | **62.4±5.2%** | **63.2±6.3%** | **69.6±5.7%** | **+0.8** | **+7.2** | `matched_s10000/disassemble/` · `awr_s10000_disassemble.*` |
 | MW box-close | ep-2000 | **59.6±7.5%** | **66.4±3.0%** | **72.8±4.1%** | **+6.8** | **+13.2** | `matched_s10000/box-close/` · `awr_s10000_box-close.*` |
-| Square | **ep-0600** | **29.6±7.3%** | **31.2±9.0%** | **24.8±2.3%** | **+1.6** | **−4.8** | `matched_s10000/square/` · `awr_s10000_square.*` (AWR < base; BoN flat) |
-| Square ep-1500 (archived) | ep-1500 | **27.2±6.9%** | **26.0±7.5%** | — | **−1.2** | — | `matched_s10000/square_ep1500/` — BoN flat, not paper primary |
-| Lift | **retrain → matched ~90%** | — | — | — | — | — | same as Can/Square: TopK → `matched_s10000` Wave1/2 (❌ chain5 gate); `cluster_policy_lift_retrain.sh` |
+| Square | **ep-0700** TopK lock `215024` | Wave1 baseline **RUNNING** | — | — | — | — | lock `my_models/square_topk_lock.txt` (0.42 @700, 2026-07-22T10:11Z) · tmux `square_matched` |
+| Lift | **2 runs** (see below) | | | | | | |
+| — run A (mid-train) | **ep-0900** `144024` | **82.0±3.2%** | **84.8±4.6%** | **81.2±4.1%** | **+2.8** | **−0.8** | `matched_s10000/lift/` · `awr_s10000_lift.*` · **not** TopK-lock · AWR < baseline · replan **8.0** DONE |
+| — run B (TopK lock / paper) | **ep-1400** `144024` | **87.6±2.2%** | **84.0±4.9%** | Wave2 AWR eval **RUNNING** | **−3.6** | — | `matched_s10000/lift_ep1400/` · npz+ckpt `awr_s10000_lift_ep1400.*` · replan **9.3** · tmux `lift_awr_eval` |
 
-**Wave1 BoN verified (2026-07-16):** can / coffee / stick — `eval_log.json` ↔ `summary.json` match; Wave1 logs contain `DONE baseline` + `DONE bon`. Missing `ALL DONE` only (triplet.sh edited mid-run) — **не** invalidates paper numbers. Primary artifacts = eval_logs under `matched_s10000/`.
+**Wave1 BoN verified (2026-07-16):** can / stick — `eval_log.json` ↔ `summary.json` match. Primary artifacts = eval_logs under `matched_s10000/`.
 
-**Wave1 Square ep-0600 DONE (2026-07-17):** baseline 29.6±7.3 / BoN 31.2±9.0 (Δ+1.6, weak). Gate → Wave2 launched.
+**Wave2 DONE (finished suites):** can / stick / disassemble / box-close (2026-07-17) + **Lift run A** (2026-07-21, AWR 81.2±4.1, Δ=−0.8). **In flight (2026-07-22 ~16:25 MSK):** Lift B AWR eval; coffee-pull Wave2 collect ~20% (1959/10k); Square Wave1 baseline (TopK locked ep-700); RC `coffee_press` resume train-eval ~39/50.
 
-**Wave2 DONE (2026-07-17):** box-close AWR 72.8±4.1 (Δ_AWR +13.2); disassemble AWR 69.6±5.7 (Δ_AWR +7.2); can AWR 79.2±7.7 (Δ_AWR +2.8, below BoN 80.8); coffee-pull AWR 41.2±3.3 (Δ_AWR −0.4, flat); stick-pull AWR 26.8±5.2 (Δ_AWR +11.2). Sources: `awr_n5/eval_log.json` @ `matched_s10000/`.
+**Cluster ops (2026-07-22):** (1) deleted exploratory MT4 policy `output/20260708/032431_train_oatpolicy_mw-mt4_N50/` (~5.4 G; tokenizer kept). (2) container CUDA/NVML broke for new procs → `docker restart oat_mipt_robomimic_askhabaliev_gs` (~13:45 MSK) restored `torch.cuda`; resumed RC + parallel matched tmuxes.
 
-**Wave 2 Square ep-0600 DONE (2026-07-18):** AWR **24.8±2.3%** (Δ_AWR **−4.8**; collect per-ep SR~0.35, BoN headroom tiny). Anti-leak OK (`collect/train seed 0`, eval `@10000`). Paper-proof latency DONE → Table C.
+**Coffee-pull TopK lock (2026-07-21T23:00Z):** train-eval after ep-1000 did **not** beat 0.432 → lock `ep-1000_sr-0.432.ckpt`. Wave1 **DONE** (base 40.8 / BoN 43.2, Δ=+2.4).
 
-**Why Wave2 collect is slow (not stuck):** parallel BoN-distill collects (`n_chunks=20000`, `--bon_n 8`) on **2 GPUs / shared CPU+EGL**. Sim-bound (~4–6 s/chunk); GPU util often ~0%. Do **not** interpret as hung.
+**Square TopK lock (2026-07-22T10:11Z):** plateau rule peak-then-2-below → `ep-0700_sr-0.420.ckpt`; `my_models/square_topk_lock.txt`; train killed; Wave1 started.
+
+**Artifact pattern list:**
+
+| Artifact pattern | Examples |
+|------------------|----------|
+| AWR dataset | `my_datasets/awr_s10000_{can,stick-pull,box-close,disassemble,lift,lift_ep1400}.npz` (+ coffee-pull / square pending) |
+| AWR ckpt | `my_models/awr_s10000_<suite>.ckpt` (+ `awr_s10000_lift_ep1400.ckpt` trained) |
+| Wave2 log | `logs/awr_s10000_<suite>_wave2_gpu{0\|1}.log` |
+| Wave2 eval log | `logs/awr_s10000_<suite>_wave2_eval_gpu{0\|1}.log` |
+| AWR eval | `output/eval/matched_s10000/<suite>/awr_n5/` |
+| tmux (live) | `lift_awr_eval` · `coffee_w2` · `square_matched` · `rc_pol_chain` |
+| ❌ never | `my_models/policy_awr_*` / old exploratory `awr_*.npz` / Table B |
 
 Paper Wave1 artifacts:  
 `output/eval/matched_s10000/<suite>/{baseline_n5,bon_n8_n5}/eval_log.json` + `summary.json` + `logs/matched_s10000_<suite>_gpu*.log`.
 
-| Artifact pattern | Examples |
-|------------------|----------|
-| AWR dataset | `my_datasets/awr_s10000_{can,coffee-pull,stick-pull,box-close,disassemble,square}.npz` |
-| AWR ckpt | `my_models/awr_s10000_<suite>.ckpt` |
-| Wave2 log | `logs/awr_s10000_<suite>_wave2_gpu{0\|1}.log` |
-| Wave2 eval log | `logs/awr_s10000_<suite>_wave2_eval_gpu{0\|1}.log` |
-| AWR eval | `output/eval/matched_s10000/<suite>/awr_n5/` |
-| tmux | `paper_w2_<suite>` |
-| ❌ never | `my_models/policy_awr_*` / old exploratory `awr_*.npz` / Table B |
-
-**Lift** after retrain.
+**Lift** retrain **STOPPED**; run A matched **DONE** (incl. AWR + replan 8.0); run B Wave1 **DONE** (base 87.6 / BoN 84.0, Δ=−3.6); Wave2 collect+train **DONE** (`awr_s10000_lift_ep1400.*`), AWR eval **RUNNING**.
 
 **Имена файлов на suite (одинаковый шаблон):**
 
@@ -153,6 +155,81 @@ logs/awr_s10000_<suite>_wave2_gpu*.log         # Wave2 collect+train
 logs/awr_s10000_<suite>_wave2_eval_gpu*.log    # Wave2 AWR eval only
 tmux: paper_s10000_<suite> | paper_w2_<suite>
 ```
+
+### Table P — Reproduce manifest (seeds + artifacts)
+
+**Зачем:** один канон для reproduce / appendix — *на чём училось, чем выбирали ckpt, чем мерили paper SR*.  
+Paths relative to `/workspace/oat`. Cluster: `oat_mipt_robomimic_askhabaliev_gs`.  
+**Source of truth for numbers:** `matched_s10000/<suite>/summary.json` + `*/eval_log.json` (не train-time SR в имени ckpt).
+
+#### Seed map (anti-leak — не смешивать)
+
+| Role | Seed / range | Used for | ❌ Never use for |
+|------|--------------|----------|------------------|
+| **Train `cfg.seed` / `training.seed`** | RM **42**; MW specialists **0**; Lift *retrain* **7** | dataloader shuffle, weight init | paper SR |
+| **Selection pool (TopK during policy train)** | env `test_start_seed=**1000**` (RM: 50 eps → `1000–1049`; MW: `n_test=250` → `1000–1249`) | pick `ep-*_sr-*.ckpt` | paper Table P / Δ |
+| **Paper report pool** | `test_start_seed=**10000**`, `n_test=50` → episodes **`10000–10049`** | Wave1 baseline+BoN, Wave2 AWR eval, Table P | TopK / train selection |
+| **AWR collect** | `--seed **0**` (worker offsets) | `my_datasets/awr_s10000_<suite>.npz` | selection `1000*` or report `10000*` |
+| **Eval stochasticity** | `temperature=1.0`, `topk=10`; `-n 5` (=`num_exp`) | paper mean±std over 5 runs on **same** init set | — |
+
+**Inference (all paper evals):** OAT8 = `--use_k_tokens 8 --entropy_threshold 0`; BoN = `--bon_free 8 --bon_signal vote`.  
+**Script:** `SUITE=<suite> BASE_CKPT=<path> [SKIP_AWR=1] GPU=<g> bash scripts/cluster_matched_triplet.sh`  
+→ writes `output/eval/matched_s10000/<suite>/` + `logs/matched_s10000_<suite>_gpu*.log`.
+
+#### Per-suite train → paper base (what trained on what)
+
+| Suite | Data (zarr) | Tokenizer (frozen) | Policy run dir | Train seed | Paper **BASE_CKPT** (TopK @1000) | Matched root | AWR npz / ckpt |
+|-------|-------------|--------------------|----------------|------------|----------------------------------|--------------|----------------|
+| **Can** | `data/robomimic/can_N200.zarr` | `output/20260705/210939_train_oattok_can_N200/checkpoints/ep-0520_mse-0.005.ckpt` | `output/20260706/173343_train_oatpolicy_can_N200/` | 42 | `.../checkpoints/ep-1700_sr-0.940.ckpt` | `matched_s10000/can/` | `my_datasets/awr_s10000_can.npz` · `my_models/awr_s10000_can.ckpt` |
+| **stick-pull** | `data/metaworld/stick-pull_N50.zarr` | `output/20260710/235437_train_oattok_mw-stick-pull_st_N50/checkpoints/ep-3030_mse-0.042.ckpt` | `output/20260711/134439_train_oatpolicy_mw-stick-pull_st_N50/` | 0 | `.../checkpoints/ep-0800_sr-0.212.ckpt` | `matched_s10000/stick-pull/` | `awr_s10000_stick-pull.npz` · `.ckpt` |
+| **disassemble** | `data/metaworld/disassemble_N50.zarr` | `output/20260710/235437_train_oattok_mw-disassemble_st_N50/checkpoints/ep-3410_mse-0.027.ckpt` | `output/20260711/134440_train_oatpolicy_mw-disassemble_st_N50/` | 0 | `.../checkpoints/ep-1400_sr-0.700.ckpt` | `matched_s10000/disassemble/` | `awr_s10000_disassemble.npz` · `.ckpt` |
+| **box-close** | `data/metaworld/box-close_N50.zarr` | `output/20260710/212943_train_oattok_mw-box-close_st_N50/checkpoints/ep-3450_mse-0.019.ckpt` | `output/20260711/134439_train_oatpolicy_mw-box-close_st_N50/` | 0 | `.../checkpoints/ep-2000_sr-0.552.ckpt` | `matched_s10000/box-close/` | `awr_s10000_box-close.npz` · `.ckpt` |
+| **Lift** *(retrain DONE; **2 matched runs**)* | `data/robomimic/lift_N200.zarr` + HDF5 `data/robomimic/hdf5_datasets/lift_mh_image.hdf5` | `output/20260704/203215_train_oattok_lift_N200/checkpoints/ep-1970_mse-0.006.ckpt` | **retrain** `output/20260719/144024_train_oatpolicy_lift_N200/` | **7** | **TopK lock** `.../ep-1400_sr-0.950.ckpt`; mid-train Wave1 used `ep-0900_sr-0.930.ckpt` | **A:** `matched_s10000/lift/` (ep0900) · **B:** `matched_s10000/lift_ep1400/` (ep1400, paper) | **A:** `awr_s10000_lift.*` · **B:** `awr_s10000_lift_ep1400.*` |
+| **Square** *(TopK locked → Wave1)* | `data/robomimic/square_N200.zarr` + `.../square_mh_image.hdf5` | `output/20260706/005048_train_oattok_square_N200/checkpoints/ep-0690_mse-0.004.ckpt` | `output/20260720/215024_train_oatpolicy_square_N200/` (seed=42; train killed on plateau) | 42 | **`.../ep-0700_sr-0.420.ckpt`** (lock `my_models/square_topk_lock.txt`, 2026-07-22T10:11Z; peak-then-2-below) | `matched_s10000/square/` · Wave1 baseline **RUNNING** | `awr_s10000_square.*` after Wave1 · tmux `square_matched` |
+| **coffee-pull** *(TopK locked; Wave1 DONE → Wave2)* | `data/metaworld/coffee-pull_N50.zarr` | `output/20260710/212943_train_oattok_mw-coffee-pull_st_N50/checkpoints/ep-2670_mse-0.039.ckpt` | refit `output/20260720/090816_train_oatpolicy_mw-coffee-pull_st_N50/` (seed=0) | 0 | **`.../ep-1000_sr-0.432.ckpt`** (lock `my_models/coffee_pull_topk_lock.txt`) | `matched_s10000/coffee-pull/` · base **40.8±2.3%** · BoN **43.2±4.8%** (Δ=+2.4) · replan **12.3** | Wave2 collect **RUNNING** · tmux `coffee_w2` |
+
+#### Lift retrain — reproduce lock (STOPPED 2026-07-21, plateau)
+
+| Field | Value |
+|-------|--------|
+| Status | **STOPPED** @ ~ep **2332** (tmux `lift_retrain_resume` killed); train TopK plateau after **ep-1400** |
+| Run dir | `output/20260719/144024_train_oatpolicy_lift_N200/` |
+| Hydra | `.hydra/{overrides,config,hydra}.yaml` |
+| Train log | `logs/train_policy_lift_retrain_s7_n100.log` |
+| Launch / resume scripts | `scripts/cluster_policy_lift_retrain.sh` · `scripts/cluster_policy_lift_retrain_resume.sh` |
+| `cfg.seed` / `training.seed` | **7** |
+| `training.num_demo` | **200** |
+| `training.rollout_every` | **100** |
+| Train-time eval | `n_test=**100**`, `n_parallel_envs=4`, selection pool `test_start_seed=**1000**` (default) → **not** paper seed |
+| Checkpoint TopK | `k=3`, `monitor_key=mean_success_rate` |
+| Frozen tokenizer | `output/20260704/203215_train_oattok_lift_N200/checkpoints/ep-1970_mse-0.006.ckpt` |
+| Data | `data/robomimic/lift_N200.zarr` + `data/robomimic/hdf5_datasets/lift_mh_image.hdf5` |
+| **Paper BASE_CKPT (train TopK lock)** | `output/20260719/144024_train_oatpolicy_lift_N200/checkpoints/ep-1400_sr-0.950.ckpt` (**95.0%** @ selection pool) |
+| Other TopK kept | `ep-0600_sr-0.910` · `ep-0900_sr-0.930` · `ep-1000_sr-0.900` · `ep-1200_sr-0.930` · `ep-1700_sr-0.940` · `latest.ckpt` (~stopped epoch) |
+| TopK trajectory | 600→0.91, 900→0.93, 1000→0.90, 1200→0.93, **1400→0.95**, 1700→0.94; then +~900 ep no better |
+| **Matched runs (2)** | Same protocol `test_start_seed=10000`, `n_test=50`, `-n 5`, OAT8, BoN N=8 vote. **Not** cherry-pick by Δ — run B = protocol TopK lock; run A = early Wave1 mid-train. |
+| — **Run A** (ep-0900, mid-train) | Base `ep-0900_sr-0.930.ckpt` → `output/eval/matched_s10000/lift/` · baseline **82.0±3.2%** · BoN8 **84.8±4.6%** (Δ=+2.8) · AWR **81.2±4.1%** (Δ=−0.8) · `awr_s10000_lift.*` · **DONE** |
+| — **Run B** (ep-1400, TopK lock / paper) | Base `ep-1400_sr-0.950.ckpt` → `output/eval/matched_s10000/lift_ep1400/` · **baseline 87.6±2.2%** · **BoN8 84.0±4.9%** (Δ=**−3.6**) · Wave2: npz+`awr_s10000_lift_ep1400.ckpt` **trained**; AWR eval **RUNNING** · replan **9.3** DONE · tmux `lift_awr_eval` |
+| Anti-leak | **do not** cite train filename `sr-0.950` as paper SR; paper = `matched_s10000` only. Table P primary = **run B (ep-1400)** when Wave2 AWR finishes; run A kept for transparency. |
+
+**tmux (live, ~2026-07-22 16:25 MSK) — parallel:** `lift_awr_eval` (GPU0, Lift B AWR eval) · `coffee_w2` (GPU0, coffee-pull Wave2 collect ~20%) · `square_matched` (GPU1, Square Wave1 baseline) · `rc_pol_chain` (GPU1, RC coffee_press resume @ ~ep300 / train-eval 39/50). Launchers: `scripts/_launch_lift_ep1400_awr_eval.sh` · `_launch_coffee_w2_parallel.sh` · `_launch_square_matched_parallel.sh` · `_launch_rc_coffee_resume.sh`.
+
+**Square plateau watcher:** `scripts/_launch_square_matched_on_plateau.sh` — **FIRED** 2026-07-22T10:11Z → lock `ep-0700_sr-0.420.ckpt` (`my_models/square_topk_lock.txt`); train killed; Wave1 now in `square_matched`.
+
+**DONE suite matched layout (example Can):**
+
+```text
+output/eval/matched_s10000/can/
+  baseline_n5/eval_log.json
+  bon_n8_n5/eval_log.json
+  awr_n5/eval_log.json
+  summary.json          # base_ckpt, awr_ckpt, protocol seeds, SR, Δ
+  latency.json          # Table C
+  latency_fair_kv.json  # Table C′
+logs/matched_s10000_can_gpu0.log
+```
+
+**❌ Do not cite as paper:** `output/eval/matched/` (seed 1000 Table B); exploratory `my_models/policy_awr_*`; old deleted square/coffee `matched_s10000` from before 2026-07-20 reset; train-time `sr-0.XXX` in ckpt filename.
 
 **Роль RM/MW в статье (к сводке от 2026-06-23):** LIBERO несёт диагноз (компаундинг / K·R null / отбор+).  
 Наш трек = **ширина**: тот же позитив отбора (BoN + потом AWR) на RoboMimic/MetaWorld при **чистом** matched-протоколе. Не Таблица VI absolute parity.
@@ -183,55 +260,93 @@ Latency **нужна для статьи** (BoN = N× AR/replan; AWR = single-fo
 
 В тексте: *latency on same cluster GPU/stack as matched eval; batch=1; median over N timed forwards; same obs pipeline; same Wave2 AWR ckpt; code commit in latency.json; SR from Table P unchanged.*
 
-### Table C — PAPER latency (paper-proof, 2026-07-17/18)
+### Table C — PAPER latency (paper-proof, current valid subset)
 
 Источник: `output/eval/matched_s10000/<suite>/latency.json` + сводка `matched_s10000/table_c.json` (`paper_proof: true`).  
 **Специфика замера (2-й / paper-proof прогон):** batch=1; warmup=20 excluded; **10 timed reps** → median; obs = val dataset; **obs counter reset + warmup per mode** (fair Single↔BoN↔AWR); `cudnn.deterministic`; policy-forward only (**не** MuJoCo).  
 HW: **Tesla V100-SXM2-32GB**, torch **2.5.1+cu124**.  
 **Git в артефакте:** docker без `.git` → `OAT_GIT_*` env при запуске (метка кода, не commit/push).  
-- 5 MW/Can suites: `git_commit=643bca01…` (2026-07-17 remasure)  
-- Square: `git_commit=6bc12d6…` (2026-07-18; только `SUITES=square`, остальные не перезамерялись)  
-`git_dirty=true` на обоих. Pre-proof (1-й прогон, не в статью): `matched_s10000/_latency_pre_paperproof/` (только 5 suite до Square).
+- current valid subset: `git_commit=643bca01…` (2026-07-17 remasure)  
+`git_dirty=true`. `square` and `coffee-pull` latency artifacts were reset pending rerun. Pre-proof (1-й прогон, не в статью): `matched_s10000/_latency_pre_paperproof/`.
 
 | Suite | Single median | BoN N=8 median | AWR median | SR (Table P) base→BoN→AWR |
 |-------|---------------|----------------|------------|---------------------------|
 | Can | **40.9** ms | **40.3** ms | **40.4** ms | 76.4 → 80.8 → 79.2 |
-| coffee-pull | **48.7** | **47.7** | **49.3** | 41.6 → 42.8 → 41.2 |
 | stick-pull | **47.2** | **46.2** | **49.9** | 15.6 → 25.6 → 26.8 |
 | disassemble | **47.6** | **49.1** | **49.2** | 62.4 → 63.2 → 69.6 |
 | box-close | **48.8** | **48.1** | **48.0** | 59.6 → 66.4 → 72.8 |
-| Square | **40.7** | **40.2** | **40.8** | 29.6 → 31.2 → 24.8 |
 
 **Table C artifacts** (paper latency sources; все под `output/eval/matched_s10000/`):
 
 | Suite | `latency.json` | AWR ckpt (timed) | Base ckpt (Single/BoN) | note |
 |-------|----------------|------------------|------------------------|------|
 | Can | `can/latency.json` | `my_models/awr_s10000_can.ckpt` | Wave1 `base_ckpt` in json | `paper_proof: true`, git `643bca01` |
-| coffee-pull | `coffee-pull/latency.json` | `my_models/awr_s10000_coffee-pull.ckpt` | idem | |
 | stick-pull | `stick-pull/latency.json` | `my_models/awr_s10000_stick-pull.ckpt` | idem | |
 | disassemble | `disassemble/latency.json` | `my_models/awr_s10000_disassemble.ckpt` | idem | |
 | box-close | `box-close/latency.json` | `my_models/awr_s10000_box-close.ckpt` | idem | |
-| Square | `square/latency.json` | `my_models/awr_s10000_square.ckpt` | `ep-0600_sr-0.420.ckpt` | `paper_proof: true`, git `6bc12d6` |
-| **сводка** | `table_c.json` | — | — | n=6; rebuild: `scripts/build_table_c.py` |
+| **сводка** | `table_c.json` | — | — | current valid subset only; rebuild: `scripts/build_table_c.py` |
 | fair-KV rebuttal | `<suite>/latency_fair_kv.json` | same AWR ckpts | same bases | `fair_kv: true`; сводка `table_c_fair_kv.json` |
 | pre-proof archive | `_latency_pre_paperproof/<suite>_latency.json` | — | — | **не в статью** (1-й прогон) |
 
 Scripts: `scripts/measure_latency_paper.py`, `scripts/cluster_latency_paper_done.sh` (requires `OAT_GIT_COMMIT`), `scripts/build_table_c.py`.
 
-**Read for paper:** BoN median ≈ Single на всех 6 suite (~40–49 ms) — vision encode **один раз** (amortized), AR дешёвый → N=8 почти не бьёт policy-forward cost. Square ≈ Can (~41 ms; оба RoboMimic, 2 cams). AWR ≈ Single. Table C = inference cost only.
+**Read for paper:** on the current valid subset, BoN median ≈ Single (~40–49 ms) — vision encode **один раз** (amortized), AR дешёвый → N=8 почти не бьёт policy-forward cost. AWR ≈ Single. Table C = inference cost only.
 
 **Table C′ — fair-KV rebuttal** (опциональная страховка; **не** заменяет Table C): Single/AWR = `predict_action` (KV-cache), BoN = `generate` (KV). Артефакты: `matched_s10000/<suite>/latency_fair_kv.json` + `table_c_fair_kv.json` (`fair_kv: true`). На всех 6 suite **BoN ≥ Single** (+0.8…+2.4 ms) — ожидаемый AR overhead при apples-to-apples; абсолют всё ещё ≈40–48 ms.
 
 | Suite | Single (KV) | BoN N=8 | AWR (KV) | BoN−Single |
 |-------|-------------|---------|----------|------------|
 | Can | **37.6** | **39.1** | **38.9** | **+1.6** |
-| coffee-pull | **43.7** | **46.1** | **47.9** | **+2.4** |
 | stick-pull | **43.3** | **45.2** | **44.6** | **+1.8** |
 | disassemble | **45.1** | **47.3** | **44.4** | **+2.2** |
 | box-close | **45.3** | **46.2** | **47.8** | **+0.8** |
-| Square | **38.3** | **40.0** | **40.0** | **+1.8** |
 
 В тексте: main = Table C (deployed paths, comparable); appendix/rebuttal = Table C′ (fair KV, BoN overhead ≲2.5 ms). `FAIR_KV=1 bash scripts/cluster_latency_paper_done.sh`.
+
+### Replan count probe (lab, 2026-07-21) — не paper-final
+
+**Зачем:** episode cost ≈ `(mean_replans) × (ms/call from Table C)`. Table C меряет только forward; runners теперь логируют `mean_replans_per_episode` / `std` / `max` при каждом `eval_policy_sim`. При фиксированном `R=16` (OAT default) baseline/BoN/AWR дают **одинаковое** число replan на suite — достаточно одного baseline-style прогона.
+
+**Протокол probe (не matched):** OAT8 (`--use_k_tokens 8 --entropy_threshold 0`), `-n 1`, `--n_test 10`, `--n_parallel_envs 1`, `MUJOCO_GL=egl`, cluster V100. Default env seed base (=1000). **Не** заменяет matched `n_test=50` / Table P.
+
+| Suite | Status | mean_replans | std | max | SR (probe) | ckpt | tmux (was) · Artifacts |
+|-------|--------|--------------|-----|-----|------------|------|------------------------|
+| **MW box-close** | **DONE** | **10.6** | 2.62 | 13 | 0.50 | `output/20260711/134439_train_oatpolicy_mw-box-close_st_N50/checkpoints/ep-2000_sr-0.552.ckpt` | **`replan_can_box`** · `eval_out/replan_probe_box-close/` (`eval_log.json`) · `logs/replan_probe_box-close.log` |
+| **MW disassemble** | **DONE** | **9.7** | 3.55 | 13 | 0.60 | `output/20260711/134440_train_oatpolicy_mw-disassemble_st_N50/checkpoints/ep-1400_sr-0.700.ckpt` | **`replan_disassemble`** · `eval_out/replan_probe_disassemble/` (`eval_log.json`) · `logs/replan_probe_disassemble.log` |
+| **MW stick-pull** | **DONE** | **12.6** | 1.2 | 13 | 0.10 | `output/20260711/134439_train_oatpolicy_mw-stick-pull_st_N50/checkpoints/ep-0800_sr-0.212.ckpt` | **`replan_stick_pull`** · `eval_out/replan_probe_stick-pull/` (`eval_log.json`) · `logs/replan_probe_stick-pull.log` |
+| **RoboMimic Can** | **DONE** | **10.4** | 1.96 | 14 | 1.00 | `.../ep-1700_sr-0.940.ckpt` | extract DONE `can_mh_image.hdf5`; **`replan_can`** · `eval_out/replan_probe_can/` |
+| **Lift ep-0900** | **DONE** | **8.0** | 3.35 | 14 | 1.00 | `.../ep-0900_sr-0.930.ckpt` | `eval_out/replan_probe_lift900/` · `logs/replan_probe_lift900.log` |
+| **MW coffee-pull** | **DONE** | **12.3** | 2.10 | 13 | 0.10 | `.../ep-1000_sr-0.432.ckpt` | `eval_out/replan_probe_coffee-pull/` · `logs/replan_probe_coffee-pull.log` |
+| **Lift ep-1400** | **DONE** | **9.3** | 5.93 | 25 | 0.90 | `.../ep-1400_sr-0.950.ckpt` | `eval_out/replan_probe_lift1400/` · `logs/replan_probe_lift1400.log` |
+
+**Note:** replan probe uses **BASE** ckpt only — independent of BoN/AWR; safe to run before/during Wave1–2. Chain `scripts/_launch_replan_lift_coffee_chain.sh` **ALL DONE** 2026-07-22T00:50Z (tmux `replan_lift_coffee` exited).
+
+**Read (n=10 probe):** MW ≈ **9.7–12.6** (coffee-pull **12.3**, stick 12.6); Can **10.4**; Lift900 **8.0** / Lift1400 **9.3** (horizon 400; high probe SR → fewer replans). Lift1400 max **25** (outlier long episode; mean still ~9).
+
+**Ключи в `eval_log.json`:** `mean_replans_per_episode_mean`, `std_replans_per_episode_mean`, `max_replans_per_episode_mean` (+ обычные SR/tokens).  
+**Код:** `oat/env_runner/{metaworld,robomimic}_runner.py` (`episode_replans`); print в `scripts/eval_policy_sim.py`. Синкнуто на cluster docker 2026-07-21 (первый box-close прогон **без** этих ключей — мусор, перезаписан).  
+**Launcher:** `scripts/_launch_replan_lift_coffee_chain.sh` (serial: lift900 → coffee → lift1400, GPU1) — **finished**.
+
+**Мусор удалён:** `eval_out/replan_probe_{lift,mt4}` · `logs/replan_probe_{lift,mt4,run}.log` (ранние smoke без / со старым кодом). Tmux `replan_can_box` / `replan_disassemble` / `replan_stick_pull` / `replan_lift_coffee` убиты после DONE; артефакты `replan_probe_{box-close,disassemble,stick-pull,can,lift900,coffee-pull,lift1400}` **оставлены**.
+
+**Next (overnight):** Lift B AWR eval finish → coffee Wave2 train+eval → Square Wave1 BoN → Wave2; RC coffee_press → close_drawer serial.
+
+#### Finished matched snapshot (verified from `summary.json` / replan `eval_log.json`, 2026-07-22)
+
+| Suite | train seed | TopK @1000 | report @10000 | baseline | BoN8 | AWR | Δ_BoN | Δ_AWR | roots |
+|-------|------------|------------|---------------|----------|------|-----|-------|-------|-------|
+| Can | 42 | ep-1700 | yes | 76.4±3.0 | 80.8±1.1 | 79.2±7.7 | +4.4 | +2.8 | `matched_s10000/can/` · `awr_s10000_can.*` |
+| stick-pull | 0 | ep-0800 | yes | 15.6±6.2 | 25.6±2.6 | 26.8±5.2 | +10.0 | +11.2 | `matched_s10000/stick-pull/` · `awr_s10000_stick-pull.*` |
+| disassemble | 0 | ep-1400 | yes | 62.4±5.2 | 63.2±6.3 | 69.6±5.7 | +0.8 | +7.2 | `matched_s10000/disassemble/` · `awr_s10000_disassemble.*` |
+| box-close | 0 | ep-2000 | yes | 59.6±7.5 | 66.4±3.0 | 72.8±4.1 | +6.8 | +13.2 | `matched_s10000/box-close/` · `awr_s10000_box-close.*` |
+| Lift A (ep-0900) | 7 | mid-train | yes | 82.0±3.2 | 84.8±4.6 | 81.2±4.1 | +2.8 | −0.8 | `matched_s10000/lift/` · `awr_s10000_lift.*` · replan **8.0** |
+| Lift B (ep-1400) | 7 | ep-1400 | yes | **87.6±2.2** | **84.0±4.9** | AWR eval RUNNING | **−3.6** | — | `matched_s10000/lift_ep1400/` · `awr_s10000_lift_ep1400.*` · replan **9.3** |
+| coffee-pull | 0 | ep-1000 | yes | **40.8±2.3** | **43.2±4.8** | Wave2 collect ~20% | **+2.4** | — | `matched_s10000/coffee-pull/` · replan **12.3** |
+| Square | 42 | ep-0700 | yes | Wave1 RUNNING | — | — | — | — | lock `square_topk_lock.txt` · `matched_s10000/square/` |
+| Can replan probe | — | ep-1700 | n/a (seed 1000 probe) | — | — | — | — | — | mean_replans **10.4**±1.96 max14 SR1.0 · `eval_out/replan_probe_can/` |
+| Lift900 replan | — | ep-0900 | n/a | — | — | — | — | — | mean_replans **8.0**±3.35 max14 SR1.0 · `eval_out/replan_probe_lift900/` |
+| coffee-pull replan | — | ep-1000 | n/a | — | — | — | — | — | mean_replans **12.3**±2.10 max13 SR0.1 · `eval_out/replan_probe_coffee-pull/` |
+| Lift1400 replan | — | ep-1400 | n/a | — | — | — | — | — | mean_replans **9.3**±5.93 max25 SR0.9 · `eval_out/replan_probe_lift1400/` |
 
 ### Table B — LAB ONLY (seed 1000, selection pool) — не paper
 
@@ -257,6 +372,21 @@ Pipelines: chain5 (internal 250-episode estimate) + BoN N=8 + AWR for Lift, Can,
 
 ## RoboMimic — Lift
 
+### Retrain (paper path) — STOPPED 2026-07-21
+
+Primary policy fit for matched rematch. Full reproduce table: **«Lift retrain — reproduce lock»** above.
+
+| Item | Value |
+|------|-------|
+| Run dir | `output/20260719/144024_train_oatpolicy_lift_N200/` |
+| Seeds | `seed=7`, `training.seed=7` |
+| Train eval | `n_test=100`, pool seed **1000**, `rollout_every=100` |
+| **TopK-1 (lock)** | `checkpoints/ep-1400_sr-0.950.ckpt` |
+| Stopped | ~ep **2332**; no TopK >0.95 after ep1400 |
+| Train log | `logs/train_policy_lift_retrain_s7_n100.log` |
+| Run A matched (ep-0900) | baseline **82.0±3.2%**, BoN8 **84.8±4.6%** → `matched_s10000/lift/` |
+| Run B matched (ep-1400 / paper) | Wave1→Wave2 **QUEUED** → `matched_s10000/lift_ep1400/` · tmux `lift_ep1400_matched` |
+
 ### Data
 | Artifact | Path |
 |----------|------|
@@ -272,10 +402,10 @@ Pipelines: chain5 (internal 250-episode estimate) + BoN N=8 + AWR for Lift, Can,
 | **Best ckpt (top-1 mse)** | `output/20260704/203215_train_oattok_lift_N200/checkpoints/ep-1970_mse-0.006.ckpt` |
 | Config | `task/tokenizer=robomimic/lift`, `training.num_demo=200`, `num_epochs=5001`, top-3 by `test_reconst_mse` |
 
-### Policy
+### Policy (exploratory / pre-retrain — not paper matched base)
 | Item | Value |
 |------|-------|
-| Run dir (paper) | `output/20260706/163500_train_oatpolicy_lift_N200/` |
+| Run dir (old paper s42) | `output/20260706/163500_train_oatpolicy_lift_N200/` |
 | Train log | `logs/train_policy_lift_paper_s42.log` |
 | **Chain5 + BoN/AWR ckpt** | `.../ep-0600_sr-0.920.ckpt` |
 | Alt chain5 only (worse) | `.../ep-1200_sr-0.900.ckpt` |
@@ -391,9 +521,9 @@ Per-exp verification from `logs/can_bon_awr_pipeline.log`: BoN **92%, 92%, 88%**
 |------|-------|
 | Run dir | `output/20260707/102446_train_oatpolicy_square_N200/` |
 | Train log | `logs/train_policy_square_paper_s42.log` |
-| Chain5 ckpt (ep600) | `.../ep-0600_sr-0.420.ckpt` |
-| **Chain5 ckpt (used for BoN)** | same ep-0600 |
-| **Chain5 ckpt (best 250-eps)** | `.../ep-1500_sr-0.380.ckpt` |
+| Chain5 ckpt | rerun pending |
+| **BoN base ckpt** | rerun pending |
+| **Best 250-eps ckpt** | rerun pending |
 | Latest top-k | `ep-2200_sr-0.440.ckpt` |
 
 ### Eval — Chain5
@@ -407,43 +537,15 @@ Per-environment-block (ep1500): 0.32, 0.26, 0.30, 0.34, 0.34. Paper target: **39
 ### Eval — BoN → AWR pipeline
 | Item | Value |
 |------|-------|
-| Pipeline script | `scripts/cluster_square_bon_awr_pipeline.sh` |
-| Pipeline log | `logs/square_bon_awr_pipeline.log` |
-| Status | **DONE** (2026-07-11 00:57 UTC; EGL warnings in eval, results valid) |
-| Base ckpt | `ep-0600_sr-0.420.ckpt` |
+| Pipeline script | rerun pending |
+| Pipeline log | rerun pending |
+| Status | reset on 2026-07-20; old exploratory artifacts deleted |
+| Base ckpt | rerun pending |
 
-**BoN** (from `ep-0600`, `n_test=50`, 3 exp): `output/eval/robomimic_square_bon_n8_n3/` → **38.0 ± 2.0%** (exp: 0.40, 0.34, 0.40)  
-Δ vs ep-0600 chain5 (30.8%): **+7.2 pp**. Not comparable to ep-1500 (31.2%) — other ckpt, other protocol.
+### Eval — PAPER matched (`matched_s10000`, anti-leak) — **RERUN PENDING**
 
-**AWR** (distilled from BoN @ ep-0600): `my_datasets/awr_square_bon.npz`; `my_models/policy_awr_square.ckpt`; eval `output/eval/robomimic_square_awr_n3/` → **36.7 ± 2.9%** (exp: 0.32, 0.36, 0.42)
-Δ vs ep-0600 chain5: **+5.9 pp**. BoN > AWR on this ckpt (+7.2 vs +5.9).
-
-> ep-1500 chain5 (31.2%) is the **best single-sample** checkpoint; BoN/AWR were **not** re-run from ep-1500.
-> Exploratory / seed-1000 numbers above are **lab only** — paper Δ = Table P below.
-
-### Eval — PAPER matched (`matched_s10000`, anti-leak) — **DONE**
-
-Protocol: `test_start_seed=10000`, `n_test=50`, `-n 5`, episodes `10000–10049`. TopK selection was on seed 1000 (disjoint). Base = **`ep-0600_sr-0.420.ckpt`** (ep-1500 archived: BoN flat @ s10000).
-
-| Mode | SR | Δ vs base | Artifact |
-|------|-----|-----------|----------|
-| baseline | **29.6±7.3%** | — | `output/eval/matched_s10000/square/baseline_n5/eval_log.json` |
-| BoN N=8 vote | **31.2±9.0%** | **+1.6** | `.../bon_n8_n5/eval_log.json` |
-| AWR | **24.8±2.3%** | **−4.8** | `.../awr_n5/eval_log.json` |
-
-| Item | Path |
-|------|------|
-| summary | `output/eval/matched_s10000/square/summary.json` |
-| Wave1 log | `logs/matched_s10000_square_ep0600_gpu1.log` |
-| AWR dataset | `my_datasets/awr_s10000_square.npz` (collect `--seed 0`; per-ep SR ~0.35) |
-| AWR ckpt | `my_models/awr_s10000_square.ckpt` (train `--seed 0`) |
-| Wave2 log | `logs/awr_s10000_square_wave2_gpu1.log` |
-| Wave2 eval log | `logs/awr_s10000_square_wave2_eval_gpu1.log` |
-| latency (Table C) | `output/eval/matched_s10000/square/latency.json` — Single/BoN/AWR **40.7 / 40.2 / 40.8** ms |
-| fair-KV (Table C′) | `.../latency_fair_kv.json` — **38.3 / 40.0 / 40.0** ms (BoN−Single **+1.8**) |
-| ep-1500 archive | `output/eval/matched_s10000/square_ep1500/` — base 27.2±6.9 / BoN 26.0±7.5 (not paper primary) |
-
-**Read:** paper pool BoN almost flat (+1.6); AWR distill hurts (−4.8) — weak BoN source (collect SR~0.35). Latency still BoN≈Single (~41 ms). Same protocol as Can/MW; do **not** cite exploratory 38% BoN / `policy_awr_square.ckpt` in paper.
+Old `square` matched / AWR / latency artifacts were deleted on 2026-07-20 after checkpoint reset.  
+`square` is being rerun from a fresh policy fit and must not appear in current paper tables until new `matched_s10000/square/` artifacts are produced.
 
 ---
 
@@ -561,70 +663,34 @@ Launch: `scripts/cluster_tokenizer_metaworld_single.sh`, `scripts/cluster_gen_me
 
 ### MetaWorld single-task — coffee-pull
 
-#### Policy train — **STOPPED** (plateau ~43%, 2026-07-13)
+Old `coffee-pull` policy / chain5 / BoN / AWR artifacts were deleted on 2026-07-20 after checkpoint reset.
+
+#### Policy refit — TopK locked (2026-07-21), train STOPPED
+
 | Item | Value |
 |------|-------|
-| tmux (was) | `mwst_pol_coffee_pull` |
-| GPU | 1 |
-| Run dir | `output/20260711/134440_train_oatpolicy_mw-coffee-pull_st_N50/` |
-| Train log | `logs/train_oatpolicy_mw-coffee-pull_st_N50_s0.log` |
-| Metrics log | `output/20260711/134440_train_oatpolicy_mw-coffee-pull_st_N50/logs.json` |
-| Frozen tokenizer | `output/20260710/212943_train_oattok_mw-coffee-pull_st_N50/checkpoints/ep-2670_mse-0.039.ckpt` |
-| **Chain5 / BoN ckpt** | `.../checkpoints/ep-1000_sr-0.432.ckpt` |
-| top-k on disk | `ep-0800_sr-0.420.ckpt`, `ep-1000_sr-0.432.ckpt`, `ep-1400_sr-0.432.ckpt` |
+| Run dir | `output/20260720/090816_train_oatpolicy_mw-coffee-pull_st_N50/` |
+| Train seeds | `cfg.seed=0`, `training.seed=0` |
+| Train eval | `n_test=250`, `rollout_every=200`, selection pool seed **1000**, topk k=3 |
+| Tokenizer | `output/20260710/212943_train_oattok_mw-coffee-pull_st_N50/checkpoints/ep-2670_mse-0.039.ckpt` |
+| TopK on disk | `ep-0600_sr-0.412` · `ep-0800_sr-0.420` · **`ep-1000_sr-0.432`** |
+| Lock decision | post-ep1000 train-eval did **not** beat 0.432 → **Top-1 = ep-1000** |
+| Lock file | `my_models/coffee_pull_topk_lock.txt` (`locked_at=2026-07-21T23:00:11+00:00`) |
+| **Paper BASE_CKPT** | `output/20260720/090816_train_oatpolicy_mw-coffee-pull_st_N50/checkpoints/ep-1000_sr-0.432.ckpt` |
+| Train stopped | `tmux coffee_policy_refit` killed after lock |
 
-Train-time SR curve (250-eps eval, 1 seed — **not** chain5):
+#### Matched (same MW protocol as stick/box/disassemble) — Wave1 RUNNING
 
-| Epoch | SR |
-|-------|-----|
-| 200 | 35.6% |
-| 600 | 41.2% |
-| 1000 | **43.2%** |
-| 1200 | 40.8% (dropped from top-k) |
-| 1400 | 43.2% |
-
-Verdict: **plateau ~43%** since ep-1000; stopped for chain5/BoN.
-
-#### Eval — Chain5 — **DONE** (2026-07-13)
 | Item | Value |
 |------|-------|
-| Script | `scripts/cluster_eval_mw_coffee_pull_chain5.sh` |
-| tmux (was) | `mwst_chain5_coffee_pull` |
-| Log | `logs/eval_mw_coffee_pull_chain5.log` |
-| Output dir | `output/eval/metaworld_coffee-pull_paper5_ep1000/` |
-| Summary | `output/eval/metaworld_coffee-pull_paper5_ep1000/summary.json` |
-| Per-seed dirs | `.../seed_{0..4}/` + `seed_{0..4}.log` |
-| Base ckpt | `ep-1000_sr-0.432.ckpt` |
-| **SR** | **43.2 ± 3.3%** |
-| Per-environment-block | 34%, 52%, 48%, 44%, 38% |
-| Paper target | 26.4% |
+| Protocol | `test_start_seed=10000`, `n_test=50`, `-n 5`, OAT8, BoN N=8 vote; AWR collect `--seed 0` |
+| Launch | `scripts/_launch_coffee_pull_matched_after_eval.sh` · tmux `coffee_pull_matched` |
+| Wave1 out | `output/eval/matched_s10000/coffee-pull/{baseline_n5,bon_n8_n5,summary.json}` |
+| Wave1 log | `logs/matched_s10000_coffee-pull_gpu1.log` |
+| Wave2 (after Wave1) | `my_datasets/awr_s10000_coffee-pull.npz` · `my_models/awr_s10000_coffee-pull.ckpt` · `awr_n5/` |
+| Status now | Wave1 **baseline** in progress; BoN/AWR not yet |
 
-> Chain5 mean **matches** train-time ep-1000 (43.2%) — no train-eval gap on this task.
-
-#### Eval — BoN → AWR pipeline — **DONE** (2026-07-14)
-| Item | Value |
-|------|-------|
-| Script | `scripts/cluster_mw_coffee_pull_bon_awr_pipeline.sh` + `scripts/resume_mw_coffee_awr_step45.sh` |
-| Logs | `logs/mw_coffee_pull_bon_awr_pipeline.log`, `logs/mw_coffee_pull_awr_resume.log` |
-| Base ckpt | `ep-1000_sr-0.432.ckpt` |
-| Chain5 baseline | **43.2 ± 3.3%** |
-
-**BoN** — **DONE** (`n_test=50`, `-n 3`, vote; seeds `1000–1049`):
-| Item | Value |
-|------|-------|
-| Output | `output/eval/metaworld_coffee-pull_bon_n8_n3/` |
-| **SR** | **28.0 ± 0.0%** |
-| Δ vs chain5† | exploratory **−15.2 pp** |
-
-**AWR** — **DONE** (train+eval after docker NVML restart):
-| Item | Value |
-|------|-------|
-| Dataset | `my_datasets/awr_mw_coffee_pull_bon.npz` |
-| Collect stats | chunk-w SR 0.238; per-ep SR **0.390** / 1926 eps |
-| AWR ckpt | `my_models/policy_awr_mw_coffee_pull.ckpt` |
-| Eval output | `output/eval/metaworld_coffee-pull_awr_n3/eval_log.json` |
-| **SR** | **29.3 ± 2.3%** |
-| Δ vs chain5† | exploratory **−13.9 pp** (still well below chain5; ≈ BoN — distill keeps the low mode) |
+Anti-leak: train TopK SR **0.432 @ seed 1000** ≠ paper Table P (report only `matched_s10000`).
 
 ---
 
@@ -849,9 +915,9 @@ All four RoboMimic/MT4 AWR ckpts are on cluster under `my_models/` (Lift/Can res
 |-----------|-------------|-----------------|
 | Lift | `my_datasets/awr_lift_bon.npz` | `my_models/policy_awr_lift.ckpt` (464M) |
 | Can | `my_datasets/awr_can_bon.npz` | `my_models/policy_awr_can.ckpt` (464M) |
-| Square | `my_datasets/awr_square_bon.npz` | `my_models/policy_awr_square.ckpt` (464M) |
+| Square | rerun pending | rerun pending |
 | MT4 multitask | `my_datasets/awr_mt4_bon.npz` | `my_models/policy_awr_mt4.ckpt` (806M) |
-| MW coffee-pull | `my_datasets/awr_mw_coffee_pull_bon.npz` | `my_models/policy_awr_mw_coffee_pull.ckpt` (29.3 ± 2.3%) |
+| MW coffee-pull | rerun pending | rerun pending |
 | MW stick-pull | `my_datasets/awr_mw_stick_pull_bon.npz` | `my_models/policy_awr_mw_stick_pull.ckpt` (39.3 ± 7.6%) |
 | MW box-close | TBD | TBD |
 | MW disassemble | TBD | TBD |
@@ -862,13 +928,13 @@ All four RoboMimic/MT4 AWR ckpts are on cluster under `my_models/` (Lift/Can res
 |----------|-----|--------|
 | Lift BoN→AWR | `logs/lift_bon_awr_pipeline.log` | DONE |
 | Can BoN→AWR | `logs/can_bon_awr_pipeline.log` | DONE |
-| Square BoN→AWR | `logs/square_bon_awr_pipeline.log` | DONE |
+| Square BoN→AWR | rerun pending | old artifacts deleted |
 | MT4 BoN→AWR | `logs/mt4_bon_awr_pipeline.log` | DONE |
 | MT4 data regen (single) | `logs/metaworld_single_data_regen.log` | DONE |
 | MW coffee chain5 | `logs/eval_mw_coffee_pull_chain5.log` | DONE |
 | MW stick chain5 | `logs/eval_mw_stick_pull_chain5.log` | DONE |
 | MW disassemble chain5 | `logs/eval_mw_disassemble_chain5.log` | DONE |
-| MW coffee BoN→AWR | `logs/mw_coffee_pull_bon_awr_pipeline.log` + `logs/mw_coffee_pull_awr_resume.log` | DONE (AWR 29.3 ± 2.3%) |
+| MW coffee BoN→AWR | rerun pending | old artifacts deleted |
 | MW stick BoN→AWR | `logs/mw_stick_pull_bon_awr_pipeline.log` + `logs/mw_stick_pull_awr_resume.log` | DONE (AWR 39.3 ± 7.6%) |
 | MW box-close policy train | `logs/train_oatpolicy_mw-box-close_st_N50_s0.log` | STOPPED plateau (best 55.2% @ep-2000) |
 | MW box-close matched baseline | `logs/eval_mw_box_close_matched_baseline.log` | RUNNING |

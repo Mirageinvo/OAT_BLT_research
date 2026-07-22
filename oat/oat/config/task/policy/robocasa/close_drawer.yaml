@@ -1,0 +1,66 @@
+name: close_drawer
+
+task_name: close_drawer
+lazy_eval: false
+
+shape_meta: &shape_meta
+  obs:
+    robot0_agentview_left_rgb:
+      shape: [128, 128, 3]
+      type: rgb
+    robot0_agentview_right_rgb:
+      shape: [128, 128, 3]
+      type: rgb
+    robot0_eye_in_hand_rgb:
+      shape: [128, 128, 3]
+      type: rgb
+    robot0_eef_pos:
+      shape: [3]
+      type: state
+    robot0_eef_quat:
+      shape: [4]
+      type: state
+    robot0_gripper_qpos:
+      shape: [2]
+      type: state
+  action:
+    shape: [12]
+
+env_runner:
+  _target_: oat.env_runner.robocasa_runner.RoboCasaRunner
+  task_name: close_drawer
+  n_test: 50
+  n_test_vis: 4
+  test_start_seed: 2000
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  fps: 20
+  n_parallel_envs: 2
+  image_size: 128
+  camera_names:
+    - robot0_agentview_left
+    - robot0_agentview_right
+    - robot0_eye_in_hand
+  state_ports:
+    - robot0_eef_pos
+    - robot0_eef_quat
+    - robot0_gripper_qpos
+  max_episode_steps: 500
+  policy_use_k_tokens: 8
+  policy_entropy_threshold: 0.0
+
+dataset:
+  _target_: oat.dataset.zarr_dataset.ZarrDataset
+  zarr_path: data/robocasa/close_drawer_N${training.num_demo}.zarr
+  obs_keys:
+    - robot0_agentview_left_rgb
+    - robot0_agentview_right_rgb
+    - robot0_eye_in_hand_rgb
+    - robot0_eef_pos
+    - robot0_eef_quat
+    - robot0_gripper_qpos
+  action_key: action
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${horizon}
+  seed: ${seed}
+  val_ratio: 0.1

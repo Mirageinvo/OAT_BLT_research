@@ -1,0 +1,17 @@
+name: turn_off_sink_faucet
+
+task_name: turn_off_sink_faucet
+
+shape_meta: &shape_meta
+  action:
+    shape: [12]
+
+dataset:
+  _target_: oat.dataset.zarr_dataset.ZarrDataset
+  zarr_path: data/robocasa/turn_off_sink_faucet_N${training.num_demo}.zarr
+  obs_keys: []
+  action_key: action
+  n_obs_steps: 0
+  n_action_steps: ${horizon}
+  seed: ${seed}
+  val_ratio: 0.1

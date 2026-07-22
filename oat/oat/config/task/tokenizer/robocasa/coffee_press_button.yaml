@@ -1,0 +1,17 @@
+name: coffee_press_button
+
+task_name: coffee_press_button
+
+shape_meta: &shape_meta
+  action:
+    shape: [12]
+
+dataset:
+  _target_: oat.dataset.zarr_dataset.ZarrDataset
+  zarr_path: data/robocasa/coffee_press_button_N${training.num_demo}.zarr
+  obs_keys: []
+  action_key: action
+  n_obs_steps: 0
+  n_action_steps: ${horizon}
+  seed: ${seed}
+  val_ratio: 0.1
