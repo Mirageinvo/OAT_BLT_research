@@ -9,9 +9,10 @@ export ROBOTWIN_DIR="${ROBOTWIN_DIR:-$HOME/RoboTwin}"              # where you c
 export DEVICE="${DEVICE:-cuda:0}"
 
 # --- task / data ---
-export TASK="dual_bottles_pick_easy"          # RoboTwin task id (verify with 02_inspect)
+export TASK="pick_dual_bottles"               # RoboTwin env id (envs/pick_dual_bottles.py)
 export TASK_CFG="dual_bottles_pick"           # the config filename under config/task/*/robotwin/
-export NDEMO=500                              # demos to use
+export ROBOTWIN_CONFIG="demo_clean"           # task_config for collect_data.py (demo_clean=Easy)
+export NDEMO=50                               # demos (demo_clean episode_num; bump to 200 if underfit)
 export SRC_DIR="${OAT_DIR}/data/robotwin_src/${TASK}"   # where generated HDF5 demos land
 export DATA_FORMAT="hdf5"                     # hdf5 = generate locally with collect_data.py (small,
                                               # disk-safe). lerobot = 80GB unified download (AVOID on

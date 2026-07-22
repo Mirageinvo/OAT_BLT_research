@@ -3,7 +3,7 @@
 # Only RoboTwin-specific change vs LIBERO: action_dim 7 -> 14 (dual-arm). Copy per task.
 name: dual_bottles_pick
 
-task_name: dual_bottles_pick_easy   # a RoboTwin task id (verify against ROBOTWIN_TASKS). CHANGE per task.
+task_name: pick_dual_bottles   # a RoboTwin task id (verify against ROBOTWIN_TASKS). CHANGE per task.
 
 shape_meta: &shape_meta
   action:

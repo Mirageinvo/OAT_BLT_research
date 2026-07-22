@@ -3,7 +3,7 @@
 # 14D action, SAPIEN RoboTwinRunner, 2 chosen cameras. VERIFY all dims/keys against RoboTwin.
 name: dual_bottles_pick
 
-task_name: dual_bottles_pick_easy
+task_name: pick_dual_bottles
 lazy_eval: true
 
 # RoboTwin unified = Aloha-AgileX bimanual, 14-DOF JOINT-space action in [-1,1]; obs =
