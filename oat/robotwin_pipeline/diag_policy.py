@@ -125,3 +125,37 @@ print("[grip VERDICT]")
 print("  - CLOSED-frame policy g6 ~0 AND OPEN-frame ~1  => policy LEARNED the gripper -> not the bug.")
 print("  - CLOSED-frame policy g6 also ~1 (never closes) => policy NEVER CLOSES the gripper -> no grasp")
 print("    -> SR=0. Root cause = the gripper signal (imbalance/quantization/underfit), NOT the adapter.")
+
+# ---- (1) IN-DISTRIBUTION accuracy: does pred[0] MATCH the GT action at the same frame? ----
+print("\n=== IN-DISTRIBUTION accuracy: policy pred[0] vs GT action[i] (per-dim |err|) ===")
+errs = []
+with torch.inference_mode():
+    for i in idxs:
+        res = policy.predict_action(window(i), use_k_tokens=8, temperature=1.0, topk=1)
+        pred0 = res["action"][0, 0].detach().cpu().numpy()   # [14]
+        gt = np.asarray(z["data/action"][i])                 # [14]
+        errs.append(np.abs(pred0 - gt))
+errs = np.stack(errs)
+print(f"[acc] mean |pred-GT| per dim = " + " ".join(f"{v:.2f}" for v in errs.mean(0)))
+print(f"[acc] overall mean |pred-GT| = {errs.mean():.3f}  (dataset action std = {act_ds.std():.3f})")
+print("  small vs std (<~0.2) => accurate in-distribution => sim failure is DISTRIBUTION-SHIFT/compounding.")
+print("  large (~std) => policy inaccurate even in-distribution => deeper problem.")
+
+# ---- (2) RESET behaviour: first step uses a DUPLICATED frame [f0,f0] like the sim adapter ----
+print("\n=== RESET-step check: pred at episode start with [f0,f0] padding (as the adapter does) vs GT ===")
+with torch.inference_mode():
+    for s in starts[:5]:
+        s = int(s)
+        obs = {}
+        for p in ports:
+            f0 = np.asarray(z[f"data/{p}"][s:s + 1])
+            arr = np.concatenate([f0, f0], axis=0)           # [f0, f0] duplicate
+            obs[p] = torch.from_numpy(arr).to("cuda:0", dtype)[None]
+        pred0 = policy.predict_action(obs, use_k_tokens=8, temperature=1.0, topk=1)[
+            "action"][0, 0].detach().cpu().numpy()
+        gt = np.asarray(z["data/action"][s])
+        print(f"[reset s={s:5d}] pred[0]= " + " ".join(f"{v:+.2f}" for v in pred0))
+        print(f"[reset s={s:5d}] GT     = " + " ".join(f"{v:+.2f}" for v in gt) +
+              f"   |err|={np.abs(pred0 - gt).mean():.3f}")
+print("  pred ~= GT at reset => reset is fine (sim's near-zero 1st action was a live-obs issue).")
+print("  pred FAR from GT at reset => the [f0,f0] reset window is OOD -> bad 1st chunk -> knocks scene -> collapse.")
