@@ -125,12 +125,18 @@ def get_model(usr_args):
     return OATModel(ckpt, bon_n=bon_n, device=device)
 
 
+# open-loop horizon: execute only the first N of the predicted chunk, then replan (tighter closed
+# loop = less compounding drift; our LIBERO R-sweep: shorter R -> higher SR). Default 8; override
+# with env OAT_EXEC_STEPS (set to 16 to reproduce the old full-chunk behaviour).
+EXEC_STEPS = int(os.environ.get("OAT_EXEC_STEPS", "8"))
+
+
 def eval(TASK_ENV, model, observation):
     obs = encode_obs(observation)
     if len(model.obs_cache) == 0:
         model.update_obs(obs)
     actions = model.get_action()                          # [R, 14]
-    for action in actions:
+    for action in actions[:EXEC_STEPS]:                   # execute only the first EXEC_STEPS, then replan
         TASK_ENV.take_action(action, action_type="qpos")  # 14D joint control
         obs = encode_obs(TASK_ENV.get_obs())
         model.update_obs(obs)
