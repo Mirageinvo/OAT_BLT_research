@@ -13,6 +13,6 @@ ${OATACCEL} scripts/run_workspace.py \
   training.num_demo=${NDEMO} training.rollout_every=99999999 \
   policy.action_tokenizer.checkpoint="${TOK_CKPT}" \
   checkpoint.topk.monitor_key=val_loss checkpoint.topk.mode=min \
-  'checkpoint.topk.format_str=ep-{epoch:04d}_vl-{val_loss:.4f}.ckpt'
+  'checkpoint.topk.format_str="ep-{epoch:04d}_vl-{val_loss:.4f}.ckpt"'
 echo "[06] done. Find the latest checkpoint under output/<date>/... ; set POLICY_CKPT in config.sh,"
 echo "     then eval via path B: bash robotwin_pipeline/10_eval_pathB.sh"
