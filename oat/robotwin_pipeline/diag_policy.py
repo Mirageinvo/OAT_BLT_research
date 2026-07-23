@@ -90,3 +90,38 @@ print(f"\n[VERDICT] NORMAL std={std_n:.4f}  SWAPPED std={std_s:.4f}")
 print("  - SWAPPED std collapses (<< NORMAL, ~0) => policy is CHANNEL-SENSITIVE. If the live sim feeds")
 print("    the OTHER channel order than training, THAT is the sim-failure bug -> swap channels in the adapter.")
 print("  - SWAPPED std ~= NORMAL => channels are NOT the issue => sim failure is UNDERFIT / distribution-shift (A).")
+
+# ---- GRIPPER tracking: does the policy reproduce the OPEN->CLOSE->OPEN grasp signal? ----
+# action layout 14D = [left_arm(6), left_gripper(6? no) ...]; grippers at dims 6 and 13.
+print("\n=== GRIPPER check: predicted vs GT at frames where GT gripper is CLOSED vs OPEN ===")
+g = z["data/action"][:, 6]                                    # left gripper over the whole dataset
+closed_idx = np.where(g < 0.2)[0]
+open_idx = np.where(g > 0.8)[0]
+rng = np.random.default_rng(0)
+closed_sample = rng.choice(closed_idx, size=min(12, len(closed_idx)), replace=False)
+open_sample = rng.choice(open_idx, size=min(12, len(open_idx)), replace=False)
+
+
+def pred_grippers(sample):
+    g6, g13 = [], []
+    with torch.inference_mode():
+        for i in sample:
+            i = int(i)
+            if i < To:
+                continue
+            res = policy.predict_action(window(i), use_k_tokens=8, temperature=1.0, topk=1)
+            a0 = res["action"][0, 0].detach().cpu().numpy()   # first predicted step [14]
+            g6.append(a0[6]); g13.append(a0[13])
+    return np.array(g6), np.array(g13)
+
+
+cg6, cg13 = pred_grippers(closed_sample)
+og6, og13 = pred_grippers(open_sample)
+print(f"[grip] GT CLOSED frames (GT g6<0.2, n={len(cg6)}): policy g6 mean={cg6.mean():.3f} "
+      f"[{cg6.min():.2f}..{cg6.max():.2f}]  g13 mean={cg13.mean():.3f}")
+print(f"[grip] GT OPEN   frames (GT g6>0.8, n={len(og6)}): policy g6 mean={og6.mean():.3f} "
+      f"[{og6.min():.2f}..{og6.max():.2f}]  g13 mean={og13.mean():.3f}")
+print("[grip VERDICT]")
+print("  - CLOSED-frame policy g6 ~0 AND OPEN-frame ~1  => policy LEARNED the gripper -> not the bug.")
+print("  - CLOSED-frame policy g6 also ~1 (never closes) => policy NEVER CLOSES the gripper -> no grasp")
+print("    -> SR=0. Root cause = the gripper signal (imbalance/quantization/underfit), NOT the adapter.")
