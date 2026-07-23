@@ -30,7 +30,8 @@ launched=()
 for T in "${TASKS[@]}"; do
   if [ ! -f "${ROBOTWIN_DIR}/envs/${T}.py" ]; then
     echo "[collect] SKIP '${T}' — envs/${T}.py does NOT exist. Available tasks:"
-    ls "${ROBOTWIN_DIR}/envs/" | grep -v __ | sed 's/\.py$//' | column
+    ls "${ROBOTWIN_DIR}/envs/" | grep -v __ | sed 's/\.py$//' | xargs -n4 2>/dev/null || \
+      ls "${ROBOTWIN_DIR}/envs/" | grep -v __ | sed 's/\.py$//'
     continue
   fi
   OUT="${ROBOTWIN_DIR}/data/${T}/${CONFIG}"
