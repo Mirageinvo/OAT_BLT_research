@@ -17,7 +17,7 @@ echo "[collect] RoboTwin=${ROBOTWIN_DIR}  config=${CONFIG}  demos/task=${NDEMO_C
 # 1) set episode_num in the shared task_config (all tasks read the same value)
 CFG_YML="${ROBOTWIN_DIR}/task_config/${CONFIG}.yml"
 if [ -f "${CFG_YML}" ]; then
-  sed -i "s/^ *episode_num:.*/  episode_num: ${NDEMO_COLLECT}/" "${CFG_YML}"
+  sed -i -E "s/^(episode_num:[[:space:]]*)[0-9]+.*/\1${NDEMO_COLLECT}/" "${CFG_YML}"
   echo "[collect] set episode_num=${NDEMO_COLLECT} in ${CFG_YML}"
   grep -n episode_num "${CFG_YML}"
 else
