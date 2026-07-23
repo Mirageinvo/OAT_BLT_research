@@ -13,7 +13,7 @@ export TASK="pick_dual_bottles"               # RoboTwin env id (envs/pick_dual_
 export TASK_CFG="dual_bottles_pick"           # the config filename under config/task/*/robotwin/
 export ROBOTWIN_CONFIG="demo_clean"           # task_config for collect_data.py (demo_clean=Easy)
 export NDEMO=50                               # demos (demo_clean episode_num; bump to 200 if underfit)
-export SRC_DIR="${OAT_DIR}/data/robotwin_src/${TASK}"   # where generated HDF5 demos land
+export SRC_DIR="${ROBOTWIN_DIR}/data/${TASK}/${ROBOTWIN_CONFIG}/data"   # collect_data.py HDF5 output
 export DATA_FORMAT="hdf5"                     # hdf5 = generate locally with collect_data.py (small,
                                               # disk-safe). lerobot = 80GB unified download (AVOID on
                                               # the 99%-full shared disk).

@@ -88,28 +88,52 @@ def convert_robotwin_lerobot_to_zarr(src: str, task_uid: int = 0,
     return rb
 
 
+# --- native RoboTwin HDF5 layout (confirmed via 02_inspect on pick_dual_bottles/demo_clean) ---
+HDF5_ACTION = 'joint_action/vector'                    # [T,14] joint-space action
+HDF5_CAM_AGENTVIEW = 'observation/head_camera/rgb'     # -> agentview_rgb  (JPEG bytes per frame)
+HDF5_CAM_EYE = 'observation/left_camera/rgb'           # -> robot0_eye_in_hand_rgb (wrist, JPEG)
+# proprio agent_pos[16] = left_endpose[7] + left_gripper[1] + right_endpose[7] + right_gripper[1]
+HDF5_PROPRIO = ['endpose/left_endpose', 'endpose/left_gripper',
+                'endpose/right_endpose', 'endpose/right_gripper']
+
+
+def _decode_jpeg(buf, size):
+    """RoboTwin stores each RGB frame as encoded JPEG bytes (h5 |S dtype) -> HWC uint8 (size,size)."""
+    import cv2
+    arr = np.frombuffer(bytes(buf), dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)          # BGR HWC
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    if img.shape[:2] != (size, size):
+        img = cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
+    return img.astype(np.uint8)
+
+
 def convert_robotwin_hdf5_to_zarr(src_dir: str, task_uid: int = 0,
                                   sample_ndemo: Optional[int] = None,
                                   flip_images: bool = False,
                                   image_size: int = 128) -> ReplayBuffer:
-    """Native per-episode HDF5 under src_dir/*.hdf5. VERIFY keys with 02_inspect (D1/D3/D4)."""
+    """Native per-episode HDF5 under src_dir/**/*.hdf5 (RoboTwin data-collection). Confirmed schema."""
     import h5py, glob, os
     rb = ReplayBuffer.create_empty_zarr()
-    files = sorted(glob.glob(os.path.join(src_dir, '**', '*.hdf5'), recursive=True))
+    files = sorted(glob.glob(os.path.join(src_dir, '**', '*.hdf5'), recursive=True),
+                   key=lambda p: (len(p), p))
     if sample_ndemo is not None:
         files = files[:sample_ndemo]
     for f in tqdm.tqdm(files, desc='Converting RoboTwin (hdf5)'):
         with h5py.File(f, 'r') as h:
-            # TODO adjust to RoboTwin's HDF5 layout (02_inspect prints the real keys/shapes).
-            action = np.asarray(h['action'][:, :ACTION_DIM], dtype=np.float32)
-            state = np.asarray(h['observation/agent_pos'][:], dtype=np.float32)
-            av = np.stack([_to_hwc_uint8(x, image_size) for x in h['observation/head_camera'][:]])
-            eye = np.stack([_to_hwc_uint8(x, image_size) for x in h['observation/left_camera'][:]])
+            action = np.asarray(h[HDF5_ACTION][:, :ACTION_DIM], dtype=np.float32)   # [T,14]
+            av = np.stack([_decode_jpeg(b, image_size) for b in h[HDF5_CAM_AGENTVIEW][:]])
+            eye = np.stack([_decode_jpeg(b, image_size) for b in h[HDF5_CAM_EYE][:]])
             if flip_images:
                 av, eye = np.flip(av, 1), np.flip(eye, 1)
+            parts = []
+            for k in HDF5_PROPRIO:
+                v = np.asarray(h[k][:], dtype=np.float32)
+                parts.append(v[:, None] if v.ndim == 1 else v)
+            agent_pos = np.concatenate(parts, axis=1)                                # [T,16]
             T = action.shape[0]
             rb.add_episode({
-                'action': action, 'agent_pos': state,
+                'action': action, 'agent_pos': agent_pos,
                 'agentview_rgb': av, 'robot0_eye_in_hand_rgb': eye,
                 'task_uid': np.array([task_uid] * T)[:, np.newaxis],
             })
