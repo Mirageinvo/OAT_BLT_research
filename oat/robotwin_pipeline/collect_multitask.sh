@@ -6,7 +6,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 set +e   # don't abort the whole launch if one task is bad
 
 # ---- EDIT THESE ----
-TASKS=(pick_dual_bottles block_hammer_beat blocks_stack_easy empty_cup_place)
+TASKS=(pick_dual_bottles place_empty_cup beat_block_hammer handover_block)
 CONFIG="${ROBOTWIN_CONFIG:-demo_clean}"     # Easy mode
 NDEMO_COLLECT="${NDEMO_COLLECT:-500}"       # demos per task
 # --------------------
