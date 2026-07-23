@@ -12,7 +12,7 @@ shape_meta: &shape_meta
 
 dataset:
   _target_: oat.dataset.zarr_dataset.ZarrDataset
-  zarr_path: data/robotwin/dual_bottles_pick_easy_N${training.num_demo}.zarr   # converter output
+  zarr_path: data/robotwin/pick_dual_bottles_N${training.num_demo}.zarr   # converter output
   obs_keys: []                      # tokenizer ignores observations
   action_key: action
   n_obs_steps: 0

@@ -36,7 +36,7 @@ env_runner:
 
 dataset:
   _target_: oat.dataset.zarr_dataset.ZarrDataset
-  zarr_path: data/robotwin/dual_bottles_pick_easy_N${training.num_demo}.zarr
+  zarr_path: data/robotwin/pick_dual_bottles_N${training.num_demo}.zarr
   obs_keys:
     - agentview_rgb
     - robot0_eye_in_hand_rgb
