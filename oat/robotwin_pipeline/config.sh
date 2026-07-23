@@ -23,7 +23,7 @@ export N_COLLECT="${N_COLLECT:-200}"          # demos to GENERATE for the task (
 # --- outputs ---
 export ZARR="${OAT_DIR}/data/robotwin/${TASK}_N${NDEMO}.zarr"
 export TOK_CKPT="${OAT_DIR}/output/20260723/082734_train_oattok_dual_bottles_pick_N50/checkpoints/ep-1090_mse-0.006.ckpt"   # set from 05 output
-export POLICY_CKPT="${OAT_DIR}/my_models/policy_robotwin_${TASK}.ckpt"   # set from 06 output
+export POLICY_CKPT="${OAT_DIR}/output/20260723/103303_train_oatpolicy_dual_bottles_pick_N50/checkpoints/ep-0380_vl-2.1537.ckpt"   # set from 06 output
 export AWR_CKPT="${OAT_DIR}/my_models/policy_robotwin_${TASK}_awr.ckpt"
 
 # --- render backend ---
