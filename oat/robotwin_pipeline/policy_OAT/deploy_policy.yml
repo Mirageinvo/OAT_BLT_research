@@ -1,0 +1,10 @@
+# OAT policy config for RoboTwin eval harness. Base keys kept unchanged; oat_* added.
+policy_name: OAT
+task_name: null
+task_config: null
+ckpt_setting: null
+seed: null
+instruction_type: unseen
+oat_ckpt: null        # set via eval.sh override (path to trained OAT policy checkpoint)
+bon_n: 1              # 1 = baseline (single sample), 8 = best-of-N (vote)
+oat_device: cuda:0

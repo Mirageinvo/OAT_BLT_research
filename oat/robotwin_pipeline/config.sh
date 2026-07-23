@@ -29,7 +29,13 @@ export AWR_CKPT="${OAT_DIR}/my_models/policy_robotwin_${TASK}_awr.ckpt"
 # --- render backend ---
 export MUJOCO_GL=egl
 # SAPIEN Vulkan ICD (fix for docker: points the loader at nvidia driver via SAPIEN's ICD).
-# Needed because the container's /usr/share/vulkan/icd.d was empty; harmless if not.
 export VK_ICD_FILENAMES="${VK_ICD_FILENAMES:-/home/docker_user/.local/lib/python3.11/site-packages/sapien/vulkan_library/nvidia_icd.json}"
+
+# --- python runner: RoboTwin needs sapien/mplib (torch 2.4.1), which live in the CONDA python,
+# not the uv .venv (torch 2.10). OAT runs fine on conda torch 2.4.1 (verified). So run the WHOLE
+# RoboTwin pipeline with conda python + OAT/RoboTwin on PYTHONPATH (NOT `uv run`). ---
+export PYTHONPATH="${OAT_DIR}:${ROBOTWIN_DIR}:${PYTHONPATH:-}"
+export OATPY="/opt/conda/bin/python"
+export OATACCEL="/opt/conda/bin/accelerate"
 cd "${OAT_DIR}"
 echo "[config] TASK=${TASK} NDEMO=${NDEMO} OAT_DIR=${OAT_DIR}"
