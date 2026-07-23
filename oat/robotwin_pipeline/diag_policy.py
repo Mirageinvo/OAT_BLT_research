@@ -47,32 +47,46 @@ for s, e in zip(starts, ends):
 print(f"[diag] probing {len(idxs)} train windows at {idxs}")
 
 
-def window(i):
+RGB_PORTS = [p for p in ports if "rgb" in p]
+
+
+def window(i, swap_rgb=False):
     lo = max(0, i - To + 1)
     obs = {}
     for p in ports:
-        arr = z[f"data/{p}"][lo:i + 1]                      # [<=To, ...]
+        arr = np.asarray(z[f"data/{p}"][lo:i + 1])          # [<=To, ...]
         while arr.shape[0] < To:
             arr = np.concatenate([arr[:1], arr], axis=0)    # left-pad
-        obs[p] = torch.from_numpy(np.asarray(arr)).to("cuda:0", dtype)[None]
+        if swap_rgb and p in RGB_PORTS:
+            arr = arr[..., ::-1].copy()                     # reverse channels (RGB<->BGR)
+        obs[p] = torch.from_numpy(arr).to("cuda:0", dtype)[None]
     return obs
 
 
-first_rows = []
-with torch.inference_mode():
-    for i in idxs:
-        obs = window(i)
-        res = policy.predict_action(obs, use_k_tokens=8, temperature=1.0, topk=1)  # greedy
-        a = res["action"][0].detach().cpu().numpy()         # [R, 14]
-        first_rows.append(a[0])
-        print(f"[diag] idx {i:5d}  act[0]= " +
-              " ".join(f"{v:+.2f}" for v in a[0]) +
-              f"   (range {a.min():+.2f}..{a.max():+.2f})")
+def run(swap_rgb):
+    rows = []
+    with torch.inference_mode():
+        for i in idxs:
+            res = policy.predict_action(window(i, swap_rgb), use_k_tokens=8,
+                                        temperature=1.0, topk=1)  # greedy
+            rows.append(res["action"][0].detach().cpu().numpy()[0])
+    rows = np.stack(rows)
+    return rows, rows.std(axis=0).mean()
 
-first_rows = np.stack(first_rows)                            # [n, 14]
-per_dim_std = first_rows.std(axis=0)
-print("\n[diag] per-dim STD of act[0] ACROSS the different train obs:")
-print("       " + " ".join(f"{v:.3f}" for v in per_dim_std))
-print(f"[diag] mean cross-obs std = {per_dim_std.mean():.4f}")
-print("\n[VERDICT] cross-obs std >> 0 (e.g. > ~0.05) => policy IS obs-dependent -> sim failure is an"
-      "\n          ADAPTER mismatch (B). ~0 => mean-collapse -> UNDERFIT (A).")
+
+print("\n=== NORMAL channel order (as stored in Zarr = training convention) ===")
+rows_n, std_n = run(False)
+for i, r in zip(idxs, rows_n):
+    print(f"[diag] idx {i:5d}  act[0]= " + " ".join(f"{v:+.2f}" for v in r))
+print(f"[diag] mean cross-obs std (NORMAL)  = {std_n:.4f}")
+
+print("\n=== SWAPPED channel order (RGB<->BGR) — simulates a live/dataset channel mismatch ===")
+rows_s, std_s = run(True)
+for i, r in zip(idxs, rows_s):
+    print(f"[diag] idx {i:5d}  act[0]= " + " ".join(f"{v:+.2f}" for v in r))
+print(f"[diag] mean cross-obs std (SWAPPED) = {std_s:.4f}")
+
+print(f"\n[VERDICT] NORMAL std={std_n:.4f}  SWAPPED std={std_s:.4f}")
+print("  - SWAPPED std collapses (<< NORMAL, ~0) => policy is CHANNEL-SENSITIVE. If the live sim feeds")
+print("    the OTHER channel order than training, THAT is the sim-failure bug -> swap channels in the adapter.")
+print("  - SWAPPED std ~= NORMAL => channels are NOT the issue => sim failure is UNDERFIT / distribution-shift (A).")
