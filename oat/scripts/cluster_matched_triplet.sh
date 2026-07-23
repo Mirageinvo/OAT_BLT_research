@@ -37,7 +37,8 @@ FORCE_RERUN="${FORCE_RERUN:-1}"              # 1 = never skip baseline (paper-sa
 
 case "${SUITE}" in
   lift)
-    BASE_CKPT="${BASE_CKPT:-output/20260706/163500_train_oatpolicy_lift_N200/checkpoints/ep-0600_sr-0.920.ckpt}"
+    # Default still ep-0900 for legacy; paper TopK lock = ep-1400 (override BASE_CKPT / use _launch_lift_ep1400_matched.sh).
+    BASE_CKPT="${BASE_CKPT:-output/20260719/144024_train_oatpolicy_lift_N200/checkpoints/ep-0900_sr-0.930.ckpt}"
     AWR_CKPT="${AWR_CKPT:-}"
     ENV_TASK=""
     SUITE_DIR="lift"
@@ -49,19 +50,19 @@ case "${SUITE}" in
     SUITE_DIR="can"
     ;;
   square)
-    BASE_CKPT="${BASE_CKPT:-output/20260707/102446_train_oatpolicy_square_N200/checkpoints/ep-0600_sr-0.420.ckpt}"
+    # Prefer live TopK lock (scripts/_launch_square_matched_on_plateau.sh); else override BASE_CKPT.
+    BASE_CKPT="${BASE_CKPT:-output/20260720/215024_train_oatpolicy_square_N200/checkpoints/ep-0700_sr-0.420.ckpt}"
     AWR_CKPT="${AWR_CKPT:-}"
     ENV_TASK=""
     SUITE_DIR="square"
     ;;
   mt4)
-    BASE_CKPT="${BASE_CKPT:-output/20260708/032431_train_oatpolicy_mw-mt4_N50/checkpoints/ep-0450_sr-0.280.ckpt}"
-    AWR_CKPT="${AWR_CKPT:-}"
-    ENV_TASK="mt4"
-    SUITE_DIR="mt4"
+    echo "ERROR: SUITE=mt4 removed from paper track (policy run deleted 2026-07-22). Use MW specialists." >&2
+    exit 1
     ;;
   coffee-pull)
-    BASE_CKPT="${BASE_CKPT:-output/20260711/134440_train_oatpolicy_mw-coffee-pull_st_N50/checkpoints/ep-1000_sr-0.432.ckpt}"
+    # Paper refit 20260720; override via BASE_CKPT= (TopK lock after train-eval).
+    BASE_CKPT="${BASE_CKPT:-output/20260720/090816_train_oatpolicy_mw-coffee-pull_st_N50/checkpoints/ep-1000_sr-0.432.ckpt}"
     AWR_CKPT="${AWR_CKPT:-}"
     ENV_TASK="coffee-pull"
     SUITE_DIR="coffee-pull"

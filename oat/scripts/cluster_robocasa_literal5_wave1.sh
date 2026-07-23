@@ -20,12 +20,23 @@ OUT_ROOT="${OUT_ROOT:-${ROOT}/output/eval/matched_s10000/robocasa/${SUITE}}"
 SKIP_BASELINE="${SKIP_BASELINE:-0}"
 SKIP_BON="${SKIP_BON:-0}"
 FORCE_RERUN="${FORCE_RERUN:-0}"
+VENV="${VENV:-${ROOT}/.venv_robocasa}"
 export CUDA_VISIBLE_DEVICES="${GPU}"
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
+export LD_LIBRARY_PATH="${HOME}/.mujoco/mujoco210/bin:${LD_LIBRARY_PATH:-}"
+export OAT_USE_UV_RUN=0
+
+if [[ ! -x "${VENV}/bin/python" ]]; then
+  echo "ERROR: missing ${VENV}. RoboCasa eval needs .venv_robocasa (robosuite 1.5)."
+  exit 1
+fi
+# shellcheck disable=SC1091
+source "${VENV}/bin/activate"
+PYTHON="${VENV}/bin/python"
 
 mkdir -p "${OUT_ROOT}"
 LOG="${OUT_ROOT}/wave1_literal5.log"
-echo "[wave1] suite=${SUITE} ckpt=${BASE_CKPT} seeds=${SEEDS[*]}" | tee "${LOG}"
+echo "[wave1] suite=${SUITE} ckpt=${BASE_CKPT} seeds=${SEEDS[*]} venv=${VENV}" | tee "${LOG}"
 
 run_one() {
   local method="$1" seed="$2" extra=("${@:3}")
@@ -36,7 +47,7 @@ run_one() {
   fi
   mkdir -p "${out}"
   echo "[run] ${method} seed=${seed} -> ${out}" | tee -a "${LOG}"
-  uv run scripts/eval_policy_sim.py \
+  "${PYTHON}" scripts/eval_policy_sim.py \
     -c "${BASE_CKPT}" \
     -o "${out}" \
     -n 1 --n_test "${N_TEST}" --test_start_seed "${seed}" \
@@ -59,5 +70,5 @@ if [[ "${SKIP_BON}" != "1" ]]; then
   done
 fi
 
-python3 scripts/aggregate_robocasa_literal5.py --root "${OUT_ROOT}" | tee -a "${LOG}"
+"${PYTHON}" scripts/aggregate_robocasa_literal5.py --root "${OUT_ROOT}" | tee -a "${LOG}"
 echo "[wave1] DONE ${OUT_ROOT}/summary_literal5.json" | tee -a "${LOG}"

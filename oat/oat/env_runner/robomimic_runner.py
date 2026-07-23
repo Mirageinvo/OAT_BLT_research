@@ -148,6 +148,7 @@ class RoboMimicRunner(BaseRunner):
         all_video_paths = [None] * n_inits
         all_success = [False] * n_inits
         episode_done = np.zeros(n_inits, dtype=bool)
+        episode_replans = np.zeros(n_inits, dtype=np.int32)
         all_token_counts = []
         all_k_preds = []
         all_r_execs = []
@@ -180,6 +181,9 @@ class RoboMimicRunner(BaseRunner):
             done = False
             while not done and pbar.n < pbar.total:
                 obs_dict = dict_apply(obs, lambda x: maybe_to_torch(x, device=device, dtype=dtype))
+                for gi in range(start, end):
+                    if not episode_done[gi]:
+                        episode_replans[gi] += 1
                 result = policy.predict_action_adaptive(
                     {port: obs_dict[port] for port in policy.get_observation_ports()},
                     **infer_kwargs,
@@ -242,6 +246,9 @@ class RoboMimicRunner(BaseRunner):
         if all_r_execs:
             rs = np.concatenate([np.atleast_1d(r).ravel() for r in all_r_execs]).astype(int)
             log_data["mean_r_exec"] = float(rs.mean())
+        log_data["mean_replans_per_episode"] = float(episode_replans.mean())
+        log_data["std_replans_per_episode"] = float(episode_replans.std())
+        log_data["max_replans_per_episode"] = int(episode_replans.max())
         return log_data
 
     def close(self):

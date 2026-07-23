@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Single ICRA matched BASELINE eval (not BoN/AWR, not a triplet).
-# Protocol: test_start_seed=1000, n_test=50, num_exp=3, OAT8.
+# Lab matched BASELINE only (Table B) — NOT the paper path.
+# Paper = scripts/cluster_matched_triplet.sh with TEST_START_SEED=10000, -n 5.
+#
+# Defaults below match paper TopK locks where possible; protocol here stays
+# seed=1000 / n_exp=3 (selection-pool lab). Prefer triplet for anything cited.
 #
 # Usage: SUITE=can GPU=1 bash scripts/cluster_matched_baseline.sh
 set -euo pipefail
@@ -22,7 +25,8 @@ N_PARALLEL="${N_PARALLEL:-4}"
 
 case "${SUITE}" in
   lift)
-    CKPT="${CKPT:-output/20260706/163500_train_oatpolicy_lift_N200/checkpoints/ep-0600_sr-0.920.ckpt}"
+    # Paper primary = ep-1400; override CKPT= for run A ep-0900 if needed.
+    CKPT="${CKPT:-output/20260719/144024_train_oatpolicy_lift_N200/checkpoints/ep-1400_sr-0.950.ckpt}"
     ENV_TASK=""
     ;;
   can)
@@ -30,15 +34,15 @@ case "${SUITE}" in
     ENV_TASK=""
     ;;
   square)
-    CKPT="${CKPT:-output/20260707/102446_train_oatpolicy_square_N200/checkpoints/ep-0600_sr-0.420.ckpt}"
+    CKPT="${CKPT:-output/20260720/215024_train_oatpolicy_square_N200/checkpoints/ep-0700_sr-0.420.ckpt}"
     ENV_TASK=""
     ;;
   mt4)
-    CKPT="${CKPT:-output/20260708/032431_train_oatpolicy_mw-mt4_N50/checkpoints/ep-0450_sr-0.280.ckpt}"
-    ENV_TASK="mt4"
+    echo "ERROR: SUITE=mt4 removed from paper track (policy run deleted). Use MW specialists." >&2
+    exit 1
     ;;
   coffee-pull)
-    CKPT="${CKPT:-output/20260711/134440_train_oatpolicy_mw-coffee-pull_st_N50/checkpoints/ep-1000_sr-0.432.ckpt}"
+    CKPT="${CKPT:-output/20260720/090816_train_oatpolicy_mw-coffee-pull_st_N50/checkpoints/ep-1000_sr-0.432.ckpt}"
     ENV_TASK="coffee-pull"
     ;;
   stick-pull)

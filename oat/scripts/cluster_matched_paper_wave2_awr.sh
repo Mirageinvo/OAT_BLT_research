@@ -49,7 +49,8 @@ case "${SUITE}" in
     N_TASKS=1
     ;;
   coffee-pull)
-    BASE_CKPT="${BASE_CKPT:-output/20260711/134440_train_oatpolicy_mw-coffee-pull_st_N50/checkpoints/ep-1000_sr-0.432.ckpt}"
+    # Paper refit 20260720; override via BASE_CKPT= after TopK lock.
+    BASE_CKPT="${BASE_CKPT:-output/20260720/090816_train_oatpolicy_mw-coffee-pull_st_N50/checkpoints/ep-1000_sr-0.432.ckpt}"
     ENV_TASK=coffee-pull
     N_TASKS=1
     ;;
@@ -63,9 +64,15 @@ case "${SUITE}" in
     ENV_TASK=""
     N_TASKS=1
     ;;
+  lift)
+    # Default ep-0900 = run A artifacts. Paper TopK lock = ep-1400 via BASE_CKPT / _launch_lift_ep1400_matched.sh.
+    BASE_CKPT="${BASE_CKPT:-output/20260719/144024_train_oatpolicy_lift_N200/checkpoints/ep-0900_sr-0.930.ckpt}"
+    ENV_TASK=""
+    N_TASKS=1
+    ;;
   square)
-    # Paper primary rematch = ep-0600 (ep-1500 archived; BoN flat @ s10000)
-    BASE_CKPT="${BASE_CKPT:-output/20260707/102446_train_oatpolicy_square_N200/checkpoints/ep-0600_sr-0.420.ckpt}"
+    # Live TopK lock via scripts/_launch_square_matched_on_plateau.sh (override BASE_CKPT).
+    BASE_CKPT="${BASE_CKPT:-output/20260720/215024_train_oatpolicy_square_N200/checkpoints/ep-0700_sr-0.420.ckpt}"
     ENV_TASK=""
     N_TASKS=1
     ;;
@@ -75,7 +82,7 @@ case "${SUITE}" in
     ;;
 esac
 
-WAVE1_ROOT="output/eval/matched_s${TEST_START_SEED}/${SUITE}"
+WAVE1_ROOT="${WAVE1_ROOT:-output/eval/matched_s${TEST_START_SEED}/${SUITE}}"
 [[ -f "${WAVE1_ROOT}/baseline_n${N_EXP}/eval_log.json" ]] || {
   echo "ERROR Wave1 baseline missing: ${WAVE1_ROOT}/baseline_n${N_EXP}/eval_log.json" >&2
   exit 1
@@ -87,9 +94,10 @@ WAVE1_ROOT="output/eval/matched_s${TEST_START_SEED}/${SUITE}"
 [[ -f "${BASE_CKPT}" ]] || { echo "ERROR missing BASE_CKPT=${BASE_CKPT}" >&2; exit 1; }
 
 # Paper naming — never exploratory policy_awr_* / awr_<suite>_bon.npz
-AWR_DS="my_datasets/awr_s${TEST_START_SEED}_${SUITE}.npz"
-AWR_CKPT="my_models/awr_s${TEST_START_SEED}_${SUITE}.ckpt"
-LOG="logs/awr_s${TEST_START_SEED}_${SUITE}_wave2_gpu${GPU}.log"
+# Override AWR_DS / AWR_CKPT for dual-base runs (e.g. lift ep0900 vs ep1400).
+AWR_DS="${AWR_DS:-my_datasets/awr_s${TEST_START_SEED}_${SUITE}.npz}"
+AWR_CKPT="${AWR_CKPT:-my_models/awr_s${TEST_START_SEED}_${SUITE}.ckpt}"
+LOG="${LOG:-logs/awr_s${TEST_START_SEED}_${SUITE}_wave2_gpu${GPU}.log}"
 mkdir -p my_datasets my_models logs
 
 {
@@ -142,12 +150,14 @@ CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES}" \
 
 echo "" | tee -a "${LOG}"
 echo "[STEP4] paper eval AWR @ seed ${TEST_START_SEED}; keep Wave1 baseline/BoN" | tee -a "${LOG}"
-# Separate eval log; never truncate Wave1 matched_s10000 logs
-EVAL_LOG="logs/awr_s${TEST_START_SEED}_${SUITE}_wave2_eval_gpu${GPU}.log"
+# Separate eval log; never truncate Wave1 matched_s10000 logs.
+# Override EVAL_LOG for dual-base runs (e.g. lift_ep1400) so we don't clobber suite default.
+EVAL_LOG="${EVAL_LOG:-logs/awr_s${TEST_START_SEED}_${SUITE}_wave2_eval_gpu${GPU}.log}"
 SUITE="${SUITE}" GPU="${GPU}" \
   BASE_CKPT="${BASE_CKPT}" \
   AWR_CKPT="${AWR_CKPT}" \
   LOG="${EVAL_LOG}" \
+  OUT_ROOT="${WAVE1_ROOT}" \
   SKIP_AWR=0 SKIP_BASELINE_BON=1 FORCE_RERUN=0 \
   TEST_START_SEED="${TEST_START_SEED}" N_EXP="${N_EXP}" \
   bash scripts/cluster_matched_triplet.sh 2>&1 | tee -a "${LOG}"

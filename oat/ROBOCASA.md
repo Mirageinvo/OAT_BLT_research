@@ -34,6 +34,7 @@ This file is the **only** paper protocol for RoboCasa. If a one-off script disag
 | OAT8 | `--use_k_tokens 8 --entropy_threshold 0` |
 | Sampling | `--temperature 1.0 --topk 10` |
 | BoN | `--bon_free 8 --bon_signal vote` |
+| **AWR train (BoN-distill)** | **`--epochs 100`** (RoboCasa lock; ≠ RM/MW default) · `--beta 0.5 --beta_kl 0.05` |
 | Matched volume | **250 eps / method / task** = 5 seeds × 50 (`-n 1` each) |
 | Aggregate | **mean** over 5 seed SRs; uncertainty = **SEM** (primary) + **SD** logged; see §4 |
 | Δ | `mean(method) − mean(baseline)`; `SEM_Δ = sqrt(SEM_m² + SEM_b²)` |
@@ -242,25 +243,33 @@ RM/MW paper numbers used `-n 5` @ single `test_start_seed=10000`. **RoboCasa del
 |-------|-------|-----|
 | Collect | **0** | no leak into report |
 | Train | **0** | reproducibility |
+| AWR epochs | **100** (locked) | BoN-distill; RoboCasa-only (not RM/MW’s 30/100 sweeps) |
 | Eval | **same literal 5:** `10000…10004` | matched to Wave 1 |
 
-❌ Reuse exploratory / seed-1000 AWR. ❌ Collect on 10000 or 2000. ❌ Eval with `-n 5` on one start seed.
+❌ Reuse exploratory / seed-1000 AWR. ❌ Collect on 10000 or 2000. ❌ Eval with `-n 5` on one start seed.  
+❌ `--epochs 30` / any value other than **100** for paper RoboCasa AWR.
 
 ```bash
-MUJOCO_GL=egl uv run python scripts/collect_awr_dataset.py \
+# Preferred launcher (hardcodes EPOCHS=100 + .venv_robocasa):
+SUITE=<task> BASE_CKPT=<ckpt_from_2000_topk> GPU=0 \
+  bash scripts/cluster_robocasa_literal5_wave2_awr.sh
+
+# Manual equivalent:
+MUJOCO_GL=egl # use .venv_robocasa python, not shared uv
+python scripts/collect_awr_dataset.py \
   -c <BASE_CKPT> \
   -o my_datasets/awr_s10000_robocasa_<task>.npz \
   --seed 0 --bon_n 8 --n_chunks 20000 --n_workers 4
 
-uv run python scripts/train_awr.py \
+python scripts/train_awr.py \
   -i my_datasets/awr_s10000_robocasa_<task>.npz \
   -c <BASE_CKPT> \
   -o my_models/awr_s10000_robocasa_<task>.ckpt \
-  --beta 0.5 --beta_kl 0.05 --epochs 30
+  --beta 0.5 --beta_kl 0.05 --epochs 100
 
 # eval — same 5 seeds as Wave 1; same AWR ckpt for all
 for seed in 10000 10001 10002 10003 10004; do
-  MUJOCO_GL=egl uv run scripts/eval_policy_sim.py \
+  MUJOCO_GL=egl python scripts/eval_policy_sim.py \
     -c my_models/awr_s10000_robocasa_<task>.ckpt \
     -o output/eval/matched_s10000/robocasa/<task>/awr_seed${seed} \
     -n 1 --n_test 50 --test_start_seed ${seed} \
@@ -316,7 +325,7 @@ rg -n "test_start_seed" output/eval/matched_s10000/robocasa/*/*/summary.json \
 | **G0b** | policy | success-parity PASS |
 | **G1** | Wave 1 | TopK only on 2000; BASE_CKPT locked |
 | **G2** | Wave 2 / cite BoN | baseline+BoN on literal 5 seeds `10000…10004` |
-| **G3** | cite AWR | fresh collect@0 + eval on same 5 seeds |
+| **G3** | cite AWR | fresh collect@0 + **train 100 ep** + eval on same 5 seeds |
 | **G4** | Table C | paper_proof latency |
 
 ---
@@ -340,13 +349,18 @@ Forbidden: TopK@2000, exploratory n3, chain5-as-Δ, old AWR weights, any path ou
 2. **G0** per task (zarr validate) → **tokenizer** may start immediately for that task.  
    **G0b** (success-parity) before **policy** on that task. Parallelize: tok while other MG downloads / env port.  
 3. 4× tokenizer → freeze MSE top-1.  
-4. 4× policy (`test_start_seed=2000`, after G0b) → lock BASE_CKPT.  
-5. Wave 1 all tasks @10000 (`SKIP_AWR=1`).  
-6. GATE → Wave 2 (collect 0 → train → eval 10000).  
+4. 4× policy (`test_start_seed=2000`, after G0b) → **plateau watcher** locks BASE_CKPT.  
+5. Wave 1 literal-5 auto after lock (baseline + BoN @ `10000…10004`).  
+6. GATE → Wave 2 (collect@0 → **train `--epochs 100`** → eval same 5 seeds).  
 7. Latency C (+ C′).  
 8. Table P + Limitations (single-task tok; any forced port delta).
 
-tmux: `rc_tok_<task>`, `rc_pol_<task>`, `rc_w1_<task>`, `rc_w2_<task>`.
+```bash
+# attach plateau→literal5 to live trains; queue coffee resume + microwave when RAM frees
+bash scripts/_launch_rc_baseline_watchers.sh
+```
+
+tmux: `rc_close` / `rc_sink` / `rc_coffee` / `rc_microwave` + `rc_watch_<task>`.
 
 ---
 
@@ -358,6 +372,8 @@ tmux: `rc_tok_<task>`, `rc_pol_<task>`, `rc_w1_<task>`, `rc_w2_<task>`.
 | Runner | `oat/oat/env_runner/robocasa_runner.py` (default selection seed **2000**) |
 | Convert / validate / parity | `scripts/convert_robocasa_dataset.py`, `validate_robocasa_data.py`, `robocasa_success_parity.py` |
 | Wave 1 literal-5 | `scripts/cluster_robocasa_literal5_wave1.sh`, `aggregate_robocasa_literal5.py` → `summary_literal5.json` |
+| Wave 2 AWR | `scripts/cluster_robocasa_literal5_wave2_awr.sh` (**`--epochs 100` locked**) |
+| Plateau → lock → Wave1 | `scripts/_launch_rc_plateau_to_literal5.sh`, `_launch_rc_baseline_watchers.sh` |
 | Configs | `oat/config/task/{tokenizer,policy}/robocasa/*.yaml` |
 | Matched / latency | extend `cluster_matched_triplet.sh`, `cluster_latency_paper_done.sh` |
 | Results | `oat/RESULTS_ROBOCASA.md` |

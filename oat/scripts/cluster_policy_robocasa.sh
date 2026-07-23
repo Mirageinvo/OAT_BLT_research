@@ -26,13 +26,15 @@ export LD_LIBRARY_PATH="${HOME}/.mujoco/mujoco210/bin:${LD_LIBRARY_PATH:-}"
 
 TASK="${TASK:?Set TASK=close_drawer|coffee_press_button}"
 case "${TASK}" in
-  close_drawer|coffee_press_button) ;;
+  close_drawer|coffee_press_button|turn_off_microwave|turn_off_sink_faucet) ;;
   *) echo "ERROR: unknown TASK=${TASK}"; exit 2 ;;
 esac
 
 SEED="${SEED:-0}"
 NUM_DEMO="${NUM_DEMO:-200}"
 ROLLOUT_EVERY="${ROLLOUT_EVERY:-100}"
+# Skip early useless sim evals. Default first rollout @ 200, then 300, 400, …
+ROLLOUT_START_EPOCH="${ROLLOUT_START_EPOCH:-200}"
 N_TEST="${N_TEST:-50}"
 N_PARALLEL_ENVS="${N_PARALLEL_ENVS:-2}"
 NUM_WORKERS="${NUM_WORKERS:-8}"
@@ -51,6 +53,12 @@ if [[ -z "${TOKENIZER_CKPT:-}" ]]; then
       ;;
     coffee_press_button)
       TOKENIZER_CKPT="output/20260720/041753_train_oattok_coffee_press_button_N200/checkpoints/ep-1940_mse-0.003.ckpt"
+      ;;
+    turn_off_microwave)
+      TOKENIZER_CKPT="output/20260720/061925_train_oattok_turn_off_microwave_N200/checkpoints/ep-2720_mse-0.002.ckpt"
+      ;;
+    turn_off_sink_faucet)
+      TOKENIZER_CKPT="output/20260720/083055_train_oattok_turn_off_sink_faucet_N200/checkpoints/ep-3080_mse-0.002.ckpt"
       ;;
   esac
 fi
@@ -123,6 +131,7 @@ HYDRA_FULL_ERROR=1 accelerate launch \
   "policy.action_tokenizer.checkpoint=${TOKENIZER_CKPT}" \
   training.num_demo="${NUM_DEMO}" \
   training.rollout_every="${ROLLOUT_EVERY}" \
+  "training.rollout_start_epoch=${ROLLOUT_START_EPOCH}" \
   training.seed="${SEED}" \
   seed="${SEED}" \
   dataloader.num_workers="${NUM_WORKERS}" \

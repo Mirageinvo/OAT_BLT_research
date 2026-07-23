@@ -17,7 +17,8 @@ bash scripts/patch_robosuite_egl_assert.sh
 
 LOG=logs/train_policy_square_paper_s42.log
 SQUARE_TOK="${SQUARE_TOK:-output/20260706/005048_train_oattok_square_N200/checkpoints/ep-0690_mse-0.004.ckpt}"
-RESUME_RUN_DIR="${RESUME_RUN_DIR:-output/20260707/102446_train_oatpolicy_square_N200}"
+# Fresh by default; set RESUME_RUN_DIR explicitly to resume an existing Hydra run.
+RESUME_RUN_DIR="${RESUME_RUN_DIR:-}"
 
 echo "=== square paper-default seed=42 | GPU0 | n_parallel_envs=2 | tok=${SQUARE_TOK} ===" | tee -a "${LOG}"
 if [[ -n "${RESUME_RUN_DIR}" ]]; then
