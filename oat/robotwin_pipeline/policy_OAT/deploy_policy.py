@@ -39,6 +39,9 @@ def _resize(rgb):
     return rgb.astype(np.uint8)
 
 
+_DBG = {"n": 0}   # one-shot debug counter
+
+
 def encode_obs(observation):  # RoboTwin live obs -> OAT obs dict (single frame)
     obs_cams = observation["observation"]
     ep = observation["endpose"]
@@ -48,9 +51,24 @@ def encode_obs(observation):  # RoboTwin live obs -> OAT obs dict (single frame)
         np.asarray(ep["right_endpose"], dtype=np.float32).ravel(),
         np.atleast_1d(np.asarray(ep["right_gripper"], dtype=np.float32)).ravel(),
     ]).astype(np.float32)                                  # [16]
+    head = _resize(obs_cams[HEAD_CAM]["rgb"])
+    wrist = _resize(obs_cams[WRIST_CAM]["rgb"])
+    if _DBG["n"] < 2:
+        _DBG["n"] += 1
+        print("[DBG] obs keys:", list(observation.keys()))
+        print("[DBG] endpose keys:", list(ep.keys()))
+        print("[DBG] agent_pos shape", agent_pos.shape,
+              "range %.3f..%.3f mean %.3f" % (agent_pos.min(), agent_pos.max(), agent_pos.mean()))
+        print("[DBG] agent_pos =", np.round(agent_pos, 3).tolist())
+        print("[DBG] head rgb", head.shape, head.dtype, "min/max/mean",
+              int(head.min()), int(head.max()), round(float(head.mean()), 1),
+              "per-ch mean", [round(float(head[..., c].mean()), 1) for c in range(3)])
+        print("[DBG] wrist rgb min/max/mean", int(wrist.min()), int(wrist.max()),
+              round(float(wrist.mean()), 1))
+        print("[DBG] EXPECTED (dataset): agent_pos ~[-0.42,1.12] mean~0.34 ; rgb ~[20,255]")
     return {
-        "agentview_rgb": _resize(obs_cams[HEAD_CAM]["rgb"]),
-        "robot0_eye_in_hand_rgb": _resize(obs_cams[WRIST_CAM]["rgb"]),
+        "agentview_rgb": head,
+        "robot0_eye_in_hand_rgb": wrist,
         "agent_pos": agent_pos,
         "task_uid": np.array([0], dtype=np.float32),
     }
@@ -91,7 +109,12 @@ class OATModel:
         else:
             res = self.policy.predict_action_adaptive(
                 obs_dict, entropy_threshold=0.0, use_k_tokens=self.use_k_tokens)
-        return res["action"][0].detach().cpu().numpy()      # [R, 14]
+        a = res["action"][0].detach().cpu().numpy()          # [R, 14]
+        if _DBG["n"] <= 2:
+            print("[DBG] action chunk", a.shape, "range %.2f..%.2f mean %.2f" %
+                  (a.min(), a.max(), a.mean()), "| row0", np.round(a[0], 2).tolist())
+            print("[DBG] EXPECTED (dataset): action ~[-1.38,2.90] mean~0.57")
+        return a
 
 
 def get_model(usr_args):
