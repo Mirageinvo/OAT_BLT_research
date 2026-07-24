@@ -36,6 +36,6 @@ export VK_ICD_FILENAMES="${VK_ICD_FILENAMES:-/home/docker_user/.local/lib/python
 # RoboTwin pipeline with conda python + OAT/RoboTwin on PYTHONPATH (NOT `uv run`). ---
 export PYTHONPATH="${OAT_DIR}:${ROBOTWIN_DIR}:${PYTHONPATH:-}"
 export OATPY="/opt/conda/bin/python"
-export OATACCEL="/opt/conda/bin/python -m accelerate.commands.launch"
+export OATACCEL="/opt/conda/bin/python -m accelerate.commands.launch --num_processes ${NUM_PROC:-1}"  # NUM_PROC=2 for multi-GPU
 cd "${OAT_DIR}"
 echo "[config] TASK=${TASK} NDEMO=${NDEMO} OAT_DIR=${OAT_DIR}"
