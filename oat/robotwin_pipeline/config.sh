@@ -9,10 +9,10 @@ export ROBOTWIN_DIR="${ROBOTWIN_DIR:-$HOME/RoboTwin}"              # where you c
 export DEVICE="${DEVICE:-cuda:0}"
 
 # --- task / data ---
-export TASK="pick_dual_bottles"               # RoboTwin env id (envs/pick_dual_bottles.py)
-export TASK_CFG="dual_bottles_pick"           # the config filename under config/task/*/robotwin/
-export ROBOTWIN_CONFIG="demo_clean"           # task_config for collect_data.py (demo_clean=Easy)
-export NDEMO=50                               # demos (demo_clean episode_num; bump to 200 if underfit)
+export TASK="${TASK:-pick_dual_bottles}"       # RoboTwin env id (envs/<TASK>.py). Override per task.
+export TASK_CFG="${TASK_CFG:-dual_bottles_pick}"  # config filename under config/task/*/robotwin/<TASK_CFG>.yaml
+export ROBOTWIN_CONFIG="${ROBOTWIN_CONFIG:-demo_clean}"  # task_config for collect_data.py (demo_clean=Easy)
+export NDEMO="${NDEMO:-50}"                    # demos actually collected for this task (per-task!)
 export SRC_DIR="${ROBOTWIN_DIR}/data/${TASK}/${ROBOTWIN_CONFIG}/data"   # collect_data.py HDF5 output
 export DATA_FORMAT="hdf5"                     # hdf5 = generate locally with collect_data.py (small,
                                               # disk-safe). lerobot = 80GB unified download (AVOID on
@@ -22,8 +22,8 @@ export N_COLLECT="${N_COLLECT:-200}"          # demos to GENERATE for the task (
 
 # --- outputs ---
 export ZARR="${OAT_DIR}/data/robotwin/${TASK}_N${NDEMO}.zarr"
-export TOK_CKPT="${OAT_DIR}/output/20260723/082734_train_oattok_dual_bottles_pick_N50/checkpoints/ep-1090_mse-0.006.ckpt"   # set from 05 output
-export POLICY_CKPT="${OAT_DIR}/output/20260723/103303_train_oatpolicy_dual_bottles_pick_N50/checkpoints/ep-0380_vl-2.1537.ckpt"   # set from 06 output
+export TOK_CKPT="${TOK_CKPT:-${OAT_DIR}/output/20260723/082734_train_oattok_dual_bottles_pick_N50/checkpoints/ep-1090_mse-0.006.ckpt}"   # per-task; override after 05
+export POLICY_CKPT="${POLICY_CKPT:-${OAT_DIR}/output/20260723/103303_train_oatpolicy_dual_bottles_pick_N50/checkpoints/ep-0380_vl-2.1537.ckpt}"   # per-task; override after 06
 export AWR_CKPT="${OAT_DIR}/my_models/policy_robotwin_${TASK}_awr.ckpt"
 
 # --- render backend ---

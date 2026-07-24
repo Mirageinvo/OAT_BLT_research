@@ -1,0 +1,20 @@
+# OAT tokenizer task config — RoboTwin beat_block_hammer (action-only, 14D). Copy of dual_bottles_pick.
+name: beat_block_hammer
+
+task_name: beat_block_hammer
+
+shape_meta: &shape_meta
+  action:
+    shape: [14]                     # RoboTwin Aloha-AgileX = 14-DOF JOINT-space, [-1,1] (7/arm).
+
+dataset:
+  _target_: oat.dataset.zarr_dataset.ZarrDataset
+  zarr_path: data/robotwin/beat_block_hammer_N${training.num_demo}.zarr
+  obs_keys: []
+  action_key: action
+  n_obs_steps: 0
+  n_action_steps: ${horizon}
+  seed: ${seed}
+  val_ratio: 0.1
+
+# If recon-MSE >> LIBERO ~0.002 after training, re-run with NUM_REGISTERS=16 (and matching policy).

@@ -1,0 +1,45 @@
+# OAT policy task config — RoboTwin beat_block_hammer (bimanual, 14D joint). Copy of dual_bottles_pick.
+name: beat_block_hammer
+
+task_name: beat_block_hammer
+lazy_eval: true
+
+shape_meta: &shape_meta
+  obs:
+    agentview_rgb:          {shape: [128, 128, 3], type: rgb}   # <- head_camera
+    robot0_eye_in_hand_rgb: {shape: [128, 128, 3], type: rgb}   # <- left_camera (wrist)
+    agent_pos:              {shape: [16], type: state}          # endpose(7)+grip(1) per arm = 16D
+    task_uid:               {shape: [1], type: state}
+  action:
+    shape: [14]                                                 # 14D joint-space command in [-1,1]
+
+env_runner:
+  _target_: oat.env_runner.robotwin_runner.RoboTwinRunner
+  task_name: beat_block_hammer
+  n_test: 100
+  n_test_vis: 10
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${n_action_steps}
+  fps: 25
+  n_parallel_envs: 10
+  image_size: 128
+  camera_names:
+    - head_camera            #   -> agentview_rgb
+    - left_camera            #   -> robot0_eye_in_hand_rgb
+  state_ports:
+    - agent_pos
+  max_episode_steps: 300
+
+dataset:
+  _target_: oat.dataset.zarr_dataset.ZarrDataset
+  zarr_path: data/robotwin/beat_block_hammer_N${training.num_demo}.zarr
+  obs_keys:
+    - agentview_rgb
+    - robot0_eye_in_hand_rgb
+    - agent_pos
+    - task_uid
+  action_key: action
+  n_obs_steps: ${n_obs_steps}
+  n_action_steps: ${horizon}
+  seed: ${seed}
+  val_ratio: 0.1
