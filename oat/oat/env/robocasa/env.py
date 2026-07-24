@@ -25,6 +25,22 @@ DEFAULT_STATE_PORTS = [
 ]
 EXPECTED_ACTION_DIM = 12
 
+# Official RoboCasa eval protocol (robocasa.utils.eval_utils.create_eval_env).
+# Demos are obj_instance_split="A" + generative_textures="100p"; eval uses held-out
+# split B and the fixed 5 layout/style pairs. Matching gentex at eval avoids the
+# train/eval visual domain gap that collapsed TopK SR vs OAT Table VI.
+PAPER_EVAL_LAYOUT_AND_STYLE_IDS = ((1, 1), (2, 2), (4, 4), (6, 9), (7, 10))
+PAPER_EVAL_OBJ_INSTANCE_SPLIT = "B"
+PAPER_EVAL_GENERATIVE_TEXTURES = "100p"
+
+# Per-task horizons from robocasa dataset_registry (CoffeePressButton=300).
+TASK_MAX_EPISODE_STEPS = {
+    "close_drawer": 500,
+    "coffee_press_button": 300,
+    "turn_off_microwave": 500,
+    "turn_off_sink_faucet": 500,
+}
+
 
 def resolve_env_name(task_name: str) -> str:
     key = task_name.strip()
@@ -44,6 +60,11 @@ def _create_robocasa_env(
     seed: int,
     image_size: int,
     camera_names: List[str],
+    *,
+    obj_instance_split: str = PAPER_EVAL_OBJ_INSTANCE_SPLIT,
+    generative_textures: str = PAPER_EVAL_GENERATIVE_TEXTURES,
+    randomize_cameras: bool = False,
+    layout_and_style_ids=PAPER_EVAL_LAYOUT_AND_STYLE_IDS,
 ):
     from robocasa.utils.env_utils import create_env
 
@@ -55,7 +76,10 @@ def _create_robocasa_env(
         camera_heights=image_size,
         seed=seed,
         render_onscreen=False,
-        randomize_cameras=False,
+        randomize_cameras=randomize_cameras,
+        obj_instance_split=obj_instance_split,
+        generative_textures=generative_textures,
+        layout_and_style_ids=layout_and_style_ids,
     )
 
 
@@ -69,7 +93,11 @@ class RoboCasaEnv(gymnasium.Env):
         state_ports: Optional[List[str]] = None,
         video_camera: str = "robot0_agentview_left",
         video_resolution: int = 512,
-        max_episode_steps: int = 500,
+        max_episode_steps: Optional[int] = None,
+        obj_instance_split: str = PAPER_EVAL_OBJ_INSTANCE_SPLIT,
+        generative_textures: str = PAPER_EVAL_GENERATIVE_TEXTURES,
+        randomize_cameras: bool = False,
+        layout_and_style_ids=PAPER_EVAL_LAYOUT_AND_STYLE_IDS,
     ):
         super().__init__()
         self.env_name = resolve_env_name(task_name)
@@ -78,7 +106,11 @@ class RoboCasaEnv(gymnasium.Env):
         self.state_ports = list(state_ports or DEFAULT_STATE_PORTS)
         self.video_camera = video_camera
         self.video_resolution = video_resolution
-        self.max_episode_steps = max_episode_steps
+        if max_episode_steps is None:
+            max_episode_steps = TASK_MAX_EPISODE_STEPS.get(
+                task_name.strip(), 500
+            )
+        self.max_episode_steps = int(max_episode_steps)
         self.image_size = image_size
         self._seed = int(seed)
 
@@ -87,6 +119,10 @@ class RoboCasaEnv(gymnasium.Env):
             seed=self._seed,
             image_size=image_size,
             camera_names=self.camera_names,
+            obj_instance_split=obj_instance_split,
+            generative_textures=generative_textures,
+            randomize_cameras=randomize_cameras,
+            layout_and_style_ids=layout_and_style_ids,
         )
         self.done = False
         self.cur_step = 0

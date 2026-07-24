@@ -45,7 +45,7 @@ env_runner:
     - robot0_eef_pos
     - robot0_eef_quat
     - robot0_gripper_qpos
-  max_episode_steps: 500
+  max_episode_steps: 300
   policy_use_k_tokens: 8
   policy_entropy_threshold: 0.0
 
