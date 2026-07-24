@@ -46,10 +46,11 @@ while true; do
       snap="/tmp/watch_${TASK}.ckpt"
       cp -f "${ck}" "${snap}"    # freeze so topk can't delete it mid-eval
       echo "[watch] $(date +%H:%M:%S) eval ep=${ep} ckpt=$(basename ${ck})"
-      out=$(cd "${ROBOTWIN_DIR}/policy/OAT" && \
+      evlog="/tmp/watch_eval_${TASK}.out"    # live-tailable: tail -f this file during an eval
+      ( cd "${ROBOTWIN_DIR}/policy/OAT" && \
         OAT_DIR="${OAT_DIR}" CUDA_VISIBLE_DEVICES="${EVAL_GPU}" \
-        bash eval.sh "${TASK}" "${ROBOTWIN_CONFIG}" "${snap}" 1 "${SEED}" "${EVAL_GPU}" 2>&1)
-      sr=$(echo "${out}" | grep -i "Success rate" | tail -1 | grep -oE '[0-9]+(\.[0-9]+)?%' | tail -1)
+        bash eval.sh "${TASK}" "${ROBOTWIN_CONFIG}" "${snap}" 1 "${SEED}" "${EVAL_GPU}" ) > "${evlog}" 2>&1
+      sr=$(grep -i "Success rate" "${evlog}" | tail -1 | grep -oE '[0-9]+(\.[0-9]+)?%' | tail -1)
       [ -z "${sr}" ] && sr="NA"
       echo "${ep},${sr},$(basename ${ck}),$(date +%H:%M:%S)" >> "${CSV}"
       echo "[watch] -> ep=${ep} SR=${sr}   (logged to ${CSV})"
