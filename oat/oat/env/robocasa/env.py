@@ -25,13 +25,17 @@ DEFAULT_STATE_PORTS = [
 ]
 EXPECTED_ACTION_DIM = 12
 
-# Official RoboCasa eval protocol (robocasa.utils.eval_utils.create_eval_env).
-# Demos are obj_instance_split="A" + generative_textures="100p"; eval uses held-out
-# split B and the fixed 5 layout/style pairs. Matching gentex at eval avoids the
-# train/eval visual domain gap that collapsed TopK SR vs OAT Table VI.
+# Official RoboCasa / create_eval_env scene protocol (robocasa.utils.eval_utils):
+#   obj_instance_split="B", generative_textures=None, randomize_cameras=False,
+#   layout_and_style_ids=((1,1),(2,2),(4,4),(6,9),(7,10)).
+# Demos are split A + gentex=100p; paper eval intentionally uses human-curated
+# textures (gentex=None) — do NOT flip this to 100p for Table-VI-style absolute SR.
+# We call env_utils.create_env (rs 1.5) rather than eval_utils.create_eval_env:
+# the latter imports robosuite.load_controller_config (removed in 1.5). Scene kwargs
+# match; robot is PandaOmron (=PandaMobile rename) with the 1.5 composite controller.
 PAPER_EVAL_LAYOUT_AND_STYLE_IDS = ((1, 1), (2, 2), (4, 4), (6, 9), (7, 10))
 PAPER_EVAL_OBJ_INSTANCE_SPLIT = "B"
-PAPER_EVAL_GENERATIVE_TEXTURES = "100p"
+PAPER_EVAL_GENERATIVE_TEXTURES = None
 
 # Per-task horizons from robocasa dataset_registry (CoffeePressButton=300).
 TASK_MAX_EPISODE_STEPS = {
@@ -62,15 +66,17 @@ def _create_robocasa_env(
     camera_names: List[str],
     *,
     obj_instance_split: str = PAPER_EVAL_OBJ_INSTANCE_SPLIT,
-    generative_textures: str = PAPER_EVAL_GENERATIVE_TEXTURES,
+    generative_textures: Optional[str] = PAPER_EVAL_GENERATIVE_TEXTURES,
     randomize_cameras: bool = False,
     layout_and_style_ids=PAPER_EVAL_LAYOUT_AND_STYLE_IDS,
 ):
+    # Scene kwargs match create_eval_env; create_env is the rs-1.5-safe entrypoint
+    # (eval_utils.create_eval_env imports removed load_controller_config).
     from robocasa.utils.env_utils import create_env
 
     return create_env(
         env_name=env_name,
-        robots="PandaOmron",
+        robots="PandaOmron",  # create_eval_env default "PandaMobile" (renamed)
         camera_names=camera_names,
         camera_widths=image_size,
         camera_heights=image_size,
@@ -95,7 +101,7 @@ class RoboCasaEnv(gymnasium.Env):
         video_resolution: int = 512,
         max_episode_steps: Optional[int] = None,
         obj_instance_split: str = PAPER_EVAL_OBJ_INSTANCE_SPLIT,
-        generative_textures: str = PAPER_EVAL_GENERATIVE_TEXTURES,
+        generative_textures: Optional[str] = PAPER_EVAL_GENERATIVE_TEXTURES,
         randomize_cameras: bool = False,
         layout_and_style_ids=PAPER_EVAL_LAYOUT_AND_STYLE_IDS,
     ):

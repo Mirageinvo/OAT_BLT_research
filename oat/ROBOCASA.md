@@ -50,6 +50,23 @@ This file is the **only** paper protocol for RoboCasa. If a one-off script disag
 
 ❌ Do **not** use RM/MW-style `-n 5` on a single `test_start_seed=10000` for RoboCasa paper numbers — that is a different layout (5 sampling repeats on one init block). RoboCasa paper path = **5 distinct seeds, no repeats**.
 
+### Eval env (locked — matches `robocasa.utils.eval_utils.create_eval_env`)
+
+| Knob | Value | Notes |
+|------|--------|--------|
+| `obj_instance_split` | **`B`** | held-out vs demos `A` |
+| `generative_textures` | **`None`** | paper eval = human-curated textures; demos were `100p` |
+| `randomize_cameras` | **`False`** | demos used `True` |
+| `layout_and_style_ids` | `((1,1),(2,2),(4,4),(6,9),(7,10))` | same 5 pairs as `create_eval_env` |
+| Entrypoint | `robocasa.utils.env_utils.create_env` | **not** `create_eval_env` directly: rs 1.5 drops `load_controller_config`; scene kwargs identical |
+| Robot | `PandaOmron` | = `PandaMobile` rename; rs 1.5 composite controller (Da=12). Demo HDF5 recorded OSC_POSE — G0b eef-traj still matches |
+
+Implemented in `oat/env/robocasa/env.py` (`PAPER_EVAL_*`). Live RGB is **vflip**’d to match HDF5/zarr train orientation.
+
+**Same-scene restore (G0b only):** geometry + cams restored; XML texture basenames unchanged when gentex rewrite is disabled. Pixel L1≪5 is **not** guaranteed (robosuite 1.4→1.5 / asset-path drift). Policy eval does **not** use demo restore — only fresh `reset()`.
+
+❌ Do **not** set eval `generative_textures="100p"` for paper / Table-VI-style absolute SR (that was a train-matched experiment, not the official protocol).
+
 ---
 
 ## 1. Data — official only (G0)

@@ -68,12 +68,15 @@ def _resolve_hdf5(task: str, hdf5: Optional[str]) -> pathlib.Path:
 def _reset_to(env, initial_state: dict) -> None:
     """Restore MuJoCo state like robocasa.scripts.playback_dataset.reset_to.
 
-    Extra vs upstream (needed on robosuite 1.5 + generative_textures=100p):
+    Extra vs upstream (needed on robosuite 1.5):
     - copy ep_meta cam_configs into env._cam_configs *after* reset() (reset
       rebuilds default cams; edit_model_xml rewrites parented cams from
       _cam_configs and would otherwise clobber demo camera poses);
-    - temporarily disable generative_textures during edit_model_xml so demo
-      texture paths in model_file are kept (else random gentex replaces them).
+    - force generative_textures=None during edit_model_xml so model_file
+      texture paths are kept (if the env were constructed with gentex=100p,
+      edit would otherwise call get_random_textures and replace the skin).
+    Pixel-perfect L1 vs stored demo frames is not guaranteed (rs 1.4→1.5 /
+    asset remaps); G0b gates on success parity + eef traj, not image L1.
     """
     import copy
 
