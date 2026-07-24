@@ -169,8 +169,10 @@ class RoboCasaEnv(gymnasium.Env):
             image_key = self._image_key(cam_name)
             if image_key not in raw_obs:
                 raise KeyError(f"Camera obs '{image_key}' missing from RoboCasa env.")
-            # Camera obs already match RoboCasa HDF5 / zarr (no extra flip).
-            obs_dict[f"{cam_name}_rgb"] = np.asarray(raw_obs[image_key], dtype=np.uint8)
+            # robosuite offscreen RGB is vertically flipped vs RoboCasa HDF5/zarr
+            # (demos recorded upright). Match train orientation for policy eval.
+            img = np.asarray(raw_obs[image_key], dtype=np.uint8)
+            obs_dict[f"{cam_name}_rgb"] = img[::-1].copy()
         return obs_dict
 
     def _check_success(self) -> bool:
@@ -192,8 +194,12 @@ class RoboCasaEnv(gymnasium.Env):
     def reset(self, seed=None, options=None):
         if seed is not None:
             self._seed = int(seed)
-            if hasattr(self.env, "seed"):
-                self.env.seed(self._seed)
+            # robosuite 1.5: `.seed` is often an int attribute, not a callable.
+            seed_fn = getattr(self.env, "seed", None)
+            if callable(seed_fn):
+                seed_fn(self._seed)
+            elif hasattr(self.env, "set_seed") and callable(self.env.set_seed):
+                self.env.set_seed(self._seed)
         raw = self.env.reset()
         if isinstance(raw, tuple):
             raw = raw[0]
