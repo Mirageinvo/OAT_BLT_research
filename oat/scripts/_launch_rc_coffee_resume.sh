@@ -53,7 +53,7 @@ SKIP_G0B=1 HYDRA_FULL_ERROR=1 accelerate launch \
   seed=0 \
   dataloader.num_workers=1 \
   val_dataloader.num_workers=1 \
-  checkpoint.topk.k=3 \
+  checkpoint.topk.k=2 \
   checkpoint.topk.monitor_key=mean_success_rate \
   logging.mode=disabled \
   "hydra.run.dir=${RUN_DIR}" \

@@ -20,14 +20,19 @@ GPU="${GPU:-0}"
 source scripts/cluster_gpu_env.sh "${GPU}"
 bash scripts/patch_robosuite_egl_assert.sh
 
-SUITES="${SUITES:-can coffee-pull stick-pull disassemble box-close}"
+SUITES="${SUITES:-can coffee-pull stick-pull disassemble box-close square lift}"
 REPS="${REPS:-10}"
+TRIALS="${TRIALS:-1}"
 WARMUP="${WARMUP:-20}"
 FAIR_KV="${FAIR_KV:-0}"
 if [[ "${FAIR_KV}" == "1" ]]; then
   LOG="logs/latency_fair_kv_s10000_gpu${GPU}.log"
   EXTRA_FLAGS=(--fair_kv)
   LABEL="fair-KV"
+  # paper C′ default: multi-trial ± (batch=1 already in measure script)
+  if [[ "${TRIALS}" == "1" && -z "${TRIALS_EXPLICIT:-}" ]]; then
+    TRIALS=8
+  fi
 else
   LOG="logs/latency_paper_s10000_gpu${GPU}.log"
   EXTRA_FLAGS=()
@@ -46,7 +51,7 @@ export OAT_GIT_DIRTY="${OAT_GIT_DIRTY:-0}"
 
 {
   echo "=== PAPER LATENCY ${LABEL} $(date -Iseconds) gpu=${CUDA_VISIBLE_DEVICES} device=${OAT_DEVICE} ==="
-  echo "suites=${SUITES} reps=${REPS} warmup=${WARMUP} FAIR_KV=${FAIR_KV}"
+  echo "suites=${SUITES} batch=1 reps=${REPS} trials=${TRIALS} warmup=${WARMUP} FAIR_KV=${FAIR_KV}"
   echo "OAT_GIT_COMMIT=${OAT_GIT_COMMIT} branch=${OAT_GIT_BRANCH} dirty=${OAT_GIT_DIRTY}"
 } | tee "${LOG}"
 
@@ -59,6 +64,7 @@ for s in ${SUITES}; do
       --suite "${s}" \
       -d "${OAT_DEVICE}" \
       --reps "${REPS}" \
+      --trials "${TRIALS}" \
       --warmup "${WARMUP}" \
       "${EXTRA_FLAGS[@]}" \
       2>&1 | tee -a "${LOG}"

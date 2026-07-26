@@ -11,7 +11,15 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 MATCHED = ROOT / "output/eval/matched_s10000"
-SUITES = ["can", "coffee-pull", "stick-pull", "disassemble", "box-close", "square"]
+SUITES = [
+    "can",
+    "coffee-pull",
+    "stick-pull",
+    "disassemble",
+    "box-close",
+    "square",
+    "lift",
+]
 
 
 def sr_pct(block):
@@ -62,7 +70,18 @@ def main():
 
         def ms(m):
             x = modes[m]
-            return {k: x.get(k) for k in ("median_ms", "mean_ms", "std_ms", "iqr_ms", "reps")}
+            keys = (
+                "median_ms",
+                "mean_ms",
+                "std_ms",
+                "sem_ms",
+                "iqr_ms",
+                "reps",
+                "n_trials",
+                "trial_median_mean_ms",
+                "trial_median_std_ms",
+            )
+            return {k: x.get(k) for k in keys if k in x or k in ("median_ms", "std_ms", "reps")}
 
         rows[s] = {
             "latency": {"single": ms("single"), "bon": ms("bon"), "awr": ms("awr")},
@@ -74,6 +93,8 @@ def main():
             "latency_json": str(p.relative_to(ROOT)),
             "paper_proof": d.get("paper_proof", False),
             "fair_kv": d.get("fair_kv", False),
+            "batch_size": d.get("batch_size", 1),
+            "trials": d.get("trials"),
             "git_commit": d.get("git_commit"),
             "git_source": d.get("git_source"),
             "gpu_name": d.get("gpu_name"),
@@ -111,10 +132,16 @@ def main():
     for s, r in rows.items():
         L = r["latency"]
         dbs = r["bon_minus_single_ms"]
+        def fmt(x):
+            std = x.get("std_ms")
+            if std is None:
+                return f"{x['median_ms']:.1f}"
+            return f"{x['median_ms']:.1f}±{std:.1f}"
+
         print(
-            f"  {s:12} single={L['single']['median_ms']:.1f} "
-            f"bon={L['bon']['median_ms']:.1f} awr={L['awr']['median_ms']:.1f} "
-            f"bon-single={dbs:+.2f}ms"
+            f"  {s:12} single={fmt(L['single'])} "
+            f"bon={fmt(L['bon'])} awr={fmt(L['awr'])} "
+            f"bon-single={dbs:+.2f}ms trials={r.get('trials')}"
         )
 
 

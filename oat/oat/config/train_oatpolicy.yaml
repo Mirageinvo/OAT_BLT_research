@@ -109,7 +109,7 @@ checkpoint:
   topk:
     monitor_key: mean_success_rate
     mode: max
-    k: 3
+    k: 2
     format_str: 'ep-{epoch:04d}_sr-{mean_success_rate:.3f}.ckpt'
   save_last_ckpt: True
   save_last_snapshot: False

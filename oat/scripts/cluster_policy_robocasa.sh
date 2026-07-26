@@ -136,7 +136,7 @@ HYDRA_FULL_ERROR=1 accelerate launch \
   seed="${SEED}" \
   dataloader.num_workers="${NUM_WORKERS}" \
   val_dataloader.num_workers="${NUM_WORKERS}" \
-  checkpoint.topk.k=3 \
+  checkpoint.topk.k=2 \
   checkpoint.topk.monitor_key=mean_success_rate \
   logging.mode=disabled \
   "$@" \

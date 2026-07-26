@@ -22,6 +22,8 @@ SKIP_BON="${SKIP_BON:-0}"
 FORCE_RERUN="${FORCE_RERUN:-0}"
 VENV="${VENV:-${ROOT}/.venv_robocasa}"
 export CUDA_VISIBLE_DEVICES="${GPU}"
+# After CUDA_VISIBLE_DEVICES remaps, EGL only sees device 0 in the visible set.
+export MUJOCO_EGL_DEVICE_ID="${MUJOCO_EGL_DEVICE_ID:-0}"
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export LD_LIBRARY_PATH="${HOME}/.mujoco/mujoco210/bin:${LD_LIBRARY_PATH:-}"
 export OAT_USE_UV_RUN=0
@@ -41,11 +43,13 @@ echo "[wave1] suite=${SUITE} ckpt=${BASE_CKPT} seeds=${SEEDS[*]} venv=${VENV}" |
 run_one() {
   local method="$1" seed="$2" extra=("${@:3}")
   local out="${OUT_ROOT}/${method}_seed${seed}"
-  if [[ "${FORCE_RERUN}" != "1" && -f "${out}/eval_log.json" ]]; then
+  if [[ "${FORCE_RERUN}" == "1" ]]; then
+    rm -rf "${out}"
+  elif [[ -f "${out}/eval_log.json" ]]; then
     echo "[skip] ${out}/eval_log.json exists" | tee -a "${LOG}"
     return 0
   fi
-  mkdir -p "${out}"
+  # Do NOT mkdir "${out}" before eval: eval_policy_sim prompts overwrite if the dir exists.
   echo "[run] ${method} seed=${seed} -> ${out}" | tee -a "${LOG}"
   "${PYTHON}" scripts/eval_policy_sim.py \
     -c "${BASE_CKPT}" \

@@ -16,7 +16,7 @@ launch_watch() {
   tmux new-session -d -s "${name}" \
     "cd /workspace/oat && \
      TASK=${task} RUN_DIR=${run_dir} TRAIN_TMUX=${train_tmux} GPU=${gpu} \
-     MIN_EPOCH=${MIN_EPOCH:-2000} N_BELOW=${N_BELOW:-4} KILL_TRAIN=${KILL_TRAIN:-0} \
+     MIN_EPOCH=${MIN_EPOCH:-3000} N_BELOW=${N_BELOW:-4} KILL_TRAIN=${KILL_TRAIN:-0} \
      TRAIN_END_EPOCH=${TRAIN_END_EPOCH:-4500} \
      bash scripts/_launch_rc_plateau_to_literal5.sh \
      2>&1 | tee logs/${name}.log"
@@ -42,7 +42,7 @@ if ! tmux has-session -t rc_watch_coffee 2>/dev/null; then
      TASK=coffee_press_button \
      RUN_DIR=output/20260721/204916_train_oatpolicy_coffee_press_button_N200 \
      TRAIN_TMUX=rc_coffee GPU=${COFFEE_GPU:-1} \
-     MIN_EPOCH=${MIN_EPOCH:-2000} N_BELOW=${N_BELOW:-4} KILL_TRAIN=${KILL_TRAIN:-0} \
+     MIN_EPOCH=${MIN_EPOCH:-3000} N_BELOW=${N_BELOW:-4} KILL_TRAIN=${KILL_TRAIN:-0} \
      TRAIN_END_EPOCH=${TRAIN_END_EPOCH:-4500} \
      bash scripts/_launch_rc_plateau_to_literal5.sh \
      2>&1 | tee logs/rc_watch_coffee.log"
@@ -67,7 +67,7 @@ if ! tmux has-session -t rc_watch_microwave 2>/dev/null; then
          if ls \"\$d\"/checkpoints/ep-*_sr-*.ckpt >/dev/null 2>&1 || [[ -f \"\$d/logs.json\" ]]; then
            echo \"[watch_mw] attaching to \$d\"
            TASK=turn_off_microwave RUN_DIR=\"\$d\" TRAIN_TMUX=rc_microwave GPU=${MW_GPU:-0} \
-             MIN_EPOCH=${MIN_EPOCH:-2000} N_BELOW=${N_BELOW:-4} KILL_TRAIN=${KILL_TRAIN:-0} \
+             MIN_EPOCH=${MIN_EPOCH:-3000} N_BELOW=${N_BELOW:-4} KILL_TRAIN=${KILL_TRAIN:-0} \
              TRAIN_END_EPOCH=${TRAIN_END_EPOCH:-4500} \
              bash scripts/_launch_rc_plateau_to_literal5.sh
            break

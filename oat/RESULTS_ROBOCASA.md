@@ -86,7 +86,7 @@ Config: `task/tokenizer=robocasa/<task>`, seed 0, batch 256, top-3 by MSE.
 | turn_off_microwave | *(new dir when starts)* | `rc_microwave` + `rc_watch_microwave` | **queued** (RAM + coffee idle) |
 | turn_off_sink_faucet | *(new dir when starts)* | `rc_sink` + `rc_watch_sink` | **queued** (after coffee) |
 
-**Lock → Wave1:** `MIN_EPOCH=2000`, `N_BELOW=4`, `KILL_TRAIN=0`, `TRAIN_END_EPOCH=4500`.  
+**Lock → Wave1:** `MIN_EPOCH=3000`, `N_BELOW=4`, `KILL_TRAIN=0`, `TRAIN_END_EPOCH=4500`.  
 Lock path: `my_models/robocasa_<task>_topk_lock.txt`.
 
 **Cluster RAM:** ~2 RC policies max in parallel (~14–17 GiB RSS each on 62 GiB host). GPU VRAM not the bottleneck.
@@ -99,20 +99,22 @@ Lock path: `my_models/robocasa_<task>_topk_lock.txt`.
 | `output/20260723/041317_train_oatpolicy_turn_off_microwave_N200` | OOM at start, 0 TopK |
 | `output/20260723/041317_train_oatpolicy_turn_off_sink_faucet_N200` | killed mid ep-0 for coffee resume, 0 TopK |
 
-**Kept:** all 4 tokenizers; coffee `204916`; close `041317`.
+**Kept:** all 4 tokenizers; coffee/close **scratch** runs under `20260724/220823_*` (TopK locked 2026-07-26).
 
 ---
 
-## Table P (literal-5) — empty until Wave1
+## Table P (literal-5) — Wave1 RUNNING (locks frozen 2026-07-26)
 
-| task | baseline mean±SEM | BoN | AWR | Δ_BoN±SEM_Δ | Δ_AWR±SEM_Δ | notes |
-|------|-------------------|-----|-----|-------------|-------------|-------|
-| close_drawer | | | | | | |
-| coffee_press_button | | | | | | |
-| turn_off_microwave | | | | | | |
-| turn_off_sink_faucet | | | | | | |
+| task | BASE_CKPT | baseline mean±SEM | BoN | AWR | Δ_BoN±SEM_Δ | Δ_AWR±SEM_Δ | notes |
+|------|-----------|-------------------|-----|-----|-------------|-------------|-------|
+| close_drawer | `my_models/robocasa_close_drawer_topk_ep0500_sr0.700.ckpt` | *running* | | | | | lock `…_topk_lock.txt` · tmux `rc_wave1_close` · GPU0 |
+| coffee_press_button | `my_models/robocasa_coffee_press_button_topk_ep0500_sr0.600.ckpt` | *running* | | | | | lock `…_topk_lock.txt` · tmux `rc_wave1_coffee` · GPU1 |
+| turn_off_microwave | TBD | | | | | | deferred |
+| turn_off_sink_faucet | TBD | | | | | | deferred |
 
 ```bash
 SUITE=<task> BASE_CKPT=<locked> GPU=0 bash scripts/cluster_robocasa_literal5_wave1.sh
 # → output/eval/matched_s10000/robocasa/<task>/summary_literal5.json
 ```
+
+**Scratch trains STOPPED 2026-07-26** (user): selection TopK frozen; no further train-evals on these runs.

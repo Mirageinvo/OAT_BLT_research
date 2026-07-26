@@ -82,11 +82,11 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 
 ### Table P — PAPER matched (seed 10000) ← сюда пишем числа для статьи
 
-**Protocol:** `test_start_seed=10000`, `n_test=50`, `-n 5`, OAT8, `--temperature 1.0 --topk 10`, BoN `--bon_free 8 --bon_signal vote`.  
+**Protocol:** `test_start_seed=10000`, `n_test=50`, `-n 5`, OAT8, `--temperature 1.0 --topk 10`, BoN `--bon_free N --bon_signal vote` (primary **N=8**; MW N-sweep also **N=16/32**).  
 **Δ** = method − paper baseline. Ckpt выбирался на seed 1000; отчёт на 10000 (disjoint).  
-**Wave 1 (сейчас):** baseline + BoN, `SKIP_AWR=1`.  
-**Wave 2:** только после GATE ниже — свежий AWR, **не** ранние exploratory раны.  
-**Launch:** `bash scripts/cluster_launch_matched_paper_wave.sh` (5 tmux параллельно).
+**Wave 1:** baseline + BoN N=8. **Wave 1b (MW only, locked):** BoN N=16 + N=32 on same ckpt/seeds.  
+**Wave 2:** свежий AWR (не exploratory).  
+**Launch:** `bash scripts/cluster_launch_matched_paper_wave.sh` · MW BoN16/32: `logs/mw_*_bon16_32_*.log` / `mw_*_bon32_only_*.log`.
 
 #### ⛔ GATE → Wave 2 (зафиксировано 2026-07-16)
 
@@ -104,23 +104,51 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 | Suite | Base ckpt | Paper baseline | BoN N=8 | AWR | Δ_BoN | Δ_AWR | Artifacts |
 |-------|-----------|----------------|---------|-----|-------|-------|-----------|
 | Can | ep-1700 | **76.4±3.0%** | **80.8±1.1%** | **79.2±7.7%** | **+4.4** | **+2.8** | `matched_s10000/can/` · `awr_s10000_can.*` (AWR < BoN) |
-| MW coffee-pull | **ep-1000** TopK lock `090816` | **40.8±2.3%** | **43.2±4.8%** | **41.2±2.3%** | **+2.4** | **+0.4** | Wave1+2 **DONE** · `matched_s10000/coffee-pull/` · `awr_s10000_coffee-pull.*` · AWR ≈ base · replan **12.3** |
-| MW stick-pull | ep-0800 | **15.6±6.2%** | **25.6±2.6%** | **26.8±5.2%** | **+10.0** | **+11.2** | `matched_s10000/stick-pull/` · `awr_s10000_stick-pull.*` |
-| MW disassemble | ep-1400 | **62.4±5.2%** | **63.2±6.3%** | **69.6±5.7%** | **+0.8** | **+7.2** | `matched_s10000/disassemble/` · `awr_s10000_disassemble.*` |
-| MW box-close | ep-2000 | **59.6±7.5%** | **66.4±3.0%** | **72.8±4.1%** | **+6.8** | **+13.2** | `matched_s10000/box-close/` · `awr_s10000_box-close.*` |
+| MW coffee-pull | **ep-1000** TopK lock `090816` | **40.8±2.3%** | **43.2±4.8%** | **41.2±2.3%** | **+2.4** | **+0.4** | Wave1+2 **DONE** · N-sweep below · `matched_s10000/coffee-pull/` · `awr_s10000_coffee-pull.*` · replan **12.3** |
+| MW stick-pull | ep-0800 | **15.6±6.2%** | **25.6±2.6%** | **26.8±5.2%** | **+10.0** | **+11.2** | N-sweep below · `matched_s10000/stick-pull/` · `awr_s10000_stick-pull.*` |
+| MW disassemble | ep-1400 | **62.4±5.2%** | **63.2±6.3%** | **69.6±5.7%** | **+0.8** | **+7.2** | N-sweep below · `matched_s10000/disassemble/` · `awr_s10000_disassemble.*` |
+| MW box-close | ep-2000 | **59.6±7.5%** | **66.4±3.0%** | **72.8±4.1%** | **+6.8** | **+13.2** | N-sweep below · `matched_s10000/box-close/` · `awr_s10000_box-close.*` |
 | Square | **ep-0700** TopK lock `215024` | **36.0±7.5%** | **28.0±9.4%** | **31.2±5.2%** | **−8.0** | **−4.8** | Wave1+2 **DONE** · BoN **worst** Δ · AWR partial recover · replan probe **20.4** (highest) · `matched_s10000/square/` · `awr_s10000_square.*` · `eval_out/replan_probe_square/` |
 | Lift | **2 runs** (see below) | | | | | | |
 | — run A (mid-train) | **ep-0900** `144024` | **82.0±3.2%** | **84.8±4.6%** | **81.2±4.1%** | **+2.8** | **−0.8** | `matched_s10000/lift/` · `awr_s10000_lift.*` · replan **8.0** |
 | — run B (TopK lock / paper) | **ep-1400** `144024` | **87.6±2.2%** | **84.0±4.9%** | **85.2±3.9%** | **−3.6** | **−2.4** | `matched_s10000/lift_ep1400/` · `awr_s10000_lift_ep1400.*` · BoN&AWR < base · replan **9.3** |
 | **RoboCasa** *(literal-5; see § below)* | | | | | | | |
-| close_drawer | TBD lock | — | — | — | — | — | train live `041317` |
-| coffee_press_button | TBD lock (TopK sofar ep-600 @0.28) | — | — | — | — | — | resume `204916` |
-| turn_off_microwave | TBD | — | — | — | — | — | queued |
-| turn_off_sink_faucet | TBD | — | — | — | — | — | queued |
+| close_drawer | **ep-0500 @0.700** lock | Wave1 **RUNNING** | — | — | — | — | `my_models/robocasa_close_drawer_topk_ep0500_sr0.700.ckpt` · tmux `rc_wave1_close` |
+| coffee_press_button | **ep-0500 @0.600** lock | Wave1 **RUNNING** | — | — | — | — | `my_models/robocasa_coffee_press_button_topk_ep0500_sr0.600.ckpt` · tmux `rc_wave1_coffee` |
+| turn_off_microwave | TBD | — | — | — | — | — | no scratch fit yet |
+| turn_off_sink_faucet | TBD | — | — | — | — | — | no scratch fit yet |
 
+#### Table P — MW BoN N-sweep (N=8/16/32) ← **LOCKED 2026-07-26**
+
+Same paper protocol as Table P (`test_start_seed=10000`, `n_test=50`, `-n 5`, OAT8, `vote`).  
+**Source of truth (numbers):** `output/eval/matched_s10000/<suite>/bon_n{8,16,32}_n5/eval_log.json` → keys `mean_success_rate_mean` ± `mean_success_rate_std` (`num_exp=5`).  
+Primary paper BoN column above remains **N=8**; this block = inference-scaling appendix / figure. Paths relative to `/workspace/oat`.
+
+| Suite | baseline | BoN N=8 | BoN N=16 | BoN N=32 | Δ₁₆ | Δ₃₂ |
+|-------|----------|---------|----------|----------|-----|------|
+| stick-pull | **15.6±6.2%** | **25.6±2.6%** | **28.4±3.8%** | **29.6±8.8%** | **+12.8** | **+14.0** |
+| coffee-pull | **40.8±2.3%** | **43.2±4.8%** | **43.2±3.3%** | **41.2±3.0%** | **+2.4** | **+0.4** |
+| disassemble | **62.4±5.2%** | **63.2±6.3%** | **64.8±5.8%** | **64.8±3.0%** | **+2.4** | **+2.4** |
+| box-close | **59.6±7.5%** | **66.4±3.0%** | **70.4±3.6%** | **70.8±4.1%** | **+10.8** | **+11.2** |
+
+**Read (locked):** N=16→32 **flat / saturating** on disassemble & box-close (N32≈N16); coffee **regresses** at N=32 vs N=8/16; stick edges up but N=32 std blows up (8.8). Paper BoN column stays **N=8**; N=16 = useful knee (box-close +10.8, stick +12.8).
+
+##### Reproduce manifest — BASE_CKPT + eval dirs + logs + launchers
+
+| Suite | BASE_CKPT (same as Table P Wave1) | eval dirs (SR) | run logs | launcher |
+|-------|-----------------------------------|----------------|----------|----------|
+| stick-pull | `output/20260711/134439_train_oatpolicy_mw-stick-pull_st_N50/checkpoints/ep-0800_sr-0.212.ckpt` | `output/eval/matched_s10000/stick-pull/{bon_n16_n5,bon_n32_n5}/eval_log.json` | `logs/mw_stick_bon16_32_20260724_221255.log` | `scripts/_run_mw_tablep_bon16_32.sh stick-pull <gpu> <ckpt>` |
+| coffee-pull | `output/20260720/090816_train_oatpolicy_mw-coffee-pull_st_N50/checkpoints/ep-1000_sr-0.432.ckpt` | `output/eval/matched_s10000/coffee-pull/{bon_n16_n5,bon_n32_n5}/eval_log.json` | `logs/mw_coffee_bon16_32_20260724_221421.log` | idem |
+| disassemble | `output/20260711/134440_train_oatpolicy_mw-disassemble_st_N50/checkpoints/ep-1400_sr-0.700.ckpt` | `output/eval/matched_s10000/disassemble/{bon_n16_n5,bon_n32_n5}/eval_log.json` | `logs/mw_disassemble_bon16_32_20260725_061513.log` · **N32 rerun** `logs/mw_disassemble_bon32_only_20260725_161434.log` | `_run_mw_tablep_bon16_32.sh` then `_run_mw_tablep_bon32_only.sh` (canonical N32 = `*_bon32_only_*`) |
+| box-close | `output/20260711/134439_train_oatpolicy_mw-box-close_st_N50/checkpoints/ep-2000_sr-0.552.ckpt` | `output/eval/matched_s10000/box-close/{bon_n16_n5,bon_n32_n5}/eval_log.json` | `logs/mw_box-close_bon16_32_20260725_061513.log` · **N32 rerun** `logs/mw_box-close_bon32_only_20260725_175116.log` | idem |
+
+**Also:** queue orchestrator `scripts/_queue_mw_bon16_32_wave2.sh` · log `logs/mw_bon16_32_queue_20260724_223906.log`.  
+**Flags baked in launchers:** `-n 5 --n_test 50 --test_start_seed 10000 --use_k_tokens 8 --entropy_threshold 0 --temperature 1.0 --topk 10 --bon_free {16\|32} --bon_signal vote --n_parallel_envs 2`.  
+**Verified on cluster 2026-07-26:** all 8× `bon_n{16,32}_n5/eval_log.json` present; ckpts exist; listed logs exist.  
+**Note:** `summary.json` per suite still encodes Wave1 N=8 (+AWR) only — do **not** expect N16/32 inside it; cite `eval_log.json` above.
 **Wave1 BoN verified (2026-07-16):** can / stick — `eval_log.json` ↔ `summary.json` match. Primary artifacts = eval_logs under `matched_s10000/`.
 
-**Status (2026-07-23 ~21:00 MSK):** Square Wave1+2 **DONE** (base 36.0 / BoN 28.0 / AWR 31.2; Δ_BoN=**−8.0**, Δ_AWR=**−4.8**; replan probe **20.4** = max across suites). coffee-pull + Lift B Wave2 **DONE**. **RoboCasa:** coffee∥close **train+eval**; microwave/sink **queued**. See § RoboCasa / `RESULTS_ROBOCASA.md`.
+**Status (2026-07-26 ~02:10 MSK):** MW Table P BoN N-sweep **LOCKED** (4/4 suites, artifacts above). RM/MW Wave1+2 otherwise **DONE**. **RoboCasa:** scratch trains **STOPPED**; TopK locked close `ep-0500@0.700` / coffee `ep-0500@0.600`; literal-5 Wave1 **RUNNING** (`rc_wave1_close` GPU0, `rc_wave1_coffee` GPU1). See `RESULTS_ROBOCASA.md`.
 
 **Square read (high replan × worst BoN):** see replan § below — long horizon + weak base → many replans → vote compounds; AWR only half-recovers.
 
@@ -135,32 +163,41 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 | Artifact pattern | Examples |
 |------------------|----------|
 | AWR dataset | `my_datasets/awr_s10000_{can,stick-pull,box-close,disassemble,lift,lift_ep1400,coffee-pull,square}.npz` |
-| AWR ckpt | `my_models/awr_s10000_<suite>.ckpt` (+ `awr_s10000_lift_ep1400.ckpt` trained) |
+| AWR ckpt | `my_models/awr_s10000_<suite>.ckpt` (+ `awr_s10000_lift_ep1400.ckpt`) |
+| MW BoN N-sweep | **full paths in § Table P N-sweep manifest** · `output/eval/matched_s10000/<mw>/bon_n{16,32}_n5/eval_log.json` · `logs/mw_*_bon16_32_*.log` · `logs/mw_*_bon32_only_*.log` · launchers `scripts/_run_mw_tablep_bon16_32.sh` · `_run_mw_tablep_bon32_only.sh` · `_queue_mw_bon16_32_wave2.sh` |
+| RC TopK lock | `my_models/robocasa_<task>_topk_ep*_sr*.ckpt` + `…_topk_lock.txt` |
 | Wave2 log | `logs/awr_s10000_<suite>_wave2_gpu{0\|1}.log` |
 | Wave2 eval log | `logs/awr_s10000_<suite>_wave2_eval_gpu{0\|1}.log` |
 | AWR eval | `output/eval/matched_s10000/<suite>/awr_n5/` |
-| tmux (live) | `rc_close` / `rc_coffee` (+ watches / sink·microwave queues) |
+| tmux (live) | `rc_wave1_close` / `rc_wave1_coffee` |
 | ❌ never | `my_models/policy_awr_*` / old exploratory `awr_*.npz` / Table B |
 
 Paper Wave1 artifacts:  
 `output/eval/matched_s10000/<suite>/{baseline_n5,bon_n8_n5}/eval_log.json` + `summary.json` + `logs/matched_s10000_<suite>_gpu*.log`.
 
-**Lift** retrain **STOPPED**; run A matched **DONE** (incl. AWR + replan 8.0); run B Wave1 **DONE** (base 87.6 / BoN 84.0, Δ=−3.6); Wave2 collect+train **DONE** (`awr_s10000_lift_ep1400.*`), AWR eval **RUNNING**.
+MW BoN N-sweep (locked):  
+`output/eval/matched_s10000/{stick-pull,coffee-pull,disassemble,box-close}/bon_n{16,32}_n5/eval_log.json`  
++ `logs/mw_{stick,coffee}_bon16_32_*.log` · `logs/mw_{disassemble,box-close}_bon16_32_*.log` · `logs/mw_{disassemble,box-close}_bon32_only_*.log`.
+
+**Lift** retrain **STOPPED**; run A matched **DONE** (incl. AWR + replan 8.0); run B Wave1+2 **DONE**.
 
 **Имена файлов на suite (одинаковый шаблон):**
 
 ```text
 output/eval/matched_s10000/<suite>/
   baseline_n5/eval_log.json     # Wave1 single-sample OAT8  ← paper source of truth
-  bon_n8_n5/eval_log.json       # Wave1 BoN N=8 vote
+  bon_n8_n5/eval_log.json       # Wave1 BoN N=8 vote        ← primary paper BoN
+  bon_n16_n5/eval_log.json      # MW N-sweep only (locked)
+  bon_n32_n5/eval_log.json      # MW N-sweep only (locked)
   awr_n5/eval_log.json          # Wave2
-  summary.json                  # protocol + SR + Δ + paths
+  summary.json                  # protocol + SR + Δ + paths (N=8; N16/32 = eval_logs)
 my_datasets/awr_s10000_<suite>.npz
 my_models/awr_s10000_<suite>.ckpt
-logs/matched_s10000_<suite>_gpu*.log           # Wave1 (DONE baseline/bon)
+logs/matched_s10000_<suite>_gpu*.log           # Wave1 (DONE baseline/bon8)
+logs/mw_*_bon16_32_*.log / mw_*_bon32_only_*.log  # MW N-sweep
 logs/awr_s10000_<suite>_wave2_gpu*.log         # Wave2 collect+train
 logs/awr_s10000_<suite>_wave2_eval_gpu*.log    # Wave2 AWR eval only
-tmux: paper_s10000_<suite> | paper_w2_<suite>
+tmux: paper_s10000_<suite> | paper_w2_<suite> | rc_wave1_{close,coffee}
 ```
 
 ### Table P — Reproduce manifest (seeds + artifacts)
@@ -298,23 +335,40 @@ HW: **Tesla V100-SXM2-32GB**, torch **2.5.1+cu124**.
 | disassemble | `disassemble/latency.json` | `my_models/awr_s10000_disassemble.ckpt` | idem | |
 | box-close | `box-close/latency.json` | `my_models/awr_s10000_box-close.ckpt` | idem | |
 | **сводка** | `table_c.json` | — | — | current valid subset only; rebuild: `scripts/build_table_c.py` |
-| fair-KV rebuttal | `<suite>/latency_fair_kv.json` | same AWR ckpts | same bases | `fair_kv: true`; сводка `table_c_fair_kv.json` |
-| pre-proof archive | `_latency_pre_paperproof/<suite>_latency.json` | — | — | **не в статью** (1-й прогон) |
+| fair-KV rebuttal (**LOCKED**) | `<suite>/latency_fair_kv.json` | same AWR ckpts | same bases | `fair_kv: true`; `trials=8`; `batch=1`; сводка `table_c_fair_kv.json` |
+| pre-proof archive | `_latency_pre_paperproof/<suite>_latency.json` | — | — | Table C only; **не в статью** |
 
 Scripts: `scripts/measure_latency_paper.py`, `scripts/cluster_latency_paper_done.sh` (requires `OAT_GIT_COMMIT`), `scripts/build_table_c.py`.
 
 **Read for paper:** on the current valid subset, BoN median ≈ Single (~40–49 ms) — vision encode **один раз** (amortized), AR дешёвый → N=8 почти не бьёт policy-forward cost. AWR ≈ Single. Table C = inference cost only.
 
-**Table C′ — fair-KV rebuttal** (опциональная страховка; **не** заменяет Table C): Single/AWR = `predict_action` (KV-cache), BoN = `generate` (KV). Артефакты: `matched_s10000/<suite>/latency_fair_kv.json` + `table_c_fair_kv.json` (`fair_kv: true`). На всех 6 suite **BoN ≥ Single** (+0.8…+2.4 ms) — ожидаемый AR overhead при apples-to-apples; абсолют всё ещё ≈40–48 ms.
+**Table C′ — fair-KV rebuttal (PAPER-LOCKED 2026-07-24)** — **не** заменяет Table C. Single/AWR = `predict_action` (KV-cache), BoN = `generate` (KV).  
+**Репрезентативно:** batch=1; 8 trials × 10 timed reps; paper = **mean±std of per-trial medians**; obs=val; obs reset each trial; V100; `git_commit=38455fbc…`. Δ(BoN/AWR−Single) ≲ trial std → не интерпретировать как «быстрее».  
+**Канон (единственный):** `output/eval/matched_s10000/<suite>/latency_fair_kv.json` + `…/table_c_fair_kv.json` (`paper_locked: true`). Старые fair-KV прогоны / `_latency_fair_kv_pre_*` — **удалены**.
+
+| Suite | artifact | AWR ckpt | Base (Single/BoN) |
+|-------|----------|----------|-------------------|
+| Can | `output/eval/matched_s10000/can/latency_fair_kv.json` | `my_models/awr_s10000_can.ckpt` | Wave1 `base_ckpt` in json |
+| coffee-pull | `…/coffee-pull/latency_fair_kv.json` | `my_models/awr_s10000_coffee-pull.ckpt` | idem |
+| stick-pull | `…/stick-pull/latency_fair_kv.json` | `my_models/awr_s10000_stick-pull.ckpt` | idem |
+| disassemble | `…/disassemble/latency_fair_kv.json` | `my_models/awr_s10000_disassemble.ckpt` | idem |
+| box-close | `…/box-close/latency_fair_kv.json` | `my_models/awr_s10000_box-close.ckpt` | idem |
+| square | `…/square/latency_fair_kv.json` | `my_models/awr_s10000_square.ckpt` | idem |
+| lift | `…/lift/latency_fair_kv.json` | `my_models/awr_s10000_lift.ckpt` | idem |
+| **сводка** | `output/eval/matched_s10000/table_c_fair_kv.json` | — | `fair_kv: true`; `paper_locked: true` |
 
 | Suite | Single (KV) | BoN N=8 | AWR (KV) | BoN−Single |
 |-------|-------------|---------|----------|------------|
-| Can | **37.6** | **39.1** | **38.9** | **+1.6** |
-| stick-pull | **43.3** | **45.2** | **44.6** | **+1.8** |
-| disassemble | **45.1** | **47.3** | **44.4** | **+2.2** |
-| box-close | **45.3** | **46.2** | **47.8** | **+0.8** |
+| Can | **40.6±1.4** | **43.3±2.1** | **42.5±2.4** | **+2.8** |
+| coffee-pull | **49.2±1.4** | **49.2±2.1** | **50.0±2.5** | **−0.0** |
+| stick-pull | **46.6±2.0** | **47.4±2.1** | **45.7±1.3** | **+0.8** |
+| disassemble | **46.3±1.9** | **48.5±1.0** | **45.6±0.5** | **+2.2** |
+| box-close | **48.2±3.5** | **50.9±1.9** | **49.6±1.3** | **+2.7** |
+| square | **43.6±1.9** | **43.5±2.0** | **42.4±1.6** | **−0.1** |
+| lift | **40.9±1.8** | **43.0±1.9** | **40.6±1.6** | **+2.1** |
 
-В тексте: main = Table C (deployed paths, comparable); appendix/rebuttal = Table C′ (fair KV, BoN overhead ≲2.5 ms). `FAIR_KV=1 bash scripts/cluster_latency_paper_done.sh`.
+В тексте: main = Table C (deployed); appendix = Table C′ (fair KV; Single≈AWR≈BoN ~41–51 ms; BoN overhead within noise/≲3 ms).  
+Reproduce (do **not** overwrite locked unless intentional): `FAIR_KV=1 TRIALS=8 REPS=10 … bash scripts/cluster_latency_paper_done.sh`.
 
 ### Replan count probe (lab, 2026-07-21) — не paper-final
 
@@ -421,8 +475,8 @@ Paths: `output/eval/matched/<suite>/` (seed 1000). **Do not cite in paper.**
 
 | task | BASE_CKPT (TopK @2000) | baseline mean±SEM | BoN N=8 | AWR | Δ_BoN±SEM_Δ | Δ_AWR±SEM_Δ | artifacts |
 |------|------------------------|-------------------|---------|-----|-------------|-------------|-----------|
-| close_drawer | TBD | — | — | — | — | — | `matched_s10000/robocasa/close_drawer/` |
-| coffee_press_button | TBD (sofar `ep-0600_sr-0.280`) | — | — | — | — | — | `matched_s10000/robocasa/coffee_press_button/` |
+| close_drawer | **`my_models/robocasa_close_drawer_topk_ep0500_sr0.700.ckpt`** (src `20260724/220823_…/ep-0500_sr-0.700`) | Wave1 **RUNNING** | — | — | — | — | `matched_s10000/robocasa/close_drawer/` · lock `my_models/robocasa_close_drawer_topk_lock.txt` · tmux `rc_wave1_close` |
+| coffee_press_button | **`my_models/robocasa_coffee_press_button_topk_ep0500_sr0.600.ckpt`** (src `20260724/220823_…/ep-0500_sr-0.600`) | Wave1 **RUNNING** | — | — | — | — | `matched_s10000/robocasa/coffee_press_button/` · lock `my_models/robocasa_coffee_press_button_topk_lock.txt` · tmux `rc_wave1_coffee` |
 | turn_off_microwave | TBD | — | — | — | — | — | `matched_s10000/robocasa/turn_off_microwave/` |
 | turn_off_sink_faucet | TBD | — | — | — | — | — | `matched_s10000/robocasa/turn_off_sink_faucet/` |
 
@@ -438,14 +492,14 @@ output/eval/matched_s10000/robocasa/<task>/
 
 ### Reproduce manifest — data / tok / policy (cluster paths)
 
-| task | zarr | `ROBOCASA_SOURCE.txt` sha256 | Tokenizer (frozen MSE top) | Policy run (live) | Train status |
-|------|------|------------------------------|----------------------------|-------------------|--------------|
-| close_drawer | `data/robocasa/close_drawer_N200.zarr` (1.4G) | `b4a8219c740e0f58…723c2b` | `output/20260720/005709_train_oattok_close_drawer_N200/checkpoints/ep-1800_mse-0.002.ckpt` | `output/20260723/041317_train_oatpolicy_close_drawer_N200/` | **RUNNING** `rc_close` |
-| coffee_press_button | `data/robocasa/coffee_press_button_N200.zarr` (809M) | `3cd0cfca695c55bb…734adac` | `output/20260720/041753_train_oattok_coffee_press_button_N200/checkpoints/ep-1940_mse-0.003.ckpt` | `output/20260721/204916_train_oatpolicy_coffee_press_button_N200/` | **RESUME** `rc_coffee` · TopK sofar ep-600 @0.28 |
-| turn_off_microwave | `data/robocasa/turn_off_microwave_N200.zarr` (1.2G) | `183855a4c7e31588…28747a` | `output/20260720/061925_train_oattok_turn_off_microwave_N200/checkpoints/ep-2720_mse-0.002.ckpt` | *(fresh when queue starts)* | **queued** `rc_microwave` |
-| turn_off_sink_faucet | `data/robocasa/turn_off_sink_faucet_N200.zarr` (1.2G) | `778f8e86853469d8…1eb7f8` | `output/20260720/083055_train_oattok_turn_off_sink_faucet_N200/checkpoints/ep-3080_mse-0.002.ckpt` | *(fresh when queue starts)* | **queued** `rc_sink` (after coffee) |
+| task | zarr | `ROBOCASA_SOURCE.txt` sha256 | Tokenizer (frozen MSE top) | Policy run | Train status |
+|------|------|------------------------------|----------------------------|------------|--------------|
+| close_drawer | `data/robocasa/close_drawer_N200.zarr` (1.4G) | `b4a8219c740e0f58…723c2b` | `output/20260720/005709_train_oattok_close_drawer_N200/checkpoints/ep-1800_mse-0.002.ckpt` | **scratch** `output/20260724/220823_train_oatpolicy_close_drawer_N200/` | **STOPPED** · TopK lock ep-0500@0.700 · Wave1 live |
+| coffee_press_button | `data/robocasa/coffee_press_button_N200.zarr` (809M) | `3cd0cfca695c55bb…734adac` | `output/20260720/041753_train_oattok_coffee_press_button_N200/checkpoints/ep-1940_mse-0.003.ckpt` | **scratch** `output/20260724/220823_train_oatpolicy_coffee_press_button_N200/` | **STOPPED** · TopK lock ep-0500@0.600 · Wave1 live |
+| turn_off_microwave | `data/robocasa/turn_off_microwave_N200.zarr` (1.2G) | `183855a4c7e31588…28747a` | `output/20260720/061925_train_oattok_turn_off_microwave_N200/checkpoints/ep-2720_mse-0.002.ckpt` | *(none)* | **deferred** |
+| turn_off_sink_faucet | `data/robocasa/turn_off_sink_faucet_N200.zarr` (1.2G) | `778f8e86853469d8…1eb7f8` | `output/20260720/083055_train_oattok_turn_off_sink_faucet_N200/checkpoints/ep-3080_mse-0.002.ckpt` | *(none)* | **deferred** |
 
-**Plateau → Wave1:** `MIN_EPOCH=2000`, `N_BELOW=4`, `KILL_TRAIN=0`, `TRAIN_END_EPOCH=4500` · scripts `_launch_rc_plateau_to_literal5.sh` / `_launch_rc_baseline_watchers.sh`.
+**Lock → Wave1 (2026-07-26):** user stop-fit; TopK frozen from selection@2000; `FORCE_RERUN=1` literal-5 Wave1 on sibling `oat_mw_bon32_fix` (EGL: `MUJOCO_EGL_DEVICE_ID=0` after `CUDA_VISIBLE_DEVICES` remap).
 
 **Deleted junk (2026-07-23, 0 TopK only):** empty coffee hydra `20260721/202439_*`; OOM microwave `20260723/041317_*microwave*`; killed sink `20260723/041317_*sink*`.
 

@@ -102,13 +102,14 @@ def _sha256(path: Path, max_bytes: int = 64 * 1024 * 1024) -> Optional[str]:
     return h.hexdigest()
 
 
-def _stats(ms: List[float]) -> Dict[str, float]:
+def _stats(ms: List[float], *, trial_medians: Optional[List[float]] = None) -> Dict[str, Any]:
     arr = np.asarray(ms, dtype=np.float64)
     q25, q75 = np.percentile(arr, [25, 75])
-    return {
+    out: Dict[str, Any] = {
         "median_ms": float(np.median(arr)),
         "mean_ms": float(arr.mean()),
         "std_ms": float(arr.std(ddof=1) if len(arr) > 1 else 0.0),
+        "sem_ms": float(arr.std(ddof=1) / np.sqrt(len(arr)) if len(arr) > 1 else 0.0),
         "iqr_ms": float(q75 - q25),
         "p25_ms": float(q25),
         "p75_ms": float(q75),
@@ -117,6 +118,41 @@ def _stats(ms: List[float]) -> Dict[str, float]:
         "reps": int(len(arr)),
         "samples_ms": [float(x) for x in arr.tolist()],
     }
+    if trial_medians is not None and len(trial_medians) > 0:
+        tm = np.asarray(trial_medians, dtype=np.float64)
+        out["n_trials"] = int(len(tm))
+        out["trial_medians_ms"] = [float(x) for x in tm.tolist()]
+        out["trial_median_mean_ms"] = float(tm.mean())
+        out["trial_median_std_ms"] = float(tm.std(ddof=1) if len(tm) > 1 else 0.0)
+        # paper-facing: mean±std of per-trial medians
+        out["median_ms"] = out["trial_median_mean_ms"]
+        out["std_ms"] = out["trial_median_std_ms"]
+    return out
+
+
+def _time_mode_trials(
+    fn: Callable[[], None],
+    *,
+    prep: Callable[[str], None],
+    label: str,
+    warmup: int,
+    reps: int,
+    trials: int,
+    device: torch.device,
+) -> Dict[str, Any]:
+    """Independent trials: each = obs-reset + warmup + reps. Paper ± = std of trial medians."""
+    all_samples: List[float] = []
+    trial_medians: List[float] = []
+    for t in range(trials):
+        prep(f"{label} trial {t + 1}/{trials}")
+        samp = _time_calls(fn, warmup=warmup, reps=reps, device=device)
+        trial_medians.append(float(np.median(samp)))
+        all_samples.extend(samp)
+        print(
+            f"    trial {t + 1}/{trials}: median={trial_medians[-1]:.2f} ms "
+            f"(n={len(samp)})"
+        )
+    return _stats(all_samples, trial_medians=trial_medians)
 
 
 def _load_obs_batches(policy, cfg, device, n_batches: int, batch_size: int = 1):
@@ -161,7 +197,13 @@ def _time_calls(
 @click.command()
 @click.option("--suite", required=True, help="can|coffee-pull|stick-pull|disassemble|box-close|square")
 @click.option("-d", "--device", default="cuda:0")
-@click.option("--reps", default=10, show_default=True, help="timed reps per mode (protocol: 5–10)")
+@click.option("--reps", default=10, show_default=True, help="timed reps per trial (protocol: 5–10)")
+@click.option(
+    "--trials",
+    default=1,
+    show_default=True,
+    help="independent timing trials per mode; paper ± = std of per-trial medians",
+)
 @click.option("--warmup", default=20, show_default=True)
 @click.option("--n_obs", default=8, show_default=True, help="val obs batches to cycle")
 @click.option("--seed", default=0, show_default=True, help="timing-loop seed (not Table P env seed)")
@@ -184,6 +226,7 @@ def main(
     suite: str,
     device: str,
     reps: int,
+    trials: int,
     warmup: int,
     n_obs: int,
     seed: int,
@@ -192,6 +235,8 @@ def main(
 ):
     if reps < 5:
         raise click.ClickException("protocol requires >=5 timed reps")
+    if trials < 1:
+        raise click.ClickException("--trials must be >=1")
 
     summary_path = ROOT / f"output/eval/matched_s10000/{suite}/summary.json"
     if not summary_path.is_file():
@@ -231,7 +276,7 @@ def main(
     print(f"=== PAPER LATENCY {suite} [{mode_tag}] ===")
     print(f"base_ckpt={base_ckpt}")
     print(f"awr_ckpt={awr_ckpt}")
-    print(f"device={device} gpu={gpu_name} reps={reps} warmup={warmup}")
+    print(f"device={device} gpu={gpu_name} batch=1 reps={reps} trials={trials} warmup={warmup}")
 
     # --- base policy: single + bon ---
     print("Loading base policy...")
@@ -266,12 +311,19 @@ def main(
                 topk=10,
             )
 
-        _prep_mode("single predict_action (KV-cache)")
         modes["single"] = {
             "method": "predict_action",
             "ckpt": base_ckpt,
             "kwargs": {"use_k_tokens": 8, "temperature": 1.0, "topk": 10},
-            **_stats(_time_calls(run_single, warmup=warmup, reps=reps, device=device_t)),
+            **_time_mode_trials(
+                run_single,
+                prep=_prep_mode,
+                label="single predict_action (KV-cache)",
+                warmup=warmup,
+                reps=reps,
+                trials=trials,
+                device=device_t,
+            ),
         }
     else:
         def run_single():
@@ -283,14 +335,24 @@ def main(
                 topk=10,
             )
 
-        _prep_mode("single (OAT8 deployed adaptive)")
         modes["single"] = {
             "method": "predict_action_adaptive",
             "ckpt": base_ckpt,
             "kwargs": {"use_k_tokens": 8, "entropy_threshold": 0.0, "temperature": 1.0, "topk": 10},
-            **_stats(_time_calls(run_single, warmup=warmup, reps=reps, device=device_t)),
+            **_time_mode_trials(
+                run_single,
+                prep=_prep_mode,
+                label="single (OAT8 deployed adaptive)",
+                warmup=warmup,
+                reps=reps,
+                trials=trials,
+                device=device_t,
+            ),
         }
-    print(f"  single median={modes['single']['median_ms']:.2f} ms")
+    print(
+        f"  single = {modes['single']['median_ms']:.2f} ± {modes['single']['std_ms']:.2f} ms "
+        f"(trials={modes['single'].get('n_trials', 1)})"
+    )
 
     def run_bon():
         base_policy.predict_action_adaptive(
@@ -303,7 +365,6 @@ def main(
             bon_signal="vote",
         )
 
-    _prep_mode("bon N=8 vote")
     modes["bon"] = {
         "method": "predict_action_adaptive+bon_free",
         "ckpt": base_ckpt,
@@ -315,9 +376,20 @@ def main(
             "bon_free": 8,
             "bon_signal": "vote",
         },
-        **_stats(_time_calls(run_bon, warmup=warmup, reps=reps, device=device_t)),
+        **_time_mode_trials(
+            run_bon,
+            prep=_prep_mode,
+            label="bon N=8 vote",
+            warmup=warmup,
+            reps=reps,
+            trials=trials,
+            device=device_t,
+        ),
     }
-    print(f"  bon median={modes['bon']['median_ms']:.2f} ms")
+    print(
+        f"  bon = {modes['bon']['median_ms']:.2f} ± {modes['bon']['std_ms']:.2f} ms "
+        f"(trials={modes['bon'].get('n_trials', 1)})"
+    )
 
     # free base VRAM before AWR
     del base_policy
@@ -349,12 +421,19 @@ def main(
                 topk=10,
             )
 
-        _prep_mode("awr predict_action (KV-cache)")
         modes["awr"] = {
             "method": "predict_action",
             "ckpt": awr_ckpt,
             "kwargs": {"use_k_tokens": 8, "temperature": 1.0, "topk": 10},
-            **_stats(_time_calls(run_awr, warmup=warmup, reps=reps, device=device_t)),
+            **_time_mode_trials(
+                run_awr,
+                prep=_prep_mode,
+                label="awr predict_action (KV-cache)",
+                warmup=warmup,
+                reps=reps,
+                trials=trials,
+                device=device_t,
+            ),
         }
     else:
         def run_awr():
@@ -366,14 +445,24 @@ def main(
                 topk=10,
             )
 
-        _prep_mode("awr (single-sample deployed adaptive)")
         modes["awr"] = {
             "method": "predict_action_adaptive",
             "ckpt": awr_ckpt,
             "kwargs": {"use_k_tokens": 8, "entropy_threshold": 0.0, "temperature": 1.0, "topk": 10},
-            **_stats(_time_calls(run_awr, warmup=warmup, reps=reps, device=device_t)),
+            **_time_mode_trials(
+                run_awr,
+                prep=_prep_mode,
+                label="awr (single-sample deployed adaptive)",
+                warmup=warmup,
+                reps=reps,
+                trials=trials,
+                device=device_t,
+            ),
         }
-    print(f"  awr median={modes['awr']['median_ms']:.2f} ms")
+    print(
+        f"  awr = {modes['awr']['median_ms']:.2f} ± {modes['awr']['std_ms']:.2f} ms "
+        f"(trials={modes['awr'].get('n_trials', 1)})"
+    )
 
     sr = {
         "baseline": summary.get("baseline_n5"),
@@ -401,11 +490,17 @@ def main(
         "fairness": {
             "obs_counter_reset_per_mode": True,
             "warmup_per_mode": True,
+            "warmup_per_trial": True,
             "cudnn_deterministic": True,
+            "batch_size": 1,
+            "n_trials": trials,
+            "reps_per_trial": reps,
             "mode_order": ["single", "bon", "awr"],
             "single_path": "predict_action (KV)" if fair_kv else "predict_action_adaptive (no KV)",
             "awr_path": "predict_action (KV)" if fair_kv else "predict_action_adaptive (no KV)",
             "bon_path": "predict_action_bon_free / generate (KV)",
+            "paper_central": "mean of per-trial medians",
+            "paper_uncertainty": "std of per-trial medians",
         },
         "suite": suite,
         "measured_at": datetime.now(timezone.utc).isoformat(),
@@ -420,6 +515,8 @@ def main(
         "batch_size": 1,
         "warmup_excluded": True,
         "warmup": warmup,
+        "trials": trials,
+        "reps_per_trial": reps,
         "timing_seed": seed,
         "obs_source": "checkpoint_validation_dataset",
         "n_obs_batches": n_obs,
@@ -446,7 +543,11 @@ def main(
     print(f"wrote {out_path}")
     for k in ("single", "bon", "awr"):
         m = modes[k]
-        print(f"  {k}: median={m['median_ms']:.2f}  mean±std={m['mean_ms']:.2f}±{m['std_ms']:.2f}  n={m['reps']}")
+        nt = m.get("n_trials", 1)
+        print(
+            f"  {k}: {m['median_ms']:.2f} ± {m['std_ms']:.2f} ms "
+            f"(trial-medians n={nt}; pooled samples={m['reps']})"
+        )
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 # RoboCasa absolute baseline: wait for a *mature* TopK → lock → literal-5 Wave1.
 #
 # Conservative by default (do NOT kill half-trained fits):
-#   - MIN_EPOCH=2000  (rollout_every=100 → ≥20 train-evals before any lock)
+#   - MIN_EPOCH=3000  (rollout_every=100 → ≥30 train-evals before any lock)
 #   - N_BELOW=4       (need 4 consecutive evals strictly below the peak)
 #   - KILL_TRAIN=0    (lock + Wave1; leave train running unless explicitly set)
 #   - dead tmux alone never locks (resume / OOM) — need FINISHED log or
@@ -12,7 +12,7 @@
 #   TASK=close_drawer RUN_DIR=output/.../train_oatpolicy_close_drawer_N200 \
 #     TRAIN_TMUX=rc_close GPU=0 bash scripts/_launch_rc_plateau_to_literal5.sh
 #
-# Optional: SKIP_BON=1  KILL_TRAIN=1  N_BELOW=4  MIN_EPOCH=2000  POLL_SEC=60
+# Optional: SKIP_BON=1  KILL_TRAIN=1  N_BELOW=4  MIN_EPOCH=3000  POLL_SEC=60
 set -euo pipefail
 cd /workspace/oat
 
@@ -33,7 +33,7 @@ CKPT_DIR="${RUN_DIR}/checkpoints"
 TRAIN_TMUX="${TRAIN_TMUX:?set TRAIN_TMUX=...}"
 GPU="${GPU:-0}"
 N_BELOW="${N_BELOW:-4}"
-MIN_EPOCH="${MIN_EPOCH:-2000}"
+MIN_EPOCH="${MIN_EPOCH:-3000}"
 TRAIN_END_EPOCH="${TRAIN_END_EPOCH:-4500}"  # natural-end / late-dead lock bar
 KILL_TRAIN="${KILL_TRAIN:-0}"
 POLL_SEC="${POLL_SEC:-60}"
