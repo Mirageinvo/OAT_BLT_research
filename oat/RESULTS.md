@@ -163,6 +163,22 @@ logs/awr_s10000_<suite>_wave2_eval_gpu*.log    # Wave2 AWR eval only
 tmux: paper_s10000_<suite> | paper_w2_<suite>
 ```
 
+### Table P — n250 large-N refinement (`matched_s11000_n250`) — NOT the paper 50-seed pool
+
+**Protocol:** `test_start_seed=11000`, `n_test=250` (episodes `11000–11249`), `-n 3`, OAT8 (`--use_k_tokens 8 --entropy_threshold 0`, `T=1.0 topk=10`), BoN `--bon_free {8,16,32} --bon_signal vote`. Disjoint from selection (`1000–1049`) AND from paper Table P (`10000–10049`) → clean large-N probe, **not** 1:1 comparable to the 50-seed paper means. Base ckpts = HF `hf_rm_tablep/policies/{lift/ep-0900,can/ep-1700,square/ep-0700}`. Env stack fixed this run: robomimic **0.3.0** (stale lock had 0.2.0), robosuite 1.4.1, `env_robosuite.py` mujoco_py-guard patch (`scripts/patch_robomimic_mujoco_py.sh`). Artifacts: `output/eval/matched_s11000_n250/<suite>/{baseline_n3,bon_n{8,16,32}_n3}/`.
+
+| suite | baseline | BoN-8 | BoN-16 | BoN-32 | AWR-e100 (1×, BoN-16 distill) |
+|-------|----------|-------|--------|--------|-------------------------------|
+| **Lift** (ep-0900) | 0.905 ± 0.013 | **0.932 ± 0.012** (Δ+0.027) | **0.933 ± 0.002** (Δ+0.028) | 0.925 ± 0.010 (Δ+0.020) | **0.931 ± 0.022** (Δ+0.026, ~1.8σ) |
+| **Can** (ep-1700) | 0.763 ± 0.024 | **0.856 ± 0.022** (Δ+0.093) | 0.831 ± 0.013 (Δ+0.068) | 0.848 ± 0.016 (Δ+0.085) | **0.832 ± 0.031** (Δ+0.069, ~3.1σ) |
+| **Square** (ep-0700) | 0.307 ± 0.010 | 0.305 ± 0.022 (Δ−0.002) | 0.331 ± 0.027 (Δ+0.024) | 0.348 ± 0.028 (Δ+0.041) | 0.315 ± 0.036 (Δ+0.008, ~0.4σ) |
+
+**Reads:**
+- **BoN (vote) positive on all 3 suites** at n250. Can strongest (**+0.093 @ N=8, ~4.9σ**; lowest baseline → most headroom); Lift +0.027 @ N=8 (~2.6σ; near ceiling → little headroom, but BoN-16 std ±0.002 = very stable); Square weak/noisy (N=8 ≈ baseline, N=32 +0.041 ~2.4σ, std ~0.028).
+- **Scaling saturates at N=8.** Lift/Can gain nothing (even dip slightly) from N=16/32; only Square trends up with N but within noise. → operating point **N=8**; N=16/32 waste compute. Matches LIBERO (vote plateau ~N=16).
+- **🎯 Square does NOT reproduce Table P's BoN-negative.** Paper Table P (n=50, seed 10000) had Square BoN **−8.0pp** (0.360→0.280) but with std **±9.4%**. At n250 BoN is flat-to-mild-positive (−0.002…+0.041) → the "BoN hurts Square" was almost certainly **n=50 sampling noise**, not a real failure mode. Argues for larger-N eval.
+- **🎯 AWR (BoN-16 distillation) recovers ~the full BoN gain at 1× inference.** `train_awr.py --beta 0.5 --beta_kl 0.05 --epochs 100 --ordering uniform` on `my_datasets/awr_bon16_{lift,can,square}.npz` (20k chunks each, **single-task** `tasks covered=1`, source per-episode SR 0.974/0.859/0.355 = BoN-16 rollouts). Single-sample AWR: **Lift 0.931 ≈ BoN-16 0.933** (Δ+0.026 vs base), **Can 0.832 ≈ BoN-16 0.831** (Δ+0.069, ~3.1σ) — i.e. the BoN gain **without** inference-time selection. **Square flat** (0.315 ≈ base 0.307, Δ+0.008 ~0.4σ): the hard/noisy suite where neither BoN nor AWR moves SR, but AWR does NOT drop below base. **Beats the LIBERO precedent** (there AWR landed ~0.04–0.05 below the BoN source; here single-task RM + high source SR → distillation captures ~all of it). KL drift to 1.21 @ e100 did **not** hurt (AWR ≥ base everywhere) → `beta_kl=0.05` fine, no `0.1` hedge needed. Ckpts `my_models/awr_bon16_{lift,can,square}_e100.ckpt`; evals `output/eval/matched_s11000_n250/<suite>/awr_bon16_e100_n3/`.
+
 ### Table P — Reproduce manifest (seeds + artifacts)
 
 **Зачем:** один канон для reproduce / appendix — *на чём училось, чем выбирали ckpt, чем мерили paper SR*.  

@@ -4,8 +4,8 @@
 # Robosuite's stock check requires MUJOCO_EGL_DEVICE_ID to appear in CUDA_VISIBLE_DEVICES,
 # which breaks single-GPU isolation on non-zero GPUs.
 set -euo pipefail
-cd /workspace/oat
-VENV="${VENV:-/workspace/oat/.venv}"
+cd "$(cd "$(dirname "$0")/.." && pwd)"
+VENV="${VENV:-.venv}"
 # shellcheck disable=SC1091
 source "${VENV}/bin/activate"
 

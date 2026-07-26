@@ -13,7 +13,7 @@
 #   SKIP_AWR=1 SUITE=box-close GPU=1 bash scripts/cluster_matched_triplet.sh
 #   AWR_CKPT=my_models/awr_s10000_can.ckpt SUITE=can GPU=0 bash scripts/cluster_matched_triplet.sh
 set -euo pipefail
-cd /workspace/oat
+cd "$(cd "$(dirname "$0")/.." && pwd)"
 source .venv/bin/activate
 export MUJOCO_GL=egl
 export OAT_USE_UV_RUN=0
