@@ -2,10 +2,13 @@
 # RoboCasa Wave 2 — BoN-distill AWR (ROBOCASA.md §5).
 #
 # Locked vs RM/MW wave2: AWR train --epochs 100 (not 30).
+# Coffee mentee track: BON_N=16 (BoN16-distill). Default BON_N=8 matches ROBOCASA.md §5.
 # Uses .venv_robocasa; literal-5 eval (not -n 5).
 #
 # Usage (cluster docker):
 #   SUITE=close_drawer BASE_CKPT=/path/to.ckpt GPU=0 \
+#     bash scripts/cluster_robocasa_literal5_wave2_awr.sh
+#   SUITE=coffee_press_button BASE_CKPT=... GPU=0 BON_N=16 \
 #     bash scripts/cluster_robocasa_literal5_wave2_awr.sh
 #
 # Optional: FORCE_RECOLLECT=1  SKIP_COLLECT=1  SKIP_TRAIN=1  SKIP_EVAL=1
@@ -39,8 +42,16 @@ BETA_KL="${BETA_KL:-0.05}"
 SEEDS=(10000 10001 10002 10003 10004)
 N_TEST="${N_TEST:-50}"
 OUT_ROOT="${OUT_ROOT:-${ROOT}/output/eval/matched_s10000/robocasa/${SUITE}}"
-AWR_DS="${AWR_DS:-${ROOT}/my_datasets/awr_s10000_robocasa_${SUITE}.npz}"
-AWR_CKPT="${AWR_CKPT:-${ROOT}/my_models/awr_s10000_robocasa_${SUITE}.ckpt}"
+AWR_DS="${AWR_DS:-${ROOT}/my_datasets/awr_s10000_robocasa_${SUITE}_bon${BON_N}.npz}"
+AWR_CKPT="${AWR_CKPT:-${ROOT}/my_models/awr_s10000_robocasa_${SUITE}_bon${BON_N}_e${EPOCHS}.ckpt}"
+# Eval folder prefix: BON_N=8 → awr_seed*; else awr_bon${N}_seed* (override with AWR_METHOD=...).
+if [[ -z "${AWR_METHOD:-}" ]]; then
+  if [[ "${BON_N}" == "8" ]]; then
+    AWR_METHOD="awr"
+  else
+    AWR_METHOD="awr_bon${BON_N}"
+  fi
+fi
 LOG="${LOG:-${OUT_ROOT}/wave2_awr_literal5.log}"
 FORCE_RECOLLECT="${FORCE_RECOLLECT:-0}"
 SKIP_COLLECT="${SKIP_COLLECT:-0}"
@@ -69,6 +80,7 @@ mkdir -p "${OUT_ROOT}" my_datasets my_models logs
   echo "[wave2] awr_epochs=${EPOCHS} beta=${BETA} beta_kl=${BETA_KL}"
   echo "[wave2] awr_ds=${AWR_DS}"
   echo "[wave2] awr_ckpt=${AWR_CKPT}"
+  echo "[wave2] awr_method=${AWR_METHOD}"
   echo "[wave2] eval seeds=${SEEDS[*]} (literal-5)"
   echo "[wave2] started $(date -Iseconds)"
 } | tee "${LOG}"
@@ -117,15 +129,15 @@ if [[ "${SKIP_TRAIN}" != "1" ]]; then
 fi
 
 if [[ "${SKIP_EVAL}" != "1" ]]; then
-  echo "[STEP3] literal-5 AWR eval" | tee -a "${LOG}"
+  echo "[STEP3] literal-5 AWR eval (method=${AWR_METHOD})" | tee -a "${LOG}"
   for seed in "${SEEDS[@]}"; do
-    out="${OUT_ROOT}/awr_seed${seed}"
+    out="${OUT_ROOT}/${AWR_METHOD}_seed${seed}"
     if [[ -f "${out}/eval_log.json" && "${FORCE_RERUN:-0}" != "1" ]]; then
       echo "[skip] ${out}/eval_log.json exists" | tee -a "${LOG}"
       continue
     fi
-    mkdir -p "${out}"
-    echo "[run] awr seed=${seed} -> ${out}" | tee -a "${LOG}"
+    # Do NOT mkdir before eval_policy_sim (it prompts if the dir exists empty).
+    echo "[run] ${AWR_METHOD} seed=${seed} -> ${out}" | tee -a "${LOG}"
     "${PYTHON}" scripts/eval_policy_sim.py \
       -c "${AWR_CKPT}" \
       -o "${out}" \

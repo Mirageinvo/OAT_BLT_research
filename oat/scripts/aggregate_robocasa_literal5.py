@@ -2,7 +2,7 @@
 """Aggregate RoboCasa literal-5-seed Wave1/2 evals (ROBOCASA.md §4).
 
 Reads:
-  <root>/{baseline,bon_n8,awr}_seed{10000..10004}/eval_log.json
+  <root>/{baseline,bon_n8,bon_n16,bon_n32,awr,awr_bon16}_seed{10000..10004}/eval_log.json
 
 Writes:
   <root>/summary_literal5.json
@@ -24,7 +24,8 @@ import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 SEEDS = (10000, 10001, 10002, 10003, 10004)
-METHODS = ("baseline", "bon_n8", "awr")
+# Order is display-only; missing methods are skipped.
+METHODS = ("baseline", "bon_n8", "bon_n16", "bon_n32", "awr", "awr_bon16")
 
 
 def _sr_from_eval_log(path: pathlib.Path) -> float:
