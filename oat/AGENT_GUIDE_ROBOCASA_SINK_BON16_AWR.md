@@ -53,34 +53,34 @@ Repo: [`Mirageinvo/OAT_BLT_research`](https://github.com/Mirageinvo/OAT_BLT_rese
 
 ## 2. What to download from HuggingFace
 
-### 2.1 Repo (shared pack for sink + microwave)
+### 2.1 Repos
 
 | Role | HF repo | Type |
 |------|---------|------|
-| **Models + zarr + Wave1** | [`hackhackhack66666/rc-last-two`](https://huggingface.co/datasets/hackhackhack66666/rc-last-two) | dataset |
+| **Models / tokenizers** | [`hackhackhack66666/rc-model-two-last`](https://huggingface.co/hackhackhack66666/rc-model-two-last) | model |
+| **Zarr + Wave1 logs** | [`hackhackhack66666/rc-last-two`](https://huggingface.co/datasets/hackhackhack66666/rc-last-two) | dataset |
+
+Guide (this file): [`AGENT_GUIDE_ROBOCASA_SINK_BON16_AWR.md`](https://github.com/Mirageinvo/OAT_BLT_research/blob/robocasa/oat/AGENT_GUIDE_ROBOCASA_SINK_BON16_AWR.md) on branch `robocasa`.
 
 Videos under `media/` are **optional**. Paper needs `eval_log.json` only.
 
-### 2.2 Layout (`rc-last-two`)
+### 2.2 Layout
 
+**Models (`rc-model-two-last`):**
 ```
-policies/
-  robocasa_turn_off_sink_faucet_topk_ep0500_sr0.580.ckpt   # ~893M
-  robocasa_turn_off_sink_faucet_topk_lock.txt
-  robocasa_turn_off_microwave_topk_ep0500_sr0.620.ckpt     # (other task)
-  robocasa_turn_off_microwave_topk_lock.txt
-tokenizers/
-  sink_ep-3080_mse-0.002.ckpt                              # ~89M
-  microwave_ep-2720_mse-0.002.ckpt
-turn_off_sink_faucet_N200.zarr/                            # ~1.2G
-  ROBOCASA_SOURCE.txt
-turn_off_microwave_N200.zarr/
-wave1_turn_off_sink_faucet/                                # when uploaded
-  summary_literal5.json                                    # baseline (+ bon_n8)
-  baseline_seed{10000..10004}/eval_log.json
-  bon_n8_seed{10000..10004}/eval_log.json                  # may arrive later
+policies/robocasa_turn_off_sink_faucet_topk_ep0500_sr0.580.ckpt   # ~893M
+policies/robocasa_turn_off_sink_faucet_topk_lock.txt
+policies/robocasa_turn_off_microwave_topk_ep0500_sr0.620.ckpt     # sibling task
+tokenizers/sink_ep-3080_mse-0.002.ckpt
+tokenizers/microwave_ep-2720_mse-0.002.ckpt
+```
+
+**Dataset (`rc-last-two`):**
+```
+turn_off_sink_faucet_N200.zarr.tar     # ~1.2G — tar -xf → zarr/
+turn_off_microwave_N200.zarr.tar
+wave1_turn_off_sink_faucet/            # when uploaded (baseline ± bon_n8)
 wave1_turn_off_microwave/
-README.md
 ```
 
 ### 2.3 Mentee: download + place under `oat/`
@@ -91,17 +91,18 @@ mkdir -p data/robocasa my_models my_datasets \
   output/eval/matched_s10000/robocasa/turn_off_sink_faucet \
   output/20260720/083055_train_oattok_turn_off_sink_faucet_N200/checkpoints
 
-# --- full pack ---
-huggingface-cli download hackhackhack66666/rc-last-two \
-  --repo-type dataset --local-dir /tmp/rc_last_two
-# or: git xet install && git clone https://huggingface.co/datasets/hackhackhack66666/rc-last-two /tmp/rc_last_two
-
-cp /tmp/rc_last_two/policies/robocasa_turn_off_sink_faucet_topk_ep0500_sr0.580.ckpt my_models/
-cp /tmp/rc_last_two/policies/robocasa_turn_off_sink_faucet_topk_lock.txt my_models/
-cp /tmp/rc_last_two/tokenizers/sink_ep-3080_mse-0.002.ckpt \
+# --- models ---
+huggingface-cli download hackhackhack66666/rc-model-two-last \
+  --repo-type model --local-dir /tmp/rc_model_two_last
+cp /tmp/rc_model_two_last/policies/robocasa_turn_off_sink_faucet_topk_ep0500_sr0.580.ckpt my_models/
+cp /tmp/rc_model_two_last/policies/robocasa_turn_off_sink_faucet_topk_lock.txt my_models/
+cp /tmp/rc_model_two_last/tokenizers/sink_ep-3080_mse-0.002.ckpt \
   output/20260720/083055_train_oattok_turn_off_sink_faucet_N200/checkpoints/ep-3080_mse-0.002.ckpt
 
-rsync -a /tmp/rc_last_two/turn_off_sink_faucet_N200.zarr data/robocasa/
+# --- dataset + Wave1 ---
+huggingface-cli download hackhackhack66666/rc-last-two \
+  --repo-type dataset --local-dir /tmp/rc_last_two
+tar -xf /tmp/rc_last_two/turn_off_sink_faucet_N200.zarr.tar -C data/robocasa/
 if [[ -d /tmp/rc_last_two/wave1_turn_off_sink_faucet ]]; then
   rsync -a /tmp/rc_last_two/wave1_turn_off_sink_faucet/ \
     output/eval/matched_s10000/robocasa/turn_off_sink_faucet/
