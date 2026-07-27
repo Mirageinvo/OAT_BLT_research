@@ -43,7 +43,9 @@ richer tree search over the ordered tokens does not improve on it, in contrast t
 its benefit for open-loop generation." (SoTo contrast; do NOT include unmeasured.)]
 
 [FUTURE-PROOF: to add benchmarks at camera-ready, just append to the list:
-"...LIBERO, robomimic, MetaWorld, and RoboCasa" (or + RoboTwin).]
+"...LIBERO, robomimic, MetaWorld, and RoboCasa".
+NOTE: RoboTwin was attempted and DROPPED (bimanual + scripted narrow demos + absolute-joint →
+covariate shift, base ~3%, no headroom; out of OAT's regime — see PAPER_MASTER §8). Do NOT list it.]
 
 --------------------------------------------------------------------------------
 PENDING UPGRADES (before/at deadlines)
@@ -52,11 +54,10 @@ PENDING UPGRADES (before/at deadlines)
   (measure_latency_adaptive.py). If BoN latency is ~flat -> upgrade
   "reuses a single perception pass across all candidates" to
   "at negligible added latency" + a table in the body.
-- BENCHMARKS (camera-ready, Dec 14, if accepted): RoboCasa (robosuite) and/or
-  RoboTwin (SAPIEN, bimanual) strengthen the SAME claim. Then edit the benchmark
-  sentence: "...spanning two simulators -- LIBERO, robomimic, MetaWorld, and
-  RoboCasa" or "...spanning three simulators and a bimanual embodiment -- ...,
-  RoboTwin." No claim of these until measured.
+- BENCHMARKS (camera-ready, Dec 14, if accepted): RoboCasa (robosuite) strengthens the
+  SAME claim. Then edit the benchmark sentence: "...spanning two simulators -- LIBERO,
+  robomimic, MetaWorld, and RoboCasa". No claim until measured.
+  (RoboTwin DROPPED — out of regime, base ~3%; see PAPER_MASTER §8. Not a camera-ready target.)
 
 --------------------------------------------------------------------------------
 HONESTY NOTES (why each claim is defensible)

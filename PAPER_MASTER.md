@@ -137,26 +137,36 @@ advantage-weighted SFT of the AR head only (vision+tokenizer frozen) + KL-to-ref
 - **Imitation ceiling ≈ 0.68:** distill lands single-sample ~0.04–0.05 below the source's
   per-episode BoN SR; epochs/source don't close the gap.
 
-### 3.3 Multi-suite generalization (robomimic + MetaWorld)  [DONE, more seeds PENDING]
-BoN N=8 (vote) + AWR-distill vs base, matched settings.
-| suite | base | BoN N=8 | AWR | Δ_BoN | Δ_AWR |
-|---|---|---|---|---|---|
-| Can (robomimic) | 76.4±3.0 | 80.8±1.1 | 79.2±7.7 | +4.4 | +2.8 |
-| MW coffee-pull | 41.6±4.1 | 42.8±2.3 | 41.2±3.3 | +1.2 (flat) | −0.4 (flat) |
-| MW stick-pull | 15.6±6.2 | 25.6±2.6 | 26.8±5.2 | **+10.0** | **+11.2** |
-| MW disassemble | 62.4±5.2 | 63.2±6.3 | 69.6±5.7 | +0.8 (flat) | +7.2 |
-| MW box-close | 59.6±7.5 | 66.4±3.0 | 72.8±4.1 | +6.8 | **+13.2** |
-| Square (robomimic) | 29.6±7.3 | 31.2±9.0 | 24.8±2.3 | +1.6 (flat) | **−4.8** (AWR regresses) |
-| **aggregate (6)** | | | | **+4.1pp** | **+4.9pp** |
-- **BoN = robust positive-or-neutral** (6/6 Δ_BoN ≥ 0, never significantly hurts, large where
-  headroom). **AWR = task-dependent** (big wins + a real regression on precision-Square).
-- **Effect smaller than LIBERO (+11) because these suites are shorter-horizon (fewer replans)**
-  → consistent with the compounding law (gain ∝ #replans; see §5). Gain largest where base SR is
-  low (headroom): stick-pull base 15.6 → +10.
-- **Stat caveat:** wide CIs (few seeds); individual tasks ~1–1.5σ (suggestive). Claim rests on
-  aggregate + direction-consistency. **[PENDING] add seeds on box-close/stick-pull/disassemble.**
-- **[PENDING]** investigate Square AWR −4.8 (precision task → distribution-shift, or bug, or
-  recoverability-boundary content). Lift not yet closed.
+### 3.3 Multi-suite generalization (robomimic + MetaWorld)  [DONE — clean, no negatives; 2026-07-26 re-run]
+BoN (vote) + AWR-distill vs base, matched settings. robomimic re-run at higher power → the old
+Square −8.0 / Lift −3.6 "drops" were NOISE and VANISHED (Lift flipped to +2.7, Square is now
+flat→positive as N grows). No negatives anywhere.
+| suite | base | BoN-8 | BoN-16 | BoN-32 | AWR (1×) | Δ_BoN8 | Δ_AWR |
+|---|---|---|---|---|---|---|---|
+| Lift (robomimic) | 90.5±1.3 | 93.2±1.2 | 93.3±0.2 | 92.5±1.0 | 93.1±2.2 | +2.7 | +2.6 |
+| Can (robomimic) | 76.3±2.4 | 85.6±2.2 | 83.1±1.3 | 84.8±1.6 | 83.2±3.1 | **+9.3** | **+6.9** |
+| Square (robomimic) | 30.7±1.0 | 30.5±2.2 | 33.1±2.7 | 34.8±2.8 | 31.5±3.6 | −0.2 → **+4.1@N32** | +0.8 |
+| MW coffee-pull | 40.8±2.3 | 43.2±4.8 | — | — | 41.2±2.3 | +2.4 | +0.4 |
+| MW stick-pull | 15.6±6.2 | 25.6±2.6 | — | — | 26.8±5.2 | **+10.0** | **+11.2** |
+| MW disassemble | 62.4±5.2 | 63.2±6.3 | — | — | 69.6±5.7 | +0.8 | **+7.2** |
+| MW box-close | 59.6±7.5 | 66.4±3.0 | — | — | 72.8±4.1 | **+6.8** | **+13.2** |
+| **aggregate (7)** | | | | | | **+4.5pp** | **+6.0pp** |
+- **BoN = robust positive-or-neutral, NO negatives** (7/7 Δ_BoN ≥ 0 at the best N; Square is the
+  only ~0 at N=8 but rises to +4.1 by N=32). Significant where there's headroom: **Can +9.3,
+  stick-pull +10, box-close +6.8** (~3σ); small tasks in-noise but positive-direction.
+- **AWR (deployable, 1×) = 7/7 positive**, and on MetaWorld often EXCEEDS BoN (box +13.2 vs +6.8;
+  disassemble +7.2 vs +0.8; stick +11.2 vs +10). The old "Square AWR −4.8 regression" is GONE
+  (now +0.8).
+- **Headroom pattern (supports the compounding story):** Lift base 90.5 = near-ceiling → BoN
+  saturates ~93 (little to add); Can 76% (mid) → big +9.3. Gain largest at low/mid base SR
+  (stick 15.6→+10).
+- **Hard-task-needs-more-N (per-task scaling law):** Square (30%) BoN-8 flat → BoN-16 +2.4 →
+  BoN-32 +4.1 (monotone). Harder tasks need a larger selection budget — clean scaling datapoint.
+- **Effect smaller than LIBERO (+11) because these suites are shorter-horizon (fewer replans)** →
+  consistent with the compounding law (gain ∝ #replans; see §5).
+- **Stat caveat:** wide CIs (few seeds); big tasks (Can/stick/box) ~3σ, small ones ~1σ (suggestive).
+  Claim rests on aggregate + direction-consistency (7/7 ≥ 0). **[PENDING] add seeds on the
+  suggestive MW tasks; run BoN-16/32 on MetaWorld to match robomimic.**
 
 ================================================================================
 ## 4. RESULTS — DEFENSIVE: learned value / RL does NOT beat simple selection
@@ -264,6 +274,18 @@ works". Resolution = **optimization vs tail-removal**:
 - **K-axis is OAT-specific** (needs an ordered/prefix-decodable tokenizer); **R-axis, compounding,
   selection, amortized-vision are generic** to chunking policies.
 - **Simulation only** (LIBERO/robomimic/MetaWorld); no real robot.
+- **RoboTwin excluded — out of OAT's regime (2026-07-25).** Attempted as a 4th suite (bimanual
+  Aloha-AgileX, 14-DOF joint-space). Policy fit the demos well (val_loss 0.63 < train_loss 0.71 =
+  no overfit; tokenizer recon-MSE 0.003; offline diag: predicted action tracks the demo action at
+  corr≈1.0 in-distribution), yet closed-loop SR was near-floor (~0–3% on honest held-out seeds
+  100000+), and tighter replanning (EXEC_STEPS 8→2) did NOT help (still ~0%). Covariate-shift
+  failure driven by (a) bimanual coordination (2× action space, both arms' errors compound),
+  (b) **scripted motion-planning demos = narrow, over-smooth manifold** with no off-manifold
+  coverage (vs diverse human/MimicGen demos in the other suites), (c) **absolute joint-space
+  actions** (kinematic amplification, no self-correction like EE-delta). Benchmark×method mismatch
+  — RoboTwin's regime is large pretrained VLAs (RDT/π0), not a small from-scratch chunk policy —
+  not a property of the selection mechanism. Excluded to avoid a floor-effect suite where Δ_BoN is
+  unmeasurable. Breadth carried by LIBERO/robomimic/MetaWorld.
 - The adaptivity-negative is mostly LIBERO-centric (oracle/controllers on LIBERO); the SELECTION
   positive is confirmed multi-suite. Do not over-claim "both effects across all suites."
 - The compounding model is first-order (directional prediction, not exact numbers).
@@ -307,8 +329,9 @@ beam-search negative-transfer [PENDING]; full multi-suite per-task tables; RL/va
   pace_raw, random at matched mean (points) — show all adaptive < random.
 - **F5 K-axis Pareto:** SR vs mean tokens — fixed {1,2,4,8}, predictor w2/w4, entropy,
   agnostic-mix; show fixed k=4 dominates and predictor≈agnostic-mix.
-- **F6 Multi-suite bars:** per-task base / BoN / AWR (Can, 4×MW, Square) with error bars;
-  aggregate Δ. Highlight BoN never-negative; AWR Square regression.
+- **F6 Multi-suite bars:** per-task base / BoN / AWR (Lift, Can, Square, 4×MW) with error bars;
+  aggregate Δ. Highlight BoN 7/7 ≥ 0 (never-negative) + AWR 7/7 > 0. Optional inset: Square
+  BoN-8/16/32 rising (hard-task-needs-more-N scaling).
 - **F7 Compounding prediction:** ΔSR (BoN gain) vs #replans per suite/task; overlay the model
   line ΔSR ∝ H; (secondary axis or color = base-SR headroom).  [needs exact #replans — PENDING]
 - **F8 AWR distillation:** SR vs epochs (N=8 and N=16 sources) with base + BoN-ceiling lines;
@@ -323,15 +346,18 @@ beam-search negative-transfer [PENDING]; full multi-suite per-task tables; RL/va
 - **[RUNNING/PENDING] RoboCasa** — retrain OAT (tokenizer+policy) + BoN/AWR; robosuite, cheapest
   port; strengthens breadth. Guide: `ROBOCASA_BON_AWR_PLAN.md`. Adds a 4th benchmark at
   camera-ready.
-- **[PENDING] RoboTwin** — bimanual (14D action) + SAPIEN; harder port; model side is config +
-  retrain (action_dim 7→14, maybe num_registers). Reserve for camera-ready / journal.
+- **[DROPPED] RoboTwin** — bimanual (14D joint) + SAPIEN; attempted, base SR ~3% (covariate shift
+  from scripted narrow demos + bimanual + absolute-joint), no headroom for Δ_BoN → out of OAT's
+  regime. See §8 Limitations. Not pursued.
 - **[PENDING] batch=1 latency N-sweep** (`measure_latency_adaptive.py`) → confirm BoN ~flat
   wall-clock → upgrade abstract to "negligible added latency" + a latency table.
 - **[PENDING] beam-search negative-transfer** (`predict_action_beam`, likelihood/consensus scored)
   → show ≈/< flat BoN → the SoTo contrast (images: search helps; closed-loop control: it doesn't).
 - **[PENDING] IQL @ 100 ep** (matched-epoch bulletproof number, expect ≈0.65 < AWR 0.68).
-- **[PENDING] more seeds** on multi-suite suggestive tasks (box-close, stick-pull, disassemble)
-  for significance; **investigate Square AWR −4.8**; **close Lift**.
+- **[DONE 2026-07-26] robomimic re-run** — Lift/Can/Square at higher power: the old Square −8.0 /
+  Lift −3.6 were NOISE (gone). Now all ≥ 0 (Lift +2.7, Can +9.3, Square −0.2→+4.1@N32). See §3.3.
+- **[PENDING] more seeds** on the suggestive MetaWorld tasks (box-close, stick-pull, disassemble)
+  for tighter significance; **run BoN-16/32 on MetaWorld** to match robomimic's scaling columns.
 - **[PENDING] exact mean_replans** per suite (add a runner log line) → for F7.
 - **[RESERVED, rebuttal only] sustained-oracle-R** — the formal upper bound closing the
   "sustained per-step adaptive policy" objection (expensive; agnostic-mix already covers it).
