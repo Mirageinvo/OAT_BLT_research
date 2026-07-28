@@ -23,6 +23,7 @@ BON_NS="${BON_NS:-8,16,32}"                   # BoN N values to time
 REPS="${REPS:-10}"
 TRIALS="${TRIALS:-8}"
 WARMUP="${WARMUP:-20}"
+N_OBS="${N_OBS:-50}"                          # val obs batches cycled during timing (task variety)
 FAIR_KV="${FAIR_KV:-1}"                        # 1 = apples-to-apples KV (Table C'); 0 = deployed (Table C)
 # ------------------------------------------------------------------------------
 
@@ -77,7 +78,7 @@ fi
   echo "  workdir=${WORKDIR}  venv=${VENV}  gpu=${CUDA_VISIBLE_DEVICES}  device=${OAT_DEVICE}"
   echo "  suite=${SUITE}  base_ckpt=${BASE_CKPT}"
   echo "  modes=single + bon(${BON_NS})  AWR=skipped  protocol=${LABEL}"
-  echo "  reps=${REPS} trials=${TRIALS} warmup=${WARMUP} batch=1"
+  echo "  reps=${REPS} trials=${TRIALS} warmup=${WARMUP} n_obs=${N_OBS} batch=1"
   echo "  git=${OAT_GIT_COMMIT} (${OAT_GIT_BRANCH}) dirty=${OAT_GIT_DIRTY}"
   echo "  out=${OUT_JSON}"
   echo "===================================="
@@ -89,7 +90,7 @@ CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES}" MUJOCO_EGL_DEVICE_ID=0 MUJOCO_GL=
     --suite "${SUITE}" \
     --base_ckpt "${BASE_CKPT}" \
     -d "${OAT_DEVICE}" \
-    --reps "${REPS}" --trials "${TRIALS}" --warmup "${WARMUP}" \
+    --reps "${REPS}" --trials "${TRIALS}" --warmup "${WARMUP}" --n_obs "${N_OBS}" \
     "${EXTRA_FLAGS[@]}" \
     2>&1 | tee -a "${LOG}"
 
