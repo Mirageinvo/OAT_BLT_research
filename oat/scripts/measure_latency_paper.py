@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-"""Paper Table C latency — protocol in RESOLUTIONPLAN.md § Latency / Table C.
+"""Paper Table C / C′ latency — protocol in RESOLUTIONPLAN.md § Latency / Table C.
 
 Measures policy-forward ms (NOT MuJoCo wall-clock) for:
-  single  = baseline OAT8 (predict_action_adaptive, k=8, entropy_threshold=0)
-  bon     = BoN N=8 vote (same base ckpt)
-  awr     = single-sample on Wave2 awr_s10000_<suite>.ckpt
+  single  = baseline OAT8 (deployed: predict_action_adaptive; fair_kv: predict_action KV)
+  bon{N}  = BoN N∈{8,16,32} vote (same base ckpt)
+  awr     = single-sample on Wave2 awr_s10000_<suite>.ckpt (optional; --skip_awr)
 
-Writes output/eval/matched_s10000/<suite>/latency.json with git/host/ckpt metadata.
+Default outs:
+  deployed → latency.json
+  fair_kv (legacy Single+BoN8+AWR) → latency_fair_kv.json  (LOCKED — do not overwrite lightly)
+  fair_kv + (--skip_awr or bon N>8) → latency_fair_kv_n16.json  (does NOT touch locked C′)
 
 Usage (inside docker /workspace/oat):
   python scripts/measure_latency_paper.py --suite can -d cuda:0
-  python scripts/measure_latency_paper.py --suite box-close --reps 10 --warmup 20
+  python scripts/measure_latency_paper.py --suite can --fair_kv --skip_awr --bon_ns 16,32
+  python scripts/measure_latency_paper.py --suite coffee_press_button --fair_kv --skip_awr \\
+      --bon_ns 8,16,32 --base_ckpt my_models/robocasa_coffee_press_button_topk_ep0500_sr0.600.ckpt
 """
 from __future__ import annotations
 
@@ -194,8 +199,43 @@ def _time_calls(
     return samples
 
 
+def _parse_bon_ns(raw: str) -> List[int]:
+    """Parse comma-separated BoN Ns. Empty string → no BoN modes (Single-only runs)."""
+    out: List[int] = []
+    for tok in raw.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        n = int(tok)
+        if n < 1:
+            raise click.ClickException(f"invalid bon_ns entry: {tok}")
+        out.append(n)
+    return out
+
+
+def _resolve_suite_paths(suite: str) -> tuple[Path, Path]:
+    """Return (matched_dir, summary_path_or_empty). Supports robocasa/<task>."""
+    matched = ROOT / "output/eval/matched_s10000"
+    candidates = [
+        matched / suite,
+        matched / "robocasa" / suite,
+    ]
+    for d in candidates:
+        for name in ("summary.json", "summary_literal5.json"):
+            p = d / name
+            if p.is_file():
+                return d, p
+        if d.is_dir():
+            return d, Path()  # dir exists but no summary — need --base_ckpt
+    return matched / suite, Path()
+
+
 @click.command()
-@click.option("--suite", required=True, help="can|coffee-pull|stick-pull|disassemble|box-close|square")
+@click.option(
+    "--suite",
+    required=True,
+    help="can|…|lift|coffee_press_button|close_drawer|turn_off_sink_faucet|turn_off_microwave",
+)
 @click.option("-d", "--device", default="cuda:0")
 @click.option("--reps", default=10, show_default=True, help="timed reps per trial (protocol: 5–10)")
 @click.option(
@@ -210,7 +250,7 @@ def _time_calls(
 @click.option(
     "--out",
     default=None,
-    help="default: matched_s10000/<suite>/latency.json (or latency_fair_kv.json with --fair_kv)",
+    help="explicit out path (overrides default naming)",
 )
 @click.option(
     "--fair_kv/--deployed",
@@ -218,8 +258,38 @@ def _time_calls(
     show_default=True,
     help=(
         "fair apples-to-apples: Single+AWR use predict_action (KV-cache generate); "
-        "BoN unchanged (already generate+KV). Writes latency_fair_kv.json; does NOT "
-        "overwrite paper Table C latency.json."
+        "BoN unchanged (already generate+KV). Extended runs write latency_fair_kv_n16.json."
+    ),
+)
+@click.option(
+    "--skip_awr/--with_awr",
+    default=False,
+    show_default=True,
+    help="skip AWR timing + AWR ckpt/eval requirements (C′ no-AWR extension)",
+)
+@click.option(
+    "--bon_ns",
+    default="8",
+    show_default=True,
+    help="comma-separated BoN N values to time, e.g. 8 or 16,32 or 8,16,32",
+)
+@click.option(
+    "--include_single/--no_single",
+    default=True,
+    show_default=True,
+    help="time Single (KV or deployed). Use --no_single when remasuring only BoN16/32.",
+)
+@click.option(
+    "--base_ckpt",
+    default=None,
+    help="override base ckpt (required if no summary.json / summary_literal5.json)",
+)
+@click.option(
+    "--awr16_ckpt",
+    default=None,
+    help=(
+        "time AWR16 (BoN16-distill) as modes['awr16'] from this ckpt path. "
+        "Does NOT require Wave2 awr_n5 eval. Merges into latency_fair_kv_n16.json."
     ),
 )
 def main(
@@ -232,32 +302,89 @@ def main(
     seed: int,
     out: Optional[str],
     fair_kv: bool,
+    skip_awr: bool,
+    bon_ns: str,
+    include_single: bool,
+    base_ckpt: Optional[str],
+    awr16_ckpt: Optional[str],
 ):
     if reps < 5:
         raise click.ClickException("protocol requires >=5 timed reps")
     if trials < 1:
         raise click.ClickException("--trials must be >=1")
 
-    summary_path = ROOT / f"output/eval/matched_s10000/{suite}/summary.json"
-    if not summary_path.is_file():
-        raise click.ClickException(f"missing Wave summary: {summary_path}")
-    summary = json.loads(summary_path.read_text())
-    base_ckpt = summary["base_ckpt"]
-    awr_ckpt = summary.get("awr_ckpt") or f"my_models/awr_s10000_{suite}.ckpt"
-    for name, p in [("base", base_ckpt), ("awr", awr_ckpt)]:
-        if not (ROOT / p).is_file():
-            raise click.ClickException(f"missing {name} ckpt: {p}")
-    awr_eval = ROOT / f"output/eval/matched_s10000/{suite}/awr_n5/eval_log.json"
-    if not awr_eval.is_file():
-        raise click.ClickException(f"Wave2 AWR eval missing ({awr_eval}) — refuse latency without Table P AWR")
+    bon_list = _parse_bon_ns(bon_ns)
+    need_base = include_single or bool(bon_list)
+    if not need_base and skip_awr and not awr16_ckpt:
+        raise click.ClickException(
+            "nothing to time: need --include_single and/or --bon_ns and/or AWR/--awr16_ckpt"
+        )
+    suite_dir, summary_path = _resolve_suite_paths(suite)
+    summary: Dict[str, Any] = {}
+    if summary_path.is_file():
+        summary = json.loads(summary_path.read_text())
 
+    resolved_base: Optional[str] = None
+    if need_base:
+        if base_ckpt:
+            resolved_base = base_ckpt
+        elif summary.get("base_ckpt"):
+            resolved_base = summary["base_ckpt"]
+        else:
+            raise click.ClickException(
+                f"no base_ckpt: pass --base_ckpt or provide summary under {suite_dir}"
+            )
+        if not (ROOT / resolved_base).is_file():
+            raise click.ClickException(f"missing base ckpt: {resolved_base}")
+
+    awr_ckpt: Optional[str] = None
+    if not skip_awr:
+        awr_ckpt = summary.get("awr_ckpt") or f"my_models/awr_s10000_{suite}.ckpt"
+        if not (ROOT / awr_ckpt).is_file():
+            raise click.ClickException(f"missing awr ckpt: {awr_ckpt}")
+        awr_eval = suite_dir / "awr_n5" / "eval_log.json"
+        if not awr_eval.is_file():
+            awr_eval_alt = ROOT / f"output/eval/matched_s10000/{suite}/awr_n5/eval_log.json"
+            if not awr_eval_alt.is_file():
+                raise click.ClickException(
+                    f"Wave2 AWR eval missing ({awr_eval}) — refuse latency without Table P AWR "
+                    "(or pass --skip_awr / use --awr16_ckpt)"
+                )
+
+    if awr16_ckpt:
+        awr16_path = Path(awr16_ckpt)
+        if not awr16_path.is_file():
+            # also try relative to ROOT
+            if (ROOT / awr16_ckpt).is_file():
+                awr16_path = ROOT / awr16_ckpt
+            else:
+                raise click.ClickException(f"missing --awr16_ckpt: {awr16_ckpt}")
+        awr16_ckpt = str(awr16_path)
+
+    extended = fair_kv and (
+        skip_awr
+        or any(n != 8 for n in bon_list)
+        or not include_single
+        or bool(awr16_ckpt)
+    )
     if out:
         out_path = Path(out)
+    elif fair_kv and extended:
+        out_path = suite_dir / "latency_fair_kv_n16.json"
     elif fair_kv:
-        out_path = ROOT / f"output/eval/matched_s10000/{suite}/latency_fair_kv.json"
+        out_path = suite_dir / "latency_fair_kv.json"
     else:
-        out_path = ROOT / f"output/eval/matched_s10000/{suite}/latency.json"
+        out_path = suite_dir / "latency.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    locked = suite_dir / "latency_fair_kv.json"
+    if out_path.resolve() == locked.resolve() and extended:
+        raise click.ClickException(
+            f"refusing to overwrite locked {locked.name} for extended run; "
+            "use default latency_fair_kv_n16.json or pass --out"
+        )
+
+    base_ckpt = resolved_base
 
     # Deterministic timing stack (protocol §2)
     torch.manual_seed(seed)
@@ -274,201 +401,316 @@ def main(
 
     mode_tag = "FAIR_KV" if fair_kv else "DEPLOYED"
     print(f"=== PAPER LATENCY {suite} [{mode_tag}] ===")
-    print(f"base_ckpt={base_ckpt}")
-    print(f"awr_ckpt={awr_ckpt}")
+    print(f"suite_dir={suite_dir}")
+    print(f"base_ckpt={base_ckpt or '(not loaded)'}")
+    print(f"awr_ckpt={awr_ckpt if not skip_awr else '(skipped)'}")
+    print(f"awr16_ckpt={awr16_ckpt or '(none)'}")
+    print(f"bon_ns={bon_list} include_single={include_single} skip_awr={skip_awr}")
     print(f"device={device} gpu={gpu_name} batch=1 reps={reps} trials={trials} warmup={warmup}")
+    print(f"out={out_path}")
 
-    # --- base policy: single + bon ---
-    print("Loading base policy...")
-    base_policy, base_cfg = BasePolicy.from_checkpoint(base_ckpt, return_configuration=True)
-    base_policy.to(device_t)
-    base_policy.eval()
-    obs_batches = _load_obs_batches(base_policy, base_cfg, device_t, n_obs, batch_size=1)
-    print(f"Loaded {len(obs_batches)} val obs batches; keys={list(obs_batches[0].keys())}")
-    n = len(obs_batches)
+    modes: Dict[str, Dict[str, Any]] = {}
+    mode_order: List[str] = []
+    obs_batches = None
     obs_i = {"i": 0}
+    n = 0
 
     def next_obs():
         o = obs_batches[obs_i["i"] % n]
         obs_i["i"] += 1
         return o
 
-    modes: Dict[str, Dict[str, Any]] = {}
-
     def _prep_mode(label: str) -> None:
-        """Fair mode start: same obs sequence, fresh CUDA sync (no order-effect carry)."""
         obs_i["i"] = 0
         if device_t.type == "cuda":
             torch.cuda.synchronize(device_t)
         print(f"Timing {label} (obs reset + {warmup} warmup + {reps} reps)...")
 
-    if fair_kv:
-        def run_single():
-            base_policy.predict_action(
-                next_obs(),
-                use_k_tokens=8,
-                temperature=1.0,
-                topk=10,
+    if need_base:
+        print("Loading base policy...")
+        base_policy, base_cfg = BasePolicy.from_checkpoint(base_ckpt, return_configuration=True)
+        base_policy.to(device_t)
+        base_policy.eval()
+        obs_batches = _load_obs_batches(base_policy, base_cfg, device_t, n_obs, batch_size=1)
+        print(f"Loaded {len(obs_batches)} val obs batches; keys={list(obs_batches[0].keys())}")
+        n = len(obs_batches)
+
+        if include_single:
+            if fair_kv:
+
+                def run_single():
+                    base_policy.predict_action(
+                        next_obs(),
+                        use_k_tokens=8,
+                        temperature=1.0,
+                        topk=10,
+                    )
+
+                modes["single"] = {
+                    "method": "predict_action",
+                    "ckpt": base_ckpt,
+                    "kwargs": {"use_k_tokens": 8, "temperature": 1.0, "topk": 10},
+                    **_time_mode_trials(
+                        run_single,
+                        prep=_prep_mode,
+                        label="single predict_action (KV-cache)",
+                        warmup=warmup,
+                        reps=reps,
+                        trials=trials,
+                        device=device_t,
+                    ),
+                }
+            else:
+
+                def run_single():
+                    base_policy.predict_action_adaptive(
+                        next_obs(),
+                        use_k_tokens=8,
+                        entropy_threshold=0.0,
+                        temperature=1.0,
+                        topk=10,
+                    )
+
+                modes["single"] = {
+                    "method": "predict_action_adaptive",
+                    "ckpt": base_ckpt,
+                    "kwargs": {
+                        "use_k_tokens": 8,
+                        "entropy_threshold": 0.0,
+                        "temperature": 1.0,
+                        "topk": 10,
+                    },
+                    **_time_mode_trials(
+                        run_single,
+                        prep=_prep_mode,
+                        label="single (OAT8 deployed adaptive)",
+                        warmup=warmup,
+                        reps=reps,
+                        trials=trials,
+                        device=device_t,
+                    ),
+                }
+            mode_order.append("single")
+            print(
+                f"  single = {modes['single']['median_ms']:.2f} ± {modes['single']['std_ms']:.2f} ms "
+                f"(trials={modes['single'].get('n_trials', 1)})"
             )
 
-        modes["single"] = {
-            "method": "predict_action",
-            "ckpt": base_ckpt,
-            "kwargs": {"use_k_tokens": 8, "temperature": 1.0, "topk": 10},
-            **_time_mode_trials(
-                run_single,
-                prep=_prep_mode,
-                label="single predict_action (KV-cache)",
-                warmup=warmup,
-                reps=reps,
-                trials=trials,
-                device=device_t,
-            ),
-        }
+        for n_bon in bon_list:
+            mode_key = "bon" if n_bon == 8 else f"bon{n_bon}"
+
+            def run_bon(n_bon=n_bon):
+                base_policy.predict_action_adaptive(
+                    next_obs(),
+                    use_k_tokens=8,
+                    entropy_threshold=0.0,
+                    temperature=1.0,
+                    topk=10,
+                    bon_free=n_bon,
+                    bon_signal="vote",
+                )
+
+            modes[mode_key] = {
+                "method": "predict_action_adaptive+bon_free",
+                "ckpt": base_ckpt,
+                "kwargs": {
+                    "use_k_tokens": 8,
+                    "entropy_threshold": 0.0,
+                    "temperature": 1.0,
+                    "topk": 10,
+                    "bon_free": n_bon,
+                    "bon_signal": "vote",
+                },
+                **_time_mode_trials(
+                    run_bon,
+                    prep=_prep_mode,
+                    label=f"bon N={n_bon} vote",
+                    warmup=warmup,
+                    reps=reps,
+                    trials=trials,
+                    device=device_t,
+                ),
+            }
+            mode_order.append(mode_key)
+            print(
+                f"  {mode_key} = {modes[mode_key]['median_ms']:.2f} ± {modes[mode_key]['std_ms']:.2f} ms "
+                f"(trials={modes[mode_key].get('n_trials', 1)})"
+            )
+
+        del base_policy
+        if device_t.type == "cuda":
+            torch.cuda.empty_cache()
     else:
-        def run_single():
-            base_policy.predict_action_adaptive(
-                next_obs(),
-                use_k_tokens=8,
-                entropy_threshold=0.0,
-                temperature=1.0,
-                topk=10,
-            )
+        print("Skipping base policy load (AWR16-only / no single+bon).")
 
-        modes["single"] = {
-            "method": "predict_action_adaptive",
-            "ckpt": base_ckpt,
-            "kwargs": {"use_k_tokens": 8, "entropy_threshold": 0.0, "temperature": 1.0, "topk": 10},
-            **_time_mode_trials(
-                run_single,
-                prep=_prep_mode,
-                label="single (OAT8 deployed adaptive)",
-                warmup=warmup,
-                reps=reps,
-                trials=trials,
-                device=device_t,
-            ),
-        }
-    print(
-        f"  single = {modes['single']['median_ms']:.2f} ± {modes['single']['std_ms']:.2f} ms "
-        f"(trials={modes['single'].get('n_trials', 1)})"
-    )
+    if not skip_awr:
+        assert awr_ckpt is not None
+        print("Loading AWR policy (Wave2 ckpt)...")
+        awr_policy, awr_cfg = BasePolicy.from_checkpoint(awr_ckpt, return_configuration=True)
+        awr_policy.to(device_t)
+        awr_policy.eval()
+        try:
+            awr_obs = _load_obs_batches(awr_policy, awr_cfg, device_t, n_obs, batch_size=1)
+        except Exception:
+            awr_obs = obs_batches
+        n_a = len(awr_obs)
 
-    def run_bon():
-        base_policy.predict_action_adaptive(
-            next_obs(),
-            use_k_tokens=8,
-            entropy_threshold=0.0,
-            temperature=1.0,
-            topk=10,
-            bon_free=8,
-            bon_signal="vote",
+        def next_obs_awr():
+            o = awr_obs[obs_i["i"] % n_a]
+            obs_i["i"] += 1
+            return o
+
+        if fair_kv:
+
+            def run_awr():
+                awr_policy.predict_action(
+                    next_obs_awr(),
+                    use_k_tokens=8,
+                    temperature=1.0,
+                    topk=10,
+                )
+
+            modes["awr"] = {
+                "method": "predict_action",
+                "ckpt": awr_ckpt,
+                "kwargs": {"use_k_tokens": 8, "temperature": 1.0, "topk": 10},
+                **_time_mode_trials(
+                    run_awr,
+                    prep=_prep_mode,
+                    label="awr predict_action (KV-cache)",
+                    warmup=warmup,
+                    reps=reps,
+                    trials=trials,
+                    device=device_t,
+                ),
+            }
+        else:
+
+            def run_awr():
+                awr_policy.predict_action_adaptive(
+                    next_obs_awr(),
+                    use_k_tokens=8,
+                    entropy_threshold=0.0,
+                    temperature=1.0,
+                    topk=10,
+                )
+
+            modes["awr"] = {
+                "method": "predict_action_adaptive",
+                "ckpt": awr_ckpt,
+                "kwargs": {
+                    "use_k_tokens": 8,
+                    "entropy_threshold": 0.0,
+                    "temperature": 1.0,
+                    "topk": 10,
+                },
+                **_time_mode_trials(
+                    run_awr,
+                    prep=_prep_mode,
+                    label="awr (single-sample deployed adaptive)",
+                    warmup=warmup,
+                    reps=reps,
+                    trials=trials,
+                    device=device_t,
+                ),
+            }
+        mode_order.append("awr")
+        print(
+            f"  awr = {modes['awr']['median_ms']:.2f} ± {modes['awr']['std_ms']:.2f} ms "
+            f"(trials={modes['awr'].get('n_trials', 1)})"
         )
+        del awr_policy
+        if device_t.type == "cuda":
+            torch.cuda.empty_cache()
 
-    modes["bon"] = {
-        "method": "predict_action_adaptive+bon_free",
-        "ckpt": base_ckpt,
-        "kwargs": {
-            "use_k_tokens": 8,
-            "entropy_threshold": 0.0,
-            "temperature": 1.0,
-            "topk": 10,
-            "bon_free": 8,
-            "bon_signal": "vote",
-        },
-        **_time_mode_trials(
-            run_bon,
-            prep=_prep_mode,
-            label="bon N=8 vote",
-            warmup=warmup,
-            reps=reps,
-            trials=trials,
-            device=device_t,
-        ),
-    }
-    print(
-        f"  bon = {modes['bon']['median_ms']:.2f} ± {modes['bon']['std_ms']:.2f} ms "
-        f"(trials={modes['bon'].get('n_trials', 1)})"
-    )
+    if awr16_ckpt:
+        print(f"Loading AWR16 policy ({awr16_ckpt})...")
+        awr16_policy, awr16_cfg = BasePolicy.from_checkpoint(awr16_ckpt, return_configuration=True)
+        awr16_policy.to(device_t)
+        awr16_policy.eval()
+        try:
+            awr16_obs = _load_obs_batches(awr16_policy, awr16_cfg, device_t, n_obs, batch_size=1)
+        except Exception:
+            if obs_batches is None:
+                raise
+            awr16_obs = obs_batches
+        n16 = len(awr16_obs)
 
-    # free base VRAM before AWR
-    del base_policy
-    if device_t.type == "cuda":
-        torch.cuda.empty_cache()
+        def next_obs_awr16():
+            o = awr16_obs[obs_i["i"] % n16]
+            obs_i["i"] += 1
+            return o
 
-    print("Loading AWR policy (Wave2 ckpt)...")
-    awr_policy, awr_cfg = BasePolicy.from_checkpoint(awr_ckpt, return_configuration=True)
-    awr_policy.to(device_t)
-    awr_policy.eval()
-    # AWR trained on same task — reuse obs from base val if configs match; else reload
-    try:
-        awr_obs = _load_obs_batches(awr_policy, awr_cfg, device_t, n_obs, batch_size=1)
-    except Exception:
-        awr_obs = obs_batches
-    n_a = len(awr_obs)
+        if fair_kv:
 
-    def next_obs_awr():
-        o = awr_obs[obs_i["i"] % n_a]
-        obs_i["i"] += 1
-        return o
+            def run_awr16():
+                awr16_policy.predict_action(
+                    next_obs_awr16(),
+                    use_k_tokens=8,
+                    temperature=1.0,
+                    topk=10,
+                )
 
-    if fair_kv:
-        def run_awr():
-            awr_policy.predict_action(
-                next_obs_awr(),
-                use_k_tokens=8,
-                temperature=1.0,
-                topk=10,
-            )
+            modes["awr16"] = {
+                "method": "predict_action",
+                "ckpt": awr16_ckpt,
+                "kwargs": {"use_k_tokens": 8, "temperature": 1.0, "topk": 10},
+                "note": "BoN16-distill AWR @100ep (HF Mirageinv/AWR)",
+                **_time_mode_trials(
+                    run_awr16,
+                    prep=_prep_mode,
+                    label="awr16 predict_action (KV-cache)",
+                    warmup=warmup,
+                    reps=reps,
+                    trials=trials,
+                    device=device_t,
+                ),
+            }
+        else:
 
-        modes["awr"] = {
-            "method": "predict_action",
-            "ckpt": awr_ckpt,
-            "kwargs": {"use_k_tokens": 8, "temperature": 1.0, "topk": 10},
-            **_time_mode_trials(
-                run_awr,
-                prep=_prep_mode,
-                label="awr predict_action (KV-cache)",
-                warmup=warmup,
-                reps=reps,
-                trials=trials,
-                device=device_t,
-            ),
-        }
-    else:
-        def run_awr():
-            awr_policy.predict_action_adaptive(
-                next_obs_awr(),
-                use_k_tokens=8,
-                entropy_threshold=0.0,
-                temperature=1.0,
-                topk=10,
-            )
+            def run_awr16():
+                awr16_policy.predict_action_adaptive(
+                    next_obs_awr16(),
+                    use_k_tokens=8,
+                    entropy_threshold=0.0,
+                    temperature=1.0,
+                    topk=10,
+                )
 
-        modes["awr"] = {
-            "method": "predict_action_adaptive",
-            "ckpt": awr_ckpt,
-            "kwargs": {"use_k_tokens": 8, "entropy_threshold": 0.0, "temperature": 1.0, "topk": 10},
-            **_time_mode_trials(
-                run_awr,
-                prep=_prep_mode,
-                label="awr (single-sample deployed adaptive)",
-                warmup=warmup,
-                reps=reps,
-                trials=trials,
-                device=device_t,
-            ),
-        }
-    print(
-        f"  awr = {modes['awr']['median_ms']:.2f} ± {modes['awr']['std_ms']:.2f} ms "
-        f"(trials={modes['awr'].get('n_trials', 1)})"
-    )
+            modes["awr16"] = {
+                "method": "predict_action_adaptive",
+                "ckpt": awr16_ckpt,
+                "kwargs": {
+                    "use_k_tokens": 8,
+                    "entropy_threshold": 0.0,
+                    "temperature": 1.0,
+                    "topk": 10,
+                },
+                "note": "BoN16-distill AWR @100ep (HF Mirageinv/AWR)",
+                **_time_mode_trials(
+                    run_awr16,
+                    prep=_prep_mode,
+                    label="awr16 (deployed adaptive)",
+                    warmup=warmup,
+                    reps=reps,
+                    trials=trials,
+                    device=device_t,
+                ),
+            }
+        mode_order.append("awr16")
+        print(
+            f"  awr16 = {modes['awr16']['median_ms']:.2f} ± {modes['awr16']['std_ms']:.2f} ms "
+            f"(trials={modes['awr16'].get('n_trials', 1)})"
+        )
+        del awr16_policy
+        if device_t.type == "cuda":
+            torch.cuda.empty_cache()
 
     sr = {
-        "baseline": summary.get("baseline_n5"),
-        "bon": summary.get("bon_n8_n5"),
+        "baseline": summary.get("baseline_n5") or summary.get("baseline"),
+        "bon": summary.get("bon_n8_n5") or summary.get("bon"),
         "awr": summary.get("awr_n5"),
-        "note": "SR from Table P / summary.json — not remeasured",
+        "note": "SR from Table P / summary — not remeasured",
     }
 
     git_meta = _git_meta()
@@ -480,13 +722,19 @@ def main(
 
     payload = {
         "protocol": (
-            "RESOLUTIONPLAN Latency fair-KV 2026-07-18"
-            if fair_kv
-            else "RESOLUTIONPLAN Latency/Table C paper-proof 2026-07-17"
+            "RESOLUTIONPLAN Latency fair-KV extended BoN16/32 no-AWR 2026-07-28"
+            if extended
+            else (
+                "RESOLUTIONPLAN Latency fair-KV 2026-07-18"
+                if fair_kv
+                else "RESOLUTIONPLAN Latency/Table C paper-proof 2026-07-17"
+            )
         ),
         "paper_proof": not fair_kv,
         "fair_kv": fair_kv,
-        "fair_single": fair_kv,  # alias for rebuttal naming
+        "fair_single": fair_kv,
+        "skip_awr": skip_awr,
+        "extended_bon": extended,
         "fairness": {
             "obs_counter_reset_per_mode": True,
             "warmup_per_mode": True,
@@ -495,14 +743,20 @@ def main(
             "batch_size": 1,
             "n_trials": trials,
             "reps_per_trial": reps,
-            "mode_order": ["single", "bon", "awr"],
+            "mode_order": mode_order,
             "single_path": "predict_action (KV)" if fair_kv else "predict_action_adaptive (no KV)",
-            "awr_path": "predict_action (KV)" if fair_kv else "predict_action_adaptive (no KV)",
+            "awr_path": (
+                None
+                if skip_awr
+                else ("predict_action (KV)" if fair_kv else "predict_action_adaptive (no KV)")
+            ),
             "bon_path": "predict_action_bon_free / generate (KV)",
+            "bon_ns": bon_list,
             "paper_central": "mean of per-trial medians",
             "paper_uncertainty": "std of per-trial medians",
         },
         "suite": suite,
+        "suite_dir": str(suite_dir.relative_to(ROOT)),
         "measured_at": datetime.now(timezone.utc).isoformat(),
         "host": socket.gethostname(),
         "platform": platform.platform(),
@@ -524,9 +778,20 @@ def main(
         **git_meta,
         "base_ckpt": base_ckpt,
         "awr_ckpt": awr_ckpt,
-        "base_ckpt_sha256_partial": _sha256(ROOT / base_ckpt),
-        "awr_ckpt_sha256_partial": _sha256(ROOT / awr_ckpt),
-        "awr_ckpt_note": "same Wave2 path as matched_s10000/<suite>/awr_n5",
+        "awr16_ckpt": awr16_ckpt,
+        "base_ckpt_sha256_partial": _sha256(ROOT / base_ckpt) if base_ckpt else None,
+        "awr_ckpt_sha256_partial": _sha256(ROOT / awr_ckpt) if awr_ckpt else None,
+        "awr16_ckpt_sha256_partial": _sha256(Path(awr16_ckpt)) if awr16_ckpt else None,
+        "awr_ckpt_note": (
+            "skipped (--skip_awr)"
+            if skip_awr
+            else "same Wave2 path as matched_s10000/<suite>/awr_n5"
+        ),
+        "awr16_ckpt_note": (
+            "HF Mirageinv/AWR BoN16-distill e100; disk-cycled download"
+            if awr16_ckpt
+            else None
+        ),
         "table_p_sr": sr,
         "modes": modes,
         "cost_note": (
@@ -539,9 +804,36 @@ def main(
             )
         ),
     }
+    # Merge into existing artifact when filling table in phases (Single then BoN).
+    if out_path.is_file():
+        try:
+            prev = json.loads(out_path.read_text())
+            prev_modes = prev.get("modes") or {}
+            if isinstance(prev_modes, dict) and prev_modes:
+                merged = dict(prev_modes)
+                merged.update(modes)
+                modes = merged
+                prev_order = list((prev.get("fairness") or {}).get("mode_order") or [])
+                for k in mode_order:
+                    if k not in prev_order:
+                        prev_order.append(k)
+                # keep previous keys that we did not remeasure
+                for k in prev_modes:
+                    if k not in prev_order:
+                        prev_order.append(k)
+                mode_order = prev_order
+                payload["modes"] = modes
+                payload["fairness"]["mode_order"] = mode_order
+                payload["merged_from"] = str(out_path)
+                print(f"merged modes into existing {out_path} → keys={list(modes)}")
+        except Exception as e:
+            print(f"WARN: could not merge existing {out_path}: {e}")
+
     out_path.write_text(json.dumps(payload, indent=2) + "\n")
     print(f"wrote {out_path}")
-    for k in ("single", "bon", "awr"):
+    for k in mode_order:
+        if k not in modes:
+            continue
         m = modes[k]
         nt = m.get("n_trials", 1)
         print(

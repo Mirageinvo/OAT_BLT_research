@@ -112,11 +112,11 @@ Paper targets (Table VI, OAT₈): Lift **99.2%**, Can **80.8%**, Square **39.2%*
 | Lift | **2 runs** (see below) | | | | | | |
 | — run A (mid-train) | **ep-0900** `144024` | **82.0±3.2%** | **84.8±4.6%** | **81.2±4.1%** | **+2.8** | **−0.8** | `matched_s10000/lift/` · `awr_s10000_lift.*` · replan **8.0** |
 | — run B (TopK lock / paper) | **ep-1400** `144024` | **87.6±2.2%** | **84.0±4.9%** | **85.2±3.9%** | **−3.6** | **−2.4** | `matched_s10000/lift_ep1400/` · `awr_s10000_lift_ep1400.*` · BoN&AWR < base · replan **9.3** |
-| **RoboCasa** *(literal-5; see § below)* | | | | | | | |
-| close_drawer | **ep-0500 @0.700** lock | Wave1 **RUNNING** | — | — | — | — | `my_models/robocasa_close_drawer_topk_ep0500_sr0.700.ckpt` · tmux `rc_wave1_close` |
-| coffee_press_button | **ep-0500 @0.600** lock | Wave1 **RUNNING** | — | — | — | — | `my_models/robocasa_coffee_press_button_topk_ep0500_sr0.600.ckpt` · tmux `rc_wave1_coffee` |
-| turn_off_microwave | TBD | — | — | — | — | — | no scratch fit yet |
-| turn_off_sink_faucet | TBD | — | — | — | — | — | no scratch fit yet |
+| **RoboCasa** *(literal-5 mean±SEM; see § below)* | | | | | | | |
+| close_drawer | **ep-0500 @0.700** lock | **56.0±1.1%** | **59.6±1.6%** | — | **+3.6±1.9** | — | Wave1 **DONE** · `summary_literal5.json` · `my_models/robocasa_close_drawer_topk_ep0500_sr0.700.ckpt` |
+| coffee_press_button | **ep-0500 @0.600** lock | **44.0±3.0%** | **55.6±2.7%** | — | **+11.6±4.1** | — | Wave1 **DONE** · `summary_literal5.json` · `my_models/robocasa_coffee_press_button_topk_ep0500_sr0.600.ckpt` |
+| turn_off_sink_faucet | **ep-0500 @0.580** lock | **52.4±2.5%** | **56.0±3.4%** | — | **+3.6±4.2** | — | Wave1 **DONE** · `summary_literal5.json` · `my_models/robocasa_turn_off_sink_faucet_topk_ep0500_sr0.580.ckpt` |
+| turn_off_microwave | **ep-0500 @0.620** lock | **43.6±3.1%** *(base 5/5)* | Wave1 BoN **RUNNING** (1/5) | — | — | — | `my_models/robocasa_turn_off_microwave_topk_ep0500_sr0.620.ckpt` |
 
 #### Table P — MW BoN N-sweep (N=8/16/32) ← **LOCKED 2026-07-26**
 
@@ -148,7 +148,7 @@ Primary paper BoN column above remains **N=8**; this block = inference-scaling a
 **Note:** `summary.json` per suite still encodes Wave1 N=8 (+AWR) only — do **not** expect N16/32 inside it; cite `eval_log.json` above.
 **Wave1 BoN verified (2026-07-16):** can / stick — `eval_log.json` ↔ `summary.json` match. Primary artifacts = eval_logs under `matched_s10000/`.
 
-**Status (2026-07-26 ~02:10 MSK):** MW Table P BoN N-sweep **LOCKED** (4/4 suites, artifacts above). RM/MW Wave1+2 otherwise **DONE**. **RoboCasa:** scratch trains **STOPPED**; TopK locked close `ep-0500@0.700` / coffee `ep-0500@0.600`; literal-5 Wave1 **RUNNING** (`rc_wave1_close` GPU0, `rc_wave1_coffee` GPU1). See `RESULTS_ROBOCASA.md`.
+**Status (2026-07-28 ~13:20 MSK):** MW Table P BoN N-sweep **LOCKED**. RM/MW Wave1+2 **DONE**. **RoboCasa Wave1:** coffee + close + **sink DONE** (literal-5); microwave base 5/5 / BoN running (1/5). **Table C′:** RC Single+BoN{8,16,32} **DONE**; RM/MW BoN16/32 **DONE**; **AWR16 DONE** for HF set (can/lift/square/coffee); remaining AWR16 = MW×4 + RC close/sink/mw (no ckpt on HF yet — see `AGENT_GUIDE_AWR16_LATENCY_REMAINING.md`).
 
 **Square read (high replan × worst BoN):** see replan § below — long horizon + weak base → many replans → vote compounds; AWR only half-recovers.
 
@@ -342,33 +342,45 @@ Scripts: `scripts/measure_latency_paper.py`, `scripts/cluster_latency_paper_done
 
 **Read for paper:** on the current valid subset, BoN median ≈ Single (~40–49 ms) — vision encode **один раз** (amortized), AR дешёвый → N=8 почти не бьёт policy-forward cost. AWR ≈ Single. Table C = inference cost only.
 
-**Table C′ — fair-KV rebuttal (PAPER-LOCKED 2026-07-24)** — **не** заменяет Table C. Single/AWR = `predict_action` (KV-cache), BoN = `generate` (KV).  
-**Репрезентативно:** batch=1; 8 trials × 10 timed reps; paper = **mean±std of per-trial medians**; obs=val; obs reset each trial; V100; `git_commit=38455fbc…`. Δ(BoN/AWR−Single) ≲ trial std → не интерпретировать как «быстрее».  
-**Канон (единственный):** `output/eval/matched_s10000/<suite>/latency_fair_kv.json` + `…/table_c_fair_kv.json` (`paper_locked: true`). Старые fair-KV прогоны / `_latency_fair_kv_pre_*` — **удалены**.
+**Table C′ — fair-KV rebuttal** — **не** заменяет Table C. Single / AWR\* = `predict_action` (KV-cache); BoN N = `predict_action_bon_free` / `generate` (KV).  
+**Репрезентативно:** batch=1; 8 trials × 10 timed reps; paper = **mean±std of per-trial medians** (ms); obs=val; obs reset each trial; V100. Δ ≲ trial std → не «быстрее».  
+**Колонки:** Single · BoN8 · BoN16 · BoN32 · **AWR8** (BoN8-distill) · **AWR16** (BoN16-distill @100ep).  
+**Locked subset (2026-07-24):** Single / BoN8 / AWR8 на 7× RM+MW — `latency_fair_kv.json` + `table_c_fair_kv.json` (`paper_locked: true`, `git_commit=38455fbc…`). **Не перезаписывать** без явного remasure.  
+**Fill (2026-07-28):** RC×4 Single+BoN{8,16,32} **DONE** → `matched_s10000/robocasa/<task>/latency_fair_kv_n16.json`. RM/MW BoN16/32 → same filename under `matched_s10000/<suite>/` (Single/BoN8/AWR8 stay in locked `latency_fair_kv.json`). **AWR16 DONE for the HF set** (RoboMimic `can/lift/square` + RoboCasa `coffee_press_button`); **still open** for MetaWorld and RoboCasa `close_drawer` / `turn_off_sink_faucet` / `turn_off_microwave` — mentee runbook: [`AGENT_GUIDE_AWR16_LATENCY_REMAINING.md`](AGENT_GUIDE_AWR16_LATENCY_REMAINING.md).
 
-| Suite | artifact | AWR ckpt | Base (Single/BoN) |
-|-------|----------|----------|-------------------|
-| Can | `output/eval/matched_s10000/can/latency_fair_kv.json` | `my_models/awr_s10000_can.ckpt` | Wave1 `base_ckpt` in json |
-| coffee-pull | `…/coffee-pull/latency_fair_kv.json` | `my_models/awr_s10000_coffee-pull.ckpt` | idem |
-| stick-pull | `…/stick-pull/latency_fair_kv.json` | `my_models/awr_s10000_stick-pull.ckpt` | idem |
-| disassemble | `…/disassemble/latency_fair_kv.json` | `my_models/awr_s10000_disassemble.ckpt` | idem |
-| box-close | `…/box-close/latency_fair_kv.json` | `my_models/awr_s10000_box-close.ckpt` | idem |
-| square | `…/square/latency_fair_kv.json` | `my_models/awr_s10000_square.ckpt` | idem |
-| lift | `…/lift/latency_fair_kv.json` | `my_models/awr_s10000_lift.ckpt` | idem |
-| **сводка** | `output/eval/matched_s10000/table_c_fair_kv.json` | — | `fair_kv: true`; `paper_locked: true` |
+| Suite | artifact (C′) | AWR8 ckpt | AWR16 ckpt | Base (Single/BoN\*) |
+|-------|---------------|-----------|------------|---------------------|
+| Can | `…/can/latency_fair_kv.json` + `latency_fair_kv_n16.json` | `awr_s10000_can.ckpt` | `Mirageinv/AWR` `robomimic_can_awr_bon16_e100.ckpt` | Wave1 `base_ckpt` in json |
+| Lift | `…/lift/…` | `awr_s10000_lift.ckpt` | `…_lift_awr_bon16_e100.ckpt` | idem |
+| Square | `…/square/…` | `awr_s10000_square.ckpt` | `…_square_awr_bon16_e100.ckpt` | idem |
+| coffee-pull | `…/coffee-pull/…` | `awr_s10000_coffee-pull.ckpt` | TBD | idem |
+| stick-pull | `…/stick-pull/…` | `awr_s10000_stick-pull.ckpt` | TBD | idem |
+| disassemble | `…/disassemble/…` | `awr_s10000_disassemble.ckpt` | TBD | idem |
+| box-close | `…/box-close/…` | `awr_s10000_box-close.ckpt` | TBD | idem |
+| coffee_press_button | `…/robocasa/coffee_press_button/latency_fair_kv_n16.json` | — (RC = AWR16 track) | `Mirageinv/AWR` `robocasa_coffee_press_button_awr_bon16_e100.ckpt` | `robocasa_coffee_…_sr0.600.ckpt` |
+| close_drawer | `…/robocasa/close_drawer/latency_fair_kv_n16.json` | — | TBD (not on HF yet) | `robocasa_close_…_sr0.700.ckpt` |
+| turn_off_sink_faucet | `…/robocasa/turn_off_sink_faucet/latency_fair_kv_n16.json` | — | TBD (not on HF yet) | `robocasa_…_sink_…_sr0.580.ckpt` |
+| turn_off_microwave | `…/robocasa/turn_off_microwave/latency_fair_kv_n16.json` | — | TBD (not on HF yet) | `robocasa_…_microwave_…_sr0.620.ckpt` |
+| **сводка** | `matched_s10000/table_c_fair_kv.json` (locked) + per-suite `*_n16.json` | — | — | `fair_kv: true` |
 
-| Suite | Single (KV) | BoN N=8 | AWR (KV) | BoN−Single |
-|-------|-------------|---------|----------|------------|
-| Can | **40.6±1.4** | **43.3±2.1** | **42.5±2.4** | **+2.8** |
-| coffee-pull | **49.2±1.4** | **49.2±2.1** | **50.0±2.5** | **−0.0** |
-| stick-pull | **46.6±2.0** | **47.4±2.1** | **45.7±1.3** | **+0.8** |
-| disassemble | **46.3±1.9** | **48.5±1.0** | **45.6±0.5** | **+2.2** |
-| box-close | **48.2±3.5** | **50.9±1.9** | **49.6±1.3** | **+2.7** |
-| square | **43.6±1.9** | **43.5±2.0** | **42.4±1.6** | **−0.1** |
-| lift | **40.9±1.8** | **43.0±1.9** | **40.6±1.6** | **+2.1** |
+| Suite | Single (KV) | BoN8 | BoN16 | BoN32 | AWR8 (KV) | AWR16 (KV) | BoN8−Single |
+|-------|-------------|------|-------|-------|-----------|------------|-------------|
+| **RoboMimic** | | | | | | | |
+| Can | **40.6±1.4** | **43.3±2.1** | **42.9±1.7** | **41.7±1.6** | **42.5±2.4** | **42.9±2.0** | **+2.8** |
+| Lift | **40.9±1.8** | **43.0±1.9** | **43.8±1.3** | **45.7±1.9** | **40.6±1.6** | **42.3±2.2** | **+2.1** |
+| Square | **43.6±1.9** | **43.5±2.0** | **45.6±5.5** | **45.4±2.0** | **42.4±1.6** | **40.8±1.1** | **−0.1** |
+| **MetaWorld** | | | | | | | |
+| coffee-pull | **49.2±1.4** | **49.2±2.1** | **48.2±1.7** | **50.2±2.4** | **50.0±2.5** | TBD | **−0.0** |
+| stick-pull | **46.6±2.0** | **47.4±2.1** | **51.7±2.4** | **52.4±2.9** | **45.7±1.3** | TBD | **+0.8** |
+| disassemble | **46.3±1.9** | **48.5±1.0** | **49.5±1.7** | **50.2±2.5** | **45.6±0.5** | TBD | **+2.2** |
+| box-close | **48.2±3.5** | **50.9±1.9** | **50.0±2.1** | **49.9±1.8** | **49.6±1.3** | TBD | **+2.7** |
+| **RoboCasa** | | | | | | | |
+| coffee_press_button | **45.5±2.0** | **45.5±2.4** | **47.0±4.0** | **46.6±2.1** | — | **43.6±1.7** | **+0.0** |
+| close_drawer | **46.9±1.3** | **46.5±1.7** | **46.9±2.0** | **48.0±2.2** | — | TBD | **−0.4** |
+| turn_off_sink_faucet | **44.1±1.9** | **44.1±1.7** | **45.5±2.4** | **47.2±2.2** | — | TBD | **+0.0** |
+| turn_off_microwave | **45.0±1.9** | **48.1±1.3** | **47.1±2.6** | **46.7±2.5** | — | TBD | **+3.1** |
 
-В тексте: main = Table C (deployed); appendix = Table C′ (fair KV; Single≈AWR≈BoN ~41–51 ms; BoN overhead within noise/≲3 ms).  
-Reproduce (do **not** overwrite locked unless intentional): `FAIR_KV=1 TRIALS=8 REPS=10 … bash scripts/cluster_latency_paper_done.sh`.
+В тексте: main = Table C (deployed); appendix = Table C′ (fair KV). Read: Single≈BoN8≈AWR8≈AWR16 ~41–51 ms; BoN16/32 overhead usually within noise / ≲5 ms (stick-pull rises more). **AWR16 DONE** for HF set (can/lift/square/coffee); MW + RC close/sink/mw AWR16 — нет ckpt на HF. Locked Single/BoN8/AWR8: do **not** overwrite `latency_fair_kv.json`.
 
 ### Replan count probe (lab, 2026-07-21) — не paper-final
 
@@ -475,10 +487,10 @@ Paths: `output/eval/matched/<suite>/` (seed 1000). **Do not cite in paper.**
 
 | task | BASE_CKPT (TopK @2000) | baseline mean±SEM | BoN N=8 | AWR | Δ_BoN±SEM_Δ | Δ_AWR±SEM_Δ | artifacts |
 |------|------------------------|-------------------|---------|-----|-------------|-------------|-----------|
-| close_drawer | **`my_models/robocasa_close_drawer_topk_ep0500_sr0.700.ckpt`** (src `20260724/220823_…/ep-0500_sr-0.700`) | Wave1 **RUNNING** | — | — | — | — | `matched_s10000/robocasa/close_drawer/` · lock `my_models/robocasa_close_drawer_topk_lock.txt` · tmux `rc_wave1_close` |
-| coffee_press_button | **`my_models/robocasa_coffee_press_button_topk_ep0500_sr0.600.ckpt`** (src `20260724/220823_…/ep-0500_sr-0.600`) | Wave1 **RUNNING** | — | — | — | — | `matched_s10000/robocasa/coffee_press_button/` · lock `my_models/robocasa_coffee_press_button_topk_lock.txt` · tmux `rc_wave1_coffee` |
-| turn_off_microwave | TBD | — | — | — | — | — | `matched_s10000/robocasa/turn_off_microwave/` |
-| turn_off_sink_faucet | TBD | — | — | — | — | — | `matched_s10000/robocasa/turn_off_sink_faucet/` |
+| close_drawer | **`my_models/robocasa_close_drawer_topk_ep0500_sr0.700.ckpt`** | **56.0±1.1%** | **59.6±1.6%** | — | **+3.6±1.9** | — | Wave1 **DONE** · `matched_s10000/robocasa/close_drawer/summary_literal5.json` · lock `…_topk_lock.txt` |
+| coffee_press_button | **`my_models/robocasa_coffee_press_button_topk_ep0500_sr0.600.ckpt`** | **44.0±3.0%** | **55.6±2.7%** | — | **+11.6±4.1** | — | Wave1 **DONE** · `…/coffee_press_button/summary_literal5.json` · lock `…_topk_lock.txt` |
+| turn_off_sink_faucet | **`my_models/robocasa_turn_off_sink_faucet_topk_ep0500_sr0.580.ckpt`** | **52.4±2.5%** | **56.0±3.4%** | — | **+3.6±4.2** | — | Wave1 **DONE** · `…/turn_off_sink_faucet/summary_literal5.json` · lock `…_topk_lock.txt` |
+| turn_off_microwave | **`my_models/robocasa_turn_off_microwave_topk_ep0500_sr0.620.ckpt`** | **43.6±3.1%** (5/5: 0.46/0.52/0.46/0.40/0.34) | BoN **RUNNING** (1/5) | — | — | — | `matched_s10000/robocasa/turn_off_microwave/` · Wave1 live |
 
 **Eval tree (per task):**
 ```text
