@@ -27,11 +27,12 @@ Repo: [`Mirageinvo/OAT_BLT_research`](https://github.com/Mirageinvo/OAT_BLT_rese
 `my_models/robocasa_turn_off_sink_faucet_topk_ep0500_sr0.580.ckpt`  
 (TopK @ selection seed 2000, SR=0.580, epoch 500. Do **not** retrain / swap.)
 
-**Already done on cluster (do not redo unless asked):** Wave1 **baseline** (+ **BoN8** when present on HF)  
+**Already on HF (do not redo):** Wave1 **baseline + BoN8** (literal-5) for sink.  
 → pull from HF (below). Your job starts at **BoN16 / BoN32** (+ AWR).
 
-**Wave1 baseline (5 seeds, locked mean):** **0.524**  
-(seeds: 0.52 / 0.58 / 0.58 / 0.46 / 0.48). BoN8 may still be finishing on cluster — if `bon_n8_*` / `summary_literal5.json` are missing on HF, wait for a refresh or run BoN16/32 first; **do not start AWR** until `baseline_seed*/eval_log.json` exist locally.
+**Wave1 sink (locked, on [`rc-last-two`](https://huggingface.co/datasets/hackhackhack66666/rc-last-two)):**  
+baseline **52.4±2.5%** · BoN8 **56.0±3.4%** · Δ **+3.6±4.2 pp**  
+(seeds base: 0.52 / 0.58 / 0.58 / 0.46 / 0.48). All `baseline_seed*` + `bon_n8_seed*` + `summary_literal5.json` are uploaded — **Wave2 gate is unblocked**.
 
 ---
 
@@ -79,8 +80,8 @@ tokenizers/microwave_ep-2720_mse-0.002.ckpt
 ```
 turn_off_sink_faucet_N200.zarr.tar     # ~1.2G — tar -xf → zarr/
 turn_off_microwave_N200.zarr.tar
-wave1_turn_off_sink_faucet/            # when uploaded (baseline ± bon_n8)
-wave1_turn_off_microwave/
+wave1_turn_off_sink_faucet/            # baseline 5/5 + BoN8 5/5 + summary ✅
+wave1_turn_off_microwave/              # sibling — see microwave guide
 ```
 
 ### 2.3 Mentee: download + place under `oat/`
@@ -114,9 +115,10 @@ Verify:
 ```bash
 test -f my_models/robocasa_turn_off_sink_faucet_topk_ep0500_sr0.580.ckpt
 test -d data/robocasa/turn_off_sink_faucet_N200.zarr
-test -f output/eval/matched_s10000/robocasa/turn_off_sink_faucet/baseline_seed10000/eval_log.json
-# optional until Wave1 refresh:
-# test -f output/eval/matched_s10000/robocasa/turn_off_sink_faucet/summary_literal5.json
+for s in 10000 10001 10002 10003 10004; do
+  test -f output/eval/matched_s10000/robocasa/turn_off_sink_faucet/baseline_seed${s}/eval_log.json
+done
+test -f output/eval/matched_s10000/robocasa/turn_off_sink_faucet/summary_literal5.json
 ```
 
 ---
