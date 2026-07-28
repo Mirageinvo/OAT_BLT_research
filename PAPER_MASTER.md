@@ -137,6 +137,24 @@ advantage-weighted SFT of the AR head only (vision+tokenizer frozen) + KL-to-ref
 - **Imitation ceiling ≈ 0.68:** distill lands single-sample ~0.04–0.05 below the source's
   per-episode BoN SR; epochs/source don't close the gap.
 
+### 3.2b LIBERO-10 per-task breakdown  [DONE — 2026-07-27; supplementary table T-libero]
+Full per-task eval, all 10 LIBERO-10 tasks, n=3 exp × 50 = 500/task, 5 modes. Deliverable file for
+the writing agent: **`libero10_per_task_results.md`** (per-task mean±std, CSV, Δ-vs-base, macro).
+| mode | macro SR (10 tasks) | Δ vs base | tasks Δ≥0 |
+|---|---|---|---|
+| base | 0.584 | — | — |
+| BoN N=8 | 0.688 | +0.104 | **10/10** |
+| **BoN N=16** | **0.723** | **+0.139** | **10/10** |
+| BoN N=32 | 0.711 | +0.127 | 10/10 |
+| AWR16@100ep (1×) | 0.669 | +0.085 | 8/10 |
+- **BoN never hurts a single task — 10/10 Δ≥0 at every N** (Δ-range +0.02…+0.24) → strongest
+  per-task safety claim.
+- **Plateau confirmed per-task:** BoN16 (0.723) ≈ BoN32 (0.711) → N=16 operating point.
+- **AWR task-dependent:** 8/10; big win STUDY_SCENE1 +0.293, two LIVING_ROOM_SCENE2 regressions
+  (−0.053, −0.060). Consistent with §3.3 (AWR fragiler than BoN).
+- Macro consistent with the canonical §3.1 scaling law within noise (base 0.581→0.584, BoN8
+  0.690→0.688); **use §3.1 numbers for the headline, this run for the per-task supplementary table.**
+
 ### 3.3 Multi-suite generalization (robomimic + MetaWorld)  [DONE — clean, no negatives; 2026-07-26 re-run]
 BoN (vote) + AWR-distill vs base, matched settings. robomimic re-run at higher power → the old
 Square −8.0 / Lift −3.6 "drops" were NOISE and VANISHED (Lift flipped to +2.7, Square is now

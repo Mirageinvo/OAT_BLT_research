@@ -245,7 +245,15 @@ also compound." MUST pre-empt this with a dedicated paragraph. Three-layer defen
 ## 5. LIBERO headline numbers (quick ref)
 - OAT8 baseline **0.581 ± 0.012** (≈ paper 0.58). BoN vote: N=4 **0.662**, N=8 **0.690**, N=16
   **0.712**, N=32 **0.717** (saturates ~0.72; textbook log-N scaling). AWR-distill (single forward)
-  **0.684** (~95% of BoN-8, at 1× inference).
+  **0.684** (~95% of BoN-8, at 1× inference). *(These canonical macro numbers = the headline; use them
+  in the abstract/intro.)*
+- **Per-task LIBERO-10 breakdown = supplementary table `T-libero`** (data file for the agent:
+  **`libero10_per_task_results.md`**, per-task mean±std + Δ). Fresh full run (n=3×50=500/task) confirms:
+  **BoN 10/10 tasks Δ≥0 at EVERY N** (Δ +0.02…+0.24 — never hurts a single task); plateau BoN16
+  (0.723) ≈ BoN32 (0.711) → N=16 operating point; **AWR 8/10** (big win STUDY_SCENE1 +0.293, two
+  LIVING_ROOM_SCENE2 regressions −0.05/−0.06 → AWR fragiler than BoN). Macro from this run (base 0.584,
+  BoN8 0.688, BoN16 0.723, BoN32 0.711, AWR 0.669) matches the canonical numbers within noise.
+  **Claim to make: "best-of-N improves or matches every LIBERO-10 task (10/10)"** — the per-task safety statement.
 
 ## 6. Figures & Tables
 - **F1 Teaser** (DONE — the current schematic): obs→OAT policy; "two ways to allocate inference
@@ -261,6 +269,8 @@ also compound." MUST pre-empt this with a dedicated paragraph. Three-layer defen
   shrinks (more replans). **[PENDING data: N=8 @ R∈{8,24,32}]**.
 - **Table 1 Benchmarks:** suite / #tasks / embodiment / action-dim / demos / protocol / horizon.
 - **Table 2 Multi-suite:** the clean table above.
+- **Table T-libero (SUPPLEMENTARY): LIBERO-10 per-task** (10 tasks × {base, BoN 8/16/32, AWR},
+  mean±std + Δ). Data: `libero10_per_task_results.md`. Body cites only the summary (10/10 Δ≥0).
 - **Figure/table BUDGET (7 pages is TIGHT — prioritize):** MUST-HAVE in body = **F1 teaser, F2
   oracle≈0, F4 BoN scaling, F5 compounding (BoN×R), Table 2 multi-suite, + a compact latency table**.
   Compress or move to SUPPLEMENTARY if space is tight: F3 (R-sweep + adaptive-R controls — could fold

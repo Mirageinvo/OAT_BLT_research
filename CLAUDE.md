@@ -1028,6 +1028,19 @@ OAT retrained (tokenizer+policy) on robomimic (Can, Square, Lift) + MetaWorld (c
 - **Headroom pattern confirmed:** Lift base 90.5 (near-ceiling) → BoN saturates ~93; Can 76% (mid) → big +9.3; stick 15.6 (low) → +10. Gain ∝ headroom.
 - **Confirms my earlier diagnosis** (the Square/Lift "drops" were underpowered/ckpt-noise, not a real BoN failure mode). → **DROP the replan-failure-mode narrative** (RESULTS.md robocasa-branch §"Square failure-mode" + PACE-era text); it's now moot. **PAPER_MASTER.md §3.3 updated** with these numbers; **RESULTS.md (robocasa branch) Table P still needs syncing** (old −8.0/−3.6 must not be cited).
 
+**⭐ LIBERO-10 PER-TASK breakdown DONE (2026-07-27) — BoN 10/10, plateau + AWR task-dependence confirmed at task granularity.** Fresh full per-task eval (n=3 exp × 50 = 500/task, all 10 tasks), 5 modes. Deliverable file for the writing agent: **`libero10_per_task_results.md`** (repo root: per-task mean±std, CSV, Δ-vs-base, macro). Macro (confirms/tightens the canonical scaling law within noise):
+| mode | macro SR | Δ vs base | tasks Δ≥0 |
+|---|---|---|---|
+| base | 0.584 | — | — |
+| BoN N=8 | 0.688 | +0.104 | **10/10** |
+| **BoN N=16** | **0.723** | **+0.139** | **10/10** |
+| BoN N=32 | 0.711 | +0.127 | 10/10 |
+| AWR16@100ep (1×) | 0.669 | +0.085 | 8/10 |
+- **BoN never hurts a single task — 10/10 Δ≥0 at EVERY N** (Δ-range all-positive +0.02…+0.24) → strongest per-task safety claim for the paper.
+- **Plateau confirmed at per-task level:** BoN16 (0.723) ≈ BoN32 (0.711), N=32 marginally lower → **N=16 = operating point** (matches the scaling-law saturation ~0.71–0.72; N=16 here is the peak, slightly above the earlier 0.712).
+- **AWR task-dependent (as in multi-suite):** 8/10 Δ≥0; huge win STUDY_SCENE1 **+0.293** (0.640→0.933); two LIVING_ROOM_SCENE2 regressions (−0.053, −0.060). Consistent with "AWR captures the gain deployably but is fragiler than BoN".
+- Anchors consistent with prior 500-eval runs (base 0.581→0.584, BoN8 0.690→0.688) → run valid. **Canonical headline numbers (0.581/0.690/0.712/0.717/0.684) unchanged for the abstract; this per-task run is the supplementary breakdown.**
+
 #### Multi-suite expansion — MIKASA-Robo (2026-06-17, investigating)
 Goal: a 2nd benchmark so the diagnosis + BoN positive read as "a phenomenon", not "our one LIBERO policy" (the single biggest lever for ICRA per the venue analysis). Assessing feasibility of running OAT + BoN on MIKASA-Robo (local path `MIKASA-Robo`, docs https://mikasarobo.github.io/).
 **FINDINGS (2026-06-17): I/O is a near-drop-in match, but it's a MEMORY benchmark → poor fit for a memoryless OAT.** Compatibility: 2× RGB 128×128 (base+hand) = LIBERO layout; 7D proprio (eef pose+gripper); **7D `pd_ee_delta_pose` action, eval in chunk_size=8** (eerily OAT-shaped); 22.5k demos (PPO+motion-planning) in RLDS/LeRobot v3; sim = **ManiSkill 3.0** (not robosuite). Integration: plug OAT into MIKASA's own eval harness (`benchmarking.py`, expects 7D action chunks) rather than porting; LeRobot→Zarr convert; **FULL retrain** of OAT (tokenizer+policy) on MIKASA demos (LIBERO ckpt won't transfer). **DEALBREAKER:** MIKASA is a memory benchmark (90 tasks, 10 memory types, horizons 25–2160; cue must be retained across delay/occlusion) but OAT is **memoryless (To=2 frames)** → ~0 SR on memory-heavy tasks → no headroom to measure BoN/diagnosis. **VERDICT: poor multi-suite choice** for this paper (different AXIS = memory; high cost for a substrate where OAT can't perform). **Prefer: other LIBERO suites (spatial/object/goal — same robosuite, only retrain) or non-memory ManiSkill/MetaWorld.** If MIKASA anyway: only the Short split + bump To (=architecture change), cheap probe first.
