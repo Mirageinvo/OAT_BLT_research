@@ -34,7 +34,10 @@ export OAT_USE_UV_RUN=0
 
 # shellcheck disable=SC1091
 source scripts/cluster_gpu_env.sh "${GPU}"     # sets CUDA_VISIBLE_DEVICES + OAT_DEVICE
-bash scripts/patch_robosuite_egl_assert.sh
+# robosuite EGL patch only matters for live rendering; latency uses dataset obs (no sim render),
+# and the stock patch hardcodes cd /workspace/oat → run best-effort, never abort.
+bash scripts/patch_robosuite_egl_assert.sh 2>/dev/null \
+  || echo "(robosuite EGL patch skipped — not needed for dataset-obs latency)"
 
 # git provenance — required by measure_latency_paper.py (docker has no .git).
 # Derive from GIT_REPO unless already exported.
