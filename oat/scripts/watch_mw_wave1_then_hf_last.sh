@@ -30,7 +30,12 @@ EVAL_ROOT="output/eval/matched_s10000/robocasa/${TASK}"
 SEEDS=(10000 10001 10002 10003 10004)
 POLL_SEC="${POLL_SEC:-60}"
 
-log() { echo "[$(date -Iseconds)] $*" | tee -a "${LOG}"; }
+log() {
+  # Prefer append-only: if stdout is already redirected to LOG (nohup), tee would duplicate.
+  local msg="[$(date -Iseconds)] $*"
+  echo "${msg}" >> "${LOG}"
+  if [[ -t 1 ]]; then echo "${msg}"; else echo "${msg}" >&2; fi
+}
 
 resolve_hf() {
   if [[ -n "${HF_BIN}" && -x "${HF_BIN}" ]]; then return 0; fi
