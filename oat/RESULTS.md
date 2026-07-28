@@ -148,7 +148,7 @@ Primary paper BoN column above remains **N=8**; this block = inference-scaling a
 **Note:** `summary.json` per suite still encodes Wave1 N=8 (+AWR) only — do **not** expect N16/32 inside it; cite `eval_log.json` above.
 **Wave1 BoN verified (2026-07-16):** can / stick — `eval_log.json` ↔ `summary.json` match. Primary artifacts = eval_logs under `matched_s10000/`.
 
-**Status (2026-07-28 ~13:20 MSK):** MW Table P BoN N-sweep **LOCKED**. RM/MW Wave1+2 **DONE**. **RoboCasa Wave1:** coffee + close + **sink DONE** (literal-5); microwave base 5/5 / BoN running (1/5). **Table C′:** RC Single+BoN{8,16,32} **DONE**; RM/MW BoN16/32 **DONE**; **AWR16 DONE** for HF set (can/lift/square/coffee); remaining AWR16 = MW×4 + RC close/sink/mw (no ckpt on HF yet — see `AGENT_GUIDE_AWR16_LATENCY_REMAINING.md`).
+**Status (2026-07-28 ~13:20 MSK):** MW Table P BoN N-sweep **LOCKED**. RM/MW Wave1+2 **DONE**. **RoboCasa Wave1:** coffee + close + **sink DONE** (literal-5); microwave base 5/5 / BoN running (1/5). **Table C′:** RC Single+BoN{8,16,32} **DONE**; RM/MW BoN16/32 **DONE**; **AWR16 DONE** for HF set (can/lift/square/coffee); remaining **RoboCasa only** AWR16 = `close_drawer` / `turn_off_sink_faucet` / `turn_off_microwave` (no ckpt on HF yet — see `AGENT_GUIDE_AWR16_LATENCY_REMAINING.md`).
 
 **Square read (high replan × worst BoN):** see replan § below — long horizon + weak base → many replans → vote compounds; AWR only half-recovers.
 
@@ -346,7 +346,7 @@ Scripts: `scripts/measure_latency_paper.py`, `scripts/cluster_latency_paper_done
 **Репрезентативно:** batch=1; 8 trials × 10 timed reps; paper = **mean±std of per-trial medians** (ms); obs=val; obs reset each trial; V100. Δ ≲ trial std → не «быстрее».  
 **Колонки:** Single · BoN8 · BoN16 · BoN32 · **AWR8** (BoN8-distill) · **AWR16** (BoN16-distill @100ep).  
 **Locked subset (2026-07-24):** Single / BoN8 / AWR8 на 7× RM+MW — `latency_fair_kv.json` + `table_c_fair_kv.json` (`paper_locked: true`, `git_commit=38455fbc…`). **Не перезаписывать** без явного remasure.  
-**Fill (2026-07-28):** RC×4 Single+BoN{8,16,32} **DONE** → `matched_s10000/robocasa/<task>/latency_fair_kv_n16.json`. RM/MW BoN16/32 → same filename under `matched_s10000/<suite>/` (Single/BoN8/AWR8 stay in locked `latency_fair_kv.json`). **AWR16 DONE for the HF set** (RoboMimic `can/lift/square` + RoboCasa `coffee_press_button`); **still open** for MetaWorld and RoboCasa `close_drawer` / `turn_off_sink_faucet` / `turn_off_microwave` — mentee runbook: [`AGENT_GUIDE_AWR16_LATENCY_REMAINING.md`](AGENT_GUIDE_AWR16_LATENCY_REMAINING.md).
+**Fill (2026-07-28):** RC×4 Single+BoN{8,16,32} **DONE** → `matched_s10000/robocasa/<task>/latency_fair_kv_n16.json`. RM/MW BoN16/32 → same filename under `matched_s10000/<suite>/` (Single/BoN8/AWR8 stay in locked `latency_fair_kv.json`). **AWR16 DONE** (RoboMimic `can/lift/square` + RoboCasa `coffee_press_button`); **still open — RoboCasa only:** `close_drawer` / `turn_off_sink_faucet` / `turn_off_microwave` — [`AGENT_GUIDE_AWR16_LATENCY_REMAINING.md`](AGENT_GUIDE_AWR16_LATENCY_REMAINING.md).
 
 | Suite | artifact (C′) | AWR8 ckpt | AWR16 ckpt | Base (Single/BoN\*) |
 |-------|---------------|-----------|------------|---------------------|
@@ -380,7 +380,7 @@ Scripts: `scripts/measure_latency_paper.py`, `scripts/cluster_latency_paper_done
 | turn_off_sink_faucet | **44.1±1.9** | **44.1±1.7** | **45.5±2.4** | **47.2±2.2** | — | TBD | **+0.0** |
 | turn_off_microwave | **45.0±1.9** | **48.1±1.3** | **47.1±2.6** | **46.7±2.5** | — | TBD | **+3.1** |
 
-В тексте: main = Table C (deployed); appendix = Table C′ (fair KV). Read: Single≈BoN8≈AWR8≈AWR16 ~41–51 ms; BoN16/32 overhead usually within noise / ≲5 ms (stick-pull rises more). **AWR16 DONE** for HF set (can/lift/square/coffee); MW + RC close/sink/mw AWR16 — нет ckpt на HF. Locked Single/BoN8/AWR8: do **not** overwrite `latency_fair_kv.json`.
+В тексте: main = Table C (deployed); appendix = Table C′ (fair KV). Read: Single≈BoN8≈AWR8≈AWR16 ~41–51 ms; BoN16/32 overhead usually within noise / ≲5 ms (stick-pull rises more). **AWR16 DONE** for HF set (can/lift/square/coffee); **RC only** close/sink/mw AWR16 — нет ckpt на HF. Locked Single/BoN8/AWR8: do **not** overwrite `latency_fair_kv.json`.
 
 ### Replan count probe (lab, 2026-07-21) — не paper-final
 
