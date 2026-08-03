@@ -263,22 +263,35 @@ class OATPolicy(BasePolicy):
     @torch.inference_mode()
     def _bon_select(self, cand_b: torch.Tensor, R: int, bon_signal: str,
                     features_b: Optional[torch.Tensor] = None) -> int:
-        """Pick the best candidate index from [N, H, D] by a ranking signal over the executed
-        prefix R (normalizer space). 'vote' = mode-seeking KDE density (pick the candidate in
-        the densest region — NOT centroid-averaging, which across multimodal plans gives an
-        invalid action); 'medoid' = min sum of distances to the others; 'value' = argmax of an
-        attached ChunkQ critic Q(features, chunk) (Q-chunking QC analog; needs features_b)."""
+        """Consensus Selection scoring step -- paper Algorithm 1, lines 6-9.
+
+        Pick the best candidate index from [N, H, D] by a ranking signal over the executed
+        prefix R (normalizer space). 'vote' = the mode-seeking kernel-density argmax of
+        paper Eq. (2) (pick the candidate in the densest region — NOT centroid-averaging,
+        which across multimodal plans gives an invalid action); 'medoid' = min sum of
+        distances to the others (implemented as an alternative, not swept in the paper);
+        'value' = argmax of an attached ChunkQ critic Q(features, chunk) (Q-chunking QC
+        analog; needs features_b).
+        """
         norm = self.action_tokenizer.normalizer['action']
-        a = norm.normalize(cand_b[:, :R])             # [N, R, D]
+        # Paper Eq. (1): rescale each action dimension before any distance is taken, so that
+        # translation / rotation / gripper coordinates cannot dominate a raw Euclidean norm.
+        a = norm.normalize(cand_b[:, :R])             # [N, R, D] = executed prefix a^{1:R}
         if bon_signal == 'value' and getattr(self, 'chunk_q', None) is not None:
             feat = features_b.unsqueeze(0).expand(a.shape[0], -1, -1)   # [N, To, d]
             return int(self.chunk_q.score(feat, a).argmax())
         flat = a.reshape(cand_b.shape[0], -1)         # [N, R*D]
-        dist = torch.cdist(flat, flat)                # [N, N]
+        dist = torch.cdist(flat, flat)                # [N, N] pairwise d_norm of Eq. (1)
         if bon_signal == 'medoid':
             return int(dist.sum(dim=1).argmin())
+        # Bandwidth h: median heuristic over the current candidate set (supplement Sec. A.2),
+        # not a tuned constant. Both `dist` and `sigma` omit the 1/(RD) factor of Eq. (1);
+        # it cancels in the ratio below, so this is exactly Eq. (2) as written.
         off = dist[dist > 0]                          # 'vote' = mode-seeking KDE density
         sigma = (off.median() if off.numel() > 0 else dist.new_tensor(1.0)) + 1e-6
+        # Paper Eq. (2): i* = argmax_i sum_{j != i} exp(-d_norm^2(a_i, a_j) / (2 h^2)).
+        # The j == i term contributes exp(0) = 1 to every row, a constant offset that leaves
+        # the argmax unchanged, so it is not masked out here.
         dens = torch.exp(-(dist ** 2) / (2 * sigma ** 2)).sum(dim=1)
         return int(dens.argmax())
 
@@ -310,10 +323,14 @@ class OATPolicy(BasePolicy):
         bon_prefix_k: int = 0,
         bon_first_temp: float = 0.0,
     ) -> Dict[str, torch.Tensor]:
-        """Verifier-free best-of-N. Per env: encode vision ONCE (amortized), sample bon_n
-        candidate plans from the cheap AR head, pick by a FREE consensus signal (see
-        `_bon_select`). No trained verifier, no oracle -> ranks by consensus, a PROXY for
-        quality.
+        """Consensus Selection (CS) -- paper Sec. Method / Algorithm 1. Verifier-free best-of-N.
+
+        Per env: encode vision ONCE (Alg. 1 line 1), sample bon_n candidate plans from the
+        cheap AR head (Alg. 1 lines 2-5), pick by a FREE consensus signal (Alg. 1 lines 6-9,
+        see `_bon_select`). No trained verifier, no oracle -> ranks by consensus, a PROXY for
+        quality. Sharing one encoder pass across all N candidates is what makes selection
+        nearly free on the dominant cost axis: the 22.4M-parameter visual encoder runs once
+        while only the 5.0M-parameter AR head is repeated N times (paper Table 5).
 
         Coarse-to-fine (idea #2): if 0 < bon_prefix_k < use_k_tokens, sample + select on the
         cheap `bon_prefix_k`-token PREFIX (each prefix-decodes to the full chunk via
@@ -334,17 +351,21 @@ class OATPolicy(BasePolicy):
         coarse_to_fine = 0 < bon_prefix_k < use_k_tokens
         gen_k = bon_prefix_k if coarse_to_fine else use_k_tokens
 
-        features = self.obs_encoder(obs_dict)        # [B, To, d]  (vision computed once)
+        features = self.obs_encoder(obs_dict)        # Alg. 1 line 1: x <- Encode(o), ONCE
         B = features.shape[0]
-        feat_rep = features.repeat_interleave(bon_n, dim=0)   # [B*N, To, d]
+        feat_rep = features.repeat_interleave(bon_n, dim=0)   # [B*N, To, d] shared encoding
+        # Alg. 1 lines 2-3: z_i ~ p_theta(. | x) for i = 1..N
         tokens = self._bon_sample(feat_rep, gen_k, temperature, topk, bon_first_temp)  # [B*N, gen_k]
+        # Alg. 1 line 4: a_i <- Decode(z_i); any prefix decodes to the full H-step chunk
         cand = self.action_tokenizer.detokenize(tokens, eval_keep_k=[gen_k] * (B * bon_n))
         H, Dd = cand.shape[1], cand.shape[2]
         cand = cand.reshape(B, bon_n, H, Dd)          # [B, N, H, D] (repeat_interleave layout)
         tokens = tokens.reshape(B, bon_n, gen_k)
 
-        R = min(self.n_action_steps, H)               # rank over the executed prefix only
-        best_idx = torch.tensor(
+        # Score only the executed prefix a^{1:R} (Eq. 1-2): disagreement after the next
+        # scheduled replan cannot affect the current transition.
+        R = min(self.n_action_steps, H)
+        best_idx = torch.tensor(                      # Alg. 1 lines 6-9: i* = argmax_i q_i
             [self._bon_select(cand[b], R, bon_signal, features[b]) for b in range(B)],
             device=self.device, dtype=torch.long)
         ar = torch.arange(B, device=self.device)

@@ -1,5 +1,7 @@
 """
-AWR / ReST fine-tuning of the OAT AR head on a collected dataset (collect_awr_dataset.py).
+CS-D: single-forward distillation of Consensus Selection (paper Sec. Method, "Single-forward
+distillation"; weights = Eq. (3), loss = Eq. (4)). Trains the OAT AR head by advantage-weighted
+regression on data collected with collect_awr_dataset.py.
 
 Advantage-weighted SFT: weight_i = clip(exp((success_i - baseline)/beta)), loss = weight_i *
 sum_t w_t * CE(logits_{i,t}, tokens_{i,t}) + beta_kl * KL(pi || pi_ref). Vision encoder &
@@ -93,11 +95,16 @@ def main(inp, checkpoint, output, device, beta, beta_kl, w_max, epochs, lr, batc
         adv = succ - baseline_vec
         bl_desc = f"V(s) critic [{baseline_vec.min():.2f},{baseline_vec.max():.2f}] mean {baseline_vec.mean():.3f}"
     else:
+        # Paper Eq. (3): constant baseline b = chunk-weighted dataset mean of the terminal
+        # success labels y_i, giving the advantage A_i = y_i - b. This is the setting used
+        # for the reported CS-D model (no learned state-value critic).
         baseline_vec = succ.mean()
         adv = succ - baseline_vec
         bl_desc = f"const SR={float(baseline_vec):.3f}"
-    weight = torch.exp(adv / beta).clamp(max=w_max)        # AWR weight
-    weight = weight / weight.mean()                        # normalize -> mean 1 (stable LR)
+    # Paper Eq. (3): clipped exponential weights w~_i = min{exp(A_i / beta), w_max}, then
+    # renormalized to mean one so the effective learning-rate scale matches ordinary SFT.
+    weight = torch.exp(adv / beta).clamp(max=w_max)
+    weight = weight / weight.mean()
     print(f"N={len(feats)}  baseline={bl_desc}  adv[min/mean/max]={adv.min():.2f}/{adv.mean():.2f}/"
           f"{adv.max():.2f}  weight[min/mean/max]={weight.min():.2f}/{weight.mean():.2f}/{weight.max():.2f}"
           f"  ordering={ordering}")
@@ -128,13 +135,18 @@ def main(inp, checkpoint, output, device, beta, beta_kl, w_max, epochs, lr, batc
             V = logits.size(-1)
             ce = F.cross_entropy(logits.reshape(-1, V), tb.reshape(-1),
                                  reduction='none').reshape(B, K)            # [B, K]
+            # Paper Eq. (4), first term: weighted teacher-forced likelihood of the COMPLETE
+            # selected token sequence, sum_k log p_theta(z*_{i,k} | o_i, z*_{i,<k}). w_t is
+            # the per-token credit (uniform for the reported model).
             ce_w = (ce * wt[None, :]).sum(1)               # [B] position-weighted CE
             awr_loss = (wb * ce_w).mean()
             with torch.no_grad():
                 ref_logits = ref_model(inp_tok, cond=fb)
+            # Paper Eq. (4), second term: forward-KL anchor to the frozen reference head,
+            # which stops the weighted objective collapsing onto a few successful episodes.
             kl = (F.softmax(logits, -1) *
                   (F.log_softmax(logits, -1) - F.log_softmax(ref_logits, -1))).sum(-1).mean()
-            loss = awr_loss + beta_kl * kl
+            loss = awr_loss + beta_kl * kl                 # L_CS-D of Eq. (4)
             opt.zero_grad(); loss.backward(); opt.step()
             tot_awr += awr_loss.item(); tot_kl += kl.item(); nb += 1
         print(f"  epoch {ep+1}: awr_loss={tot_awr/nb:.4f}  kl={tot_kl/nb:.4f}")

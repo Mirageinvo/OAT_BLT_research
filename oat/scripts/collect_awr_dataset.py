@@ -1,4 +1,8 @@
 """
+CS-D data collection (paper Sec. Experiments, "CS-D and latency details"): roll out Consensus
+Selection and log, at every replan, the SELECTED candidate's complete token sequence. The
+reported model uses 20,000 states collected with CS-16 (320,000 generated candidates).
+
 Collect an AWR / ReST fine-tuning dataset by rolling out the policy in LIBERO and labeling
 each executed chunk with its EPISODE success (cheap reward — no counterfactual sim).
 

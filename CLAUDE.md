@@ -1041,6 +1041,21 @@ OAT retrained (tokenizer+policy) on robomimic (Can, Square, Lift) + MetaWorld (c
 - **AWR task-dependent (as in multi-suite):** 8/10 Δ≥0; huge win STUDY_SCENE1 **+0.293** (0.640→0.933); two LIVING_ROOM_SCENE2 regressions (−0.053, −0.060). Consistent with "AWR captures the gain deployably but is fragiler than BoN".
 - Anchors consistent with prior 500-eval runs (base 0.581→0.584, BoN8 0.690→0.688) → run valid. **Canonical headline numbers (0.581/0.690/0.712/0.717/0.684) unchanged for the abstract; this per-task run is the supplementary breakdown.**
 
+#### ⭐ LATENCY (Table C) DONE — all 4 benchmarks (2026-07-28): BoN adds ~1–3 ms → NEGLIGIBLE, confirms amortized-vision cost model
+Policy-forward latency (ms/call, batch=1, **fair-KV**: single `predict_action` KV vs BoN `generate` KV; V100, TRIALS=8×REPS=10×WARMUP=20, mean±std of per-trial medians). Deliverables: **`latency_results.md`** (full per-suite + read) and **`latency_summary.md`** (per-benchmark averages, CS naming). Only single + CS(=BoN) 8/16/32 (AWR cols out of scope). Measured via new `oat/scripts/cluster_latency_libero.sh` + `measure_latency_paper.py --fair_kv --skip_awr --bon_ns 8,16,32`.
+
+| benchmark | Baseline | CS-8 | CS-16 | CS-32 | Δ8 | Δ16 | Δ32 |
+|---|---|---|---|---|---|---|---|
+| LIBERO-10 | 42.2±2.1 | 43.4 | 43.6 | 45.1 | +1.3 | +1.4 | +2.9 |
+| RoboMimic (3) | 41.7 | 43.3 | 44.1 | 44.3 | +1.6 | +2.4 | +2.6 |
+| MetaWorld (4) | 47.6 | 49.0 | 49.9 | 50.7 | +1.4 | +2.3 | +3.1 |
+| RoboCasa (4) | 45.4 | 46.1 | 46.6 | 47.1 | +0.7 | +1.3 | +1.8 |
+| **all (12)** | **44.9±0.8** | **46.1** | **46.8** | **47.4** | **+1.2** | **+1.9** | **+2.5** |
+
+- **BoN adds only ~1–3 ms to a ~40–50 ms single-forward, uniformly across all 4 benchmarks / 2 simulators → NEGLIGIBLE** (≤7% even at N=32; Δ(CS-8/16) within measurement noise, std of difference ~2–3 ms). Several per-suite Δ are ≈0 or slightly **negative** (Square −0.1, coffee-pull ~0, close_drawer −0.4) — BoN can't be truly faster than a subset of its own work → the overhead sits **inside the noise floor**.
+- **Confirms the amortized-vision cost model (§5):** vision encoder (22.4M) computed ONCE per replan, shared across N candidates; only the cheap AR head (5.0M) runs N times → 32× AR sampling = +2–3 ms. `C_ep ≈ H·(C_vis + N·K·c_AR)`, `C_vis ≫ c_AR`. OAT-substrate wedge vs diffusion-VLA BoN (RoboMonkey): perception amortized → BoN nearly free on the dominant axis.
+- **Pairs with SR:** CS-16 buys +0.13 SR (LIBERO) / up to +10pp (multi-suite) for ≤2.5 ms → SR-vs-latency Pareto win essentially free on this axis. **Wording:** "≤1.5 ms (within noise) at N≤16, ≤3 ms at N=32" — NOT "free/faster". Caveat: policy-forward only (episode wall-clock = MuJoCo/render-dominated); fair-KV protocol (deployed = separate `FAIR_KV=0` run).
+
 #### Multi-suite expansion — MIKASA-Robo (2026-06-17, investigating)
 Goal: a 2nd benchmark so the diagnosis + BoN positive read as "a phenomenon", not "our one LIBERO policy" (the single biggest lever for ICRA per the venue analysis). Assessing feasibility of running OAT + BoN on MIKASA-Robo (local path `MIKASA-Robo`, docs https://mikasarobo.github.io/).
 **FINDINGS (2026-06-17): I/O is a near-drop-in match, but it's a MEMORY benchmark → poor fit for a memoryless OAT.** Compatibility: 2× RGB 128×128 (base+hand) = LIBERO layout; 7D proprio (eef pose+gripper); **7D `pd_ee_delta_pose` action, eval in chunk_size=8** (eerily OAT-shaped); 22.5k demos (PPO+motion-planning) in RLDS/LeRobot v3; sim = **ManiSkill 3.0** (not robosuite). Integration: plug OAT into MIKASA's own eval harness (`benchmarking.py`, expects 7D action chunks) rather than porting; LeRobot→Zarr convert; **FULL retrain** of OAT (tokenizer+policy) on MIKASA demos (LIBERO ckpt won't transfer). **DEALBREAKER:** MIKASA is a memory benchmark (90 tasks, 10 memory types, horizons 25–2160; cue must be retained across delay/occlusion) but OAT is **memoryless (To=2 frames)** → ~0 SR on memory-heavy tasks → no headroom to measure BoN/diagnosis. **VERDICT: poor multi-suite choice** for this paper (different AXIS = memory; high cost for a substrate where OAT can't perform). **Prefer: other LIBERO suites (spatial/object/goal — same robosuite, only retrain) or non-memory ManiSkill/MetaWorld.** If MIKASA anyway: only the Short split + bump To (=architecture change), cheap probe first.
