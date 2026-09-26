@@ -66,9 +66,12 @@ from typing import List, Optional
 @click.option('--bon_free', default=0, type=int,
               help="verifier-free best-of-N: sample N candidate plans per replan (vision "
                    "amortized), pick by a FREE signal (no trained verifier). 0=off.")
-@click.option('--bon_signal', default='vote', type=click.Choice(['vote', 'medoid', 'value']),
+@click.option('--bon_signal', default='vote', type=click.Choice(['vote', 'medoid', 'value', 'random', 'max_likelihood']),
               help="ranking signal: 'vote'=mode-seeking KDE density, 'medoid'=min sum dist, "
+                   "'max_likelihood'=argmax token seq logprob, 'random'=uniform, "
                    "'value'=argmax ChunkQ critic (needs --chunk_q; Q-chunking QC analog)")
+@click.option('--selector_seed', default=0, type=int,
+              help="isolated CPU RNG seed for --bon_signal random")
 @click.option('--chunk_q', default=None, type=str,
               help="path to a ChunkQ critic .ckpt; attaches it so --bon_signal value ranks the "
                    "best-of-N candidates by learned Q(features, chunk) instead of consensus")
@@ -89,6 +92,7 @@ from typing import List, Optional
 @click.option('--env_task_name', default=None, type=str,
               help="override MetaworldRunner task_name (e.g. mt4 or box-close). "
                    "Use mt4 for interleaved MT4 eval; single subtask for per-task paper eval.")
+@click.option('--force', is_flag=True, default=False, help="overwrite output_dir without prompting")
 def eval_policy_sim(
     checkpoint: str,
     output_dir: str,
@@ -109,6 +113,7 @@ def eval_policy_sim(
     r_threshold: float = 0.5,
     bon_free: int = 0,
     bon_signal: str = 'vote',
+    selector_seed: int = 0,
     chunk_q: Optional[str] = None,
     bon_prefix_k: int = 0,
     bon_first_temp: float = 0.0,
@@ -116,10 +121,15 @@ def eval_policy_sim(
     n_test: Optional[int] = None,
     test_start_seed: Optional[int] = None,
     env_task_name: Optional[str] = None,
+    force: bool = False,
 ):
     if os.path.exists(output_dir):
-        click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
-        os.system(f"rm -rf {output_dir}")
+        if force:
+            import shutil
+            shutil.rmtree(output_dir)
+        else:
+            click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
+            os.system(f"rm -rf {output_dir}")
     pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
     
     # grab all checkpoints
@@ -227,10 +237,11 @@ def eval_policy_sim(
             kwargs['bon_signal'] = bon_signal
             kwargs['bon_prefix_k'] = bon_prefix_k
             kwargs['bon_first_temp'] = bon_first_temp
+            kwargs['selector_seed'] = selector_seed
             mode = f"coarse-to-fine prefix_k={bon_prefix_k}" if 0 < bon_prefix_k else "flat"
             if bon_first_temp > 0:
                 mode += f", first_token_temp={bon_first_temp}"
-            print(f"verifier-free BoN: N={bon_free}, signal={bon_signal}, {mode}")
+            print(f"verifier-free BoN: N={bon_free}, signal={bon_signal}, selector_seed={selector_seed}, {mode}")
         runner_log = env_runner.run(
             policy,
             **kwargs

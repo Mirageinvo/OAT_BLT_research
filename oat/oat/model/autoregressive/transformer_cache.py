@@ -251,7 +251,8 @@ class AutoregressiveModel(ModuleAttrMixin):
         temperature: float = 1.0,
         top_k: Optional[int] = None,
         eos_id: Optional[int] = None,
-    ) -> torch.LongTensor:
+        return_logprobs: bool = False,
+    ):
         """
         Generate tokens autoregressively with KV Caching.
         prefix: (B, T_pre)
@@ -261,7 +262,9 @@ class AutoregressiveModel(ModuleAttrMixin):
         top_k: Optional[int], if specified, use top-k sampling
         eos_id: Optional[int], if specified, stop generation when eos_id is generated
             all subsequent tokens will be set to eos_id
-        output: (B, T_pre + max_new_tokens)
+        return_logprobs: if True, also return per-new-token log-probs under the
+            actual sampling distribution (temperature + top-k mask + log_softmax)
+        output: (B, T_pre + max_new_tokens) or (tokens, logprobs [B, max_new_tokens])
         """        
         # --- Pre-computation for condition ---
         T_cond = cond.shape[1]
@@ -298,18 +301,26 @@ class AutoregressiveModel(ModuleAttrMixin):
         # --- Phase 2: Autoregressively generate new tokens ---
         out_tokens = prefix
         finished = torch.zeros(B_mem, dtype=torch.bool, device=prefix.device) if eos_id is not None else None
+        step_logprobs = [] if return_logprobs else None
         for i in range(max_new_tokens):
             # Sample the next token
+            step_logits = logits.squeeze(1)
             if temperature > 0:
-                logits = logits.squeeze(1) / temperature
+                step_logits = step_logits / temperature
                 if top_k is not None:
-                    v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                    logits[logits < v[:, [-1]]] = -float('Inf')
-                
-                probs = F.softmax(logits, dim=-1)
+                    v, _ = torch.topk(step_logits, min(top_k, step_logits.size(-1)))
+                    step_logits = step_logits.clone()
+                    step_logits[step_logits < v[:, [-1]]] = -float('Inf')
+                log_probs = F.log_softmax(step_logits, dim=-1)
+                probs = log_probs.exp()
                 next_token = torch.multinomial(probs, num_samples=1)
             else:
-                next_token = torch.argmax(logits.squeeze(1), dim=-1, keepdim=True)  # [B, 1]
+                next_token = torch.argmax(step_logits, dim=-1, keepdim=True)  # [B, 1]
+                log_probs = F.log_softmax(step_logits, dim=-1)
+
+            if return_logprobs:
+                gathered = log_probs.gather(1, next_token).squeeze(1)  # [B]
+                step_logprobs.append(gathered)
             
             # if an EOS token is generated, mark the sequence as finished
             # and replace all subsequent tokens with EOS
@@ -349,4 +360,14 @@ class AutoregressiveModel(ModuleAttrMixin):
             x = self.ln_f(x)
             logits = self.head(x)
         
+        if return_logprobs:
+            # [B, n_generated]; pad with 0 if early-stopped (should not happen without eos)
+            if step_logprobs:
+                lp = torch.stack(step_logprobs, dim=1)
+            else:
+                lp = out_tokens.new_zeros(out_tokens.shape[0], 0, dtype=torch.float32)
+            if lp.shape[1] < max_new_tokens:
+                pad = lp.new_zeros(lp.shape[0], max_new_tokens - lp.shape[1])
+                lp = torch.cat([lp, pad], dim=1)
+            return out_tokens, lp
         return out_tokens

@@ -262,12 +262,29 @@ class OATPolicy(BasePolicy):
 
     @torch.inference_mode()
     def _bon_select(self, cand_b: torch.Tensor, R: int, bon_signal: str,
-                    features_b: Optional[torch.Tensor] = None) -> int:
+                    features_b: Optional[torch.Tensor] = None,
+                    seq_logprob_b: Optional[torch.Tensor] = None,
+                    sel_generator: Optional[torch.Generator] = None) -> int:
         """Pick the best candidate index from [N, H, D] by a ranking signal over the executed
-        prefix R (normalizer space). 'vote' = mode-seeking KDE density (pick the candidate in
-        the densest region — NOT centroid-averaging, which across multimodal plans gives an
-        invalid action); 'medoid' = min sum of distances to the others; 'value' = argmax of an
-        attached ChunkQ critic Q(features, chunk) (Q-chunking QC analog; needs features_b)."""
+        prefix R (normalizer space).
+        - 'vote' = mode-seeking KDE density (CS / paper primary)
+        - 'medoid' = min sum of distances to the others
+        - 'max_likelihood' = argmax sum token log-prob under sampling distribution
+        - 'random' = Uniform{0..N-1} via sel_generator (does not touch global RNG)
+        - 'value' = argmax ChunkQ (needs features_b)
+        """
+        N = cand_b.shape[0]
+        if N == 1:
+            return 0
+        if bon_signal == 'random':
+            if sel_generator is None:
+                return int(torch.randint(0, N, (1,)).item())
+            return int(torch.randint(0, N, (1,), generator=sel_generator).item())
+        if bon_signal == 'max_likelihood':
+            if seq_logprob_b is None:
+                raise ValueError("max_likelihood requires seq_logprob_b [N]")
+            # deterministic tie-break: lowest index
+            return int(seq_logprob_b.argmax().item())
         norm = self.action_tokenizer.normalizer['action']
         a = norm.normalize(cand_b[:, :R])             # [N, R, D]
         if bon_signal == 'value' and getattr(self, 'chunk_q', None) is not None:
@@ -276,22 +293,35 @@ class OATPolicy(BasePolicy):
         flat = a.reshape(cand_b.shape[0], -1)         # [N, R*D]
         dist = torch.cdist(flat, flat)                # [N, N]
         if bon_signal == 'medoid':
+            # min sum L2 to others; diagonal 0 does not change argmin; tie -> min index
             return int(dist.sum(dim=1).argmin())
         off = dist[dist > 0]                          # 'vote' = mode-seeking KDE density
         sigma = (off.median() if off.numel() > 0 else dist.new_tensor(1.0)) + 1e-6
         dens = torch.exp(-(dist ** 2) / (2 * sigma ** 2)).sum(dim=1)
         return int(dens.argmax())
 
-    def _bon_sample(self, cond, n_new, temperature, topk, first_temp):
+    def _bon_sample(self, cond, n_new, temperature, topk, first_temp,
+                    return_logprobs: bool = False):
         """Sample n_new tokens for each row of cond. If first_temp>0 (idea #3), draw the
         FIRST token (the 'mode' token) at first_temp to inject mode diversity, then continue
         the tail at the base temperature (clean refinement). OAT-unique: only an ordered
-        token code has a 'first token' to target. Returns [B, n_new]."""
+        token code has a 'first token' to target.
+        Returns [B, n_new] or ([B, n_new], logprobs [B, n_new]) if return_logprobs."""
         B = cond.shape[0]
         bos = torch.full((B, 1), self.bos_id, dtype=torch.long, device=self.device)
         if not (first_temp and first_temp > 0) or n_new < 1:
-            return self.model.generate(bos, cond=cond, max_new_tokens=n_new,
-                                       temperature=temperature, top_k=topk)[:, 1:]
+            out = self.model.generate(
+                bos, cond=cond, max_new_tokens=n_new,
+                temperature=temperature, top_k=topk, return_logprobs=return_logprobs,
+            )
+            if return_logprobs:
+                tokens, lp = out
+                return tokens[:, 1:], lp
+            return out[:, 1:]
+        # first-token temperature path: only used for exploration ablations; logprobs
+        # under mixed T are not the paper max_likelihood score — refuse if requested.
+        if return_logprobs:
+            raise ValueError("return_logprobs unsupported with bon_first_temp > 0")
         t1 = self.model.generate(bos, cond=cond, max_new_tokens=1,
                                  temperature=first_temp, top_k=topk)        # [B, 2]
         if n_new == 1:
@@ -309,6 +339,7 @@ class OATPolicy(BasePolicy):
         bon_signal: str = 'vote',
         bon_prefix_k: int = 0,
         bon_first_temp: float = 0.0,
+        selector_seed: Optional[int] = None,
     ) -> Dict[str, torch.Tensor]:
         """Verifier-free best-of-N. Per env: encode vision ONCE (amortized), sample bon_n
         candidate plans from the cheap AR head, pick by a FREE consensus signal (see
@@ -333,19 +364,41 @@ class OATPolicy(BasePolicy):
 
         coarse_to_fine = 0 < bon_prefix_k < use_k_tokens
         gen_k = bon_prefix_k if coarse_to_fine else use_k_tokens
+        need_lp = (bon_signal == 'max_likelihood')
 
         features = self.obs_encoder(obs_dict)        # [B, To, d]  (vision computed once)
         B = features.shape[0]
         feat_rep = features.repeat_interleave(bon_n, dim=0)   # [B*N, To, d]
-        tokens = self._bon_sample(feat_rep, gen_k, temperature, topk, bon_first_temp)  # [B*N, gen_k]
+        sampled = self._bon_sample(
+            feat_rep, gen_k, temperature, topk, bon_first_temp,
+            return_logprobs=need_lp,
+        )
+        if need_lp:
+            tokens, tok_lp = sampled                     # [B*N, gen_k], [B*N, gen_k]
+            seq_lp = tok_lp.sum(dim=-1).reshape(B, bon_n)  # [B, N]
+        else:
+            tokens = sampled
+            seq_lp = None
         cand = self.action_tokenizer.detokenize(tokens, eval_keep_k=[gen_k] * (B * bon_n))
         H, Dd = cand.shape[1], cand.shape[2]
         cand = cand.reshape(B, bon_n, H, Dd)          # [B, N, H, D] (repeat_interleave layout)
         tokens = tokens.reshape(B, bon_n, gen_k)
 
         R = min(self.n_action_steps, H)               # rank over the executed prefix only
+        sel_gen = None
+        if bon_signal == 'random':
+            # CPU generator — isolated from CUDA sampling RNG / torch default RNG
+            sel_gen = torch.Generator(device='cpu')
+            seed = 0 if selector_seed is None else int(selector_seed)
+            # per-call uniqueness without touching global RNG: hash seed with batch id
+            sel_gen.manual_seed(seed)
+
         best_idx = torch.tensor(
-            [self._bon_select(cand[b], R, bon_signal, features[b]) for b in range(B)],
+            [self._bon_select(
+                cand[b], R, bon_signal, features[b],
+                seq_logprob_b=(None if seq_lp is None else seq_lp[b]),
+                sel_generator=sel_gen,
+            ) for b in range(B)],
             device=self.device, dtype=torch.long)
         ar = torch.arange(B, device=self.device)
         chosen_tokens = tokens[ar, best_idx]          # [B, gen_k]
@@ -364,9 +417,16 @@ class OATPolicy(BasePolicy):
             chosen = cand[ar, best_idx]                                 # [B, H, D]
 
         action = chosen[:, :self.n_action_steps]
-        return {'action': action, 'action_pred': chosen,
-                'n_tokens': float(use_k_tokens), 'bon_n': float(bon_n),
-                'bon_prefix_k': float(gen_k)}
+        out = {'action': action, 'action_pred': chosen,
+               'n_tokens': float(use_k_tokens), 'bon_n': float(bon_n),
+               'bon_prefix_k': float(gen_k),
+               'selected_idx': best_idx.detach().float().mean()}
+        if seq_lp is not None:
+            out['seq_logprob_selected'] = float(seq_lp[ar, best_idx].mean().item())
+            out['seq_logprob_mean'] = float(seq_lp.mean().item())
+            out['seq_logprob_std'] = float(seq_lp.std().item())
+            out['seq_logprob_max'] = float(seq_lp.max().item())
+        return out
 
     def predict_action_adaptive(self,
         obs_dict: Dict[str, torch.Tensor],
@@ -383,6 +443,7 @@ class OATPolicy(BasePolicy):
         bon_signal: str = 'vote',
         bon_prefix_k: int = 0,
         bon_first_temp: float = 0.0,
+        selector_seed: Optional[int] = None,
     ) -> Dict[str, torch.Tensor]:
         # verifier-free best-of-N: sample bon_free candidate plans (vision encoded ONCE,
         # amortized), pick by a free intrinsic signal (mode-seeking consensus / likelihood).
@@ -392,6 +453,7 @@ class OATPolicy(BasePolicy):
                 obs_dict, bon_n=bon_free, use_k_tokens=use_k_tokens,
                 temperature=temperature, topk=topk, bon_signal=bon_signal,
                 bon_prefix_k=bon_prefix_k, bon_first_temp=bon_first_temp,
+                selector_seed=selector_seed,
             )
         # variable-R execution (GATE 1): hold K fixed (= use_k_tokens, default full
         # budget) and adapt the executed chunk length R per observation. Distinct axis
