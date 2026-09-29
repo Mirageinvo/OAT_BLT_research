@@ -66,10 +66,14 @@ from typing import List, Optional
 @click.option('--bon_free', default=0, type=int,
               help="verifier-free best-of-N: sample N candidate plans per replan (vision "
                    "amortized), pick by a FREE signal (no trained verifier). 0=off.")
-@click.option('--bon_signal', default='vote', type=click.Choice(['vote', 'medoid', 'value', 'random', 'max_likelihood']),
+@click.option('--bon_signal', default='vote', type=click.Choice(['vote', 'medoid', 'value', 'random', 'max_likelihood', 'kdpe']),
               help="ranking signal: 'vote'=mode-seeking KDE density, 'medoid'=min sum dist, "
                    "'max_likelihood'=argmax token seq logprob, 'random'=uniform, "
+                   "'kdpe'=KDPE-style endpoint KDE (OAT adaptation; flat BoN only), "
                    "'value'=argmax ChunkQ critic (needs --chunk_q; Q-chunking QC analog)")
+@click.option('--kdpe_bandwidth', default=0.05, type=float, show_default=True,
+              help="KDPE base bandwidth b; sigma_pos/rot/grip = b/5b/20b (0.05/0.25/1.0). "
+                   "Only used with --bon_signal kdpe.")
 @click.option('--selector_seed', default=0, type=int,
               help="isolated CPU RNG seed for --bon_signal random")
 @click.option('--chunk_q', default=None, type=str,
@@ -114,6 +118,7 @@ def eval_policy_sim(
     bon_free: int = 0,
     bon_signal: str = 'vote',
     selector_seed: int = 0,
+    kdpe_bandwidth: float = 0.05,
     chunk_q: Optional[str] = None,
     bon_prefix_k: int = 0,
     bon_first_temp: float = 0.0,
@@ -238,6 +243,13 @@ def eval_policy_sim(
             kwargs['bon_prefix_k'] = bon_prefix_k
             kwargs['bon_first_temp'] = bon_first_temp
             kwargs['selector_seed'] = selector_seed
+            if bon_signal == 'kdpe':
+                if bon_prefix_k > 0 or bon_first_temp > 0:
+                    raise click.UsageError(
+                        "--bon_signal kdpe requires flat BoN (--bon_prefix_k 0 --bon_first_temp 0)")
+                kwargs['kdpe_bandwidth'] = kdpe_bandwidth
+                print(f"KDPE-OAT: bandwidth={kdpe_bandwidth} -> sigma pos/rot/grip = "
+                      f"{kdpe_bandwidth}/{5 * kdpe_bandwidth}/{20 * kdpe_bandwidth}")
             mode = f"coarse-to-fine prefix_k={bon_prefix_k}" if 0 < bon_prefix_k else "flat"
             if bon_first_temp > 0:
                 mode += f", first_token_temp={bon_first_temp}"
@@ -284,6 +296,18 @@ def eval_policy_sim(
         json_log = dict()
         json_log['checkpoint'] = ckpt
         json_log['num_exp'] = num_exp
+        json_log['bon_config'] = {
+            'bon_free': bon_free, 'bon_signal': bon_signal if bon_free > 1 else None,
+            'bon_prefix_k': bon_prefix_k, 'bon_first_temp': bon_first_temp,
+            'use_k_tokens': use_k_tokens, 'temperature': temperature, 'topk': topk,
+            'n_action_steps': n_action_steps,
+        }
+        if bon_free > 1 and bon_signal == 'kdpe':
+            json_log['bon_config'].update({
+                'kdpe_bandwidth': kdpe_bandwidth,
+                'sigma_pos': kdpe_bandwidth, 'sigma_rot': 5 * kdpe_bandwidth,
+                'sigma_grip': 20 * kdpe_bandwidth,
+            })
         
         # Add mean values
         for key, value in mean_log.items():

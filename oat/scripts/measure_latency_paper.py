@@ -274,6 +274,21 @@ def _resolve_suite_paths(suite: str) -> tuple[Path, Path]:
     help="comma-separated BoN N values to time, e.g. 8 or 16,32 or 8,16,32",
 )
 @click.option(
+    "--bon_signal",
+    default="vote",
+    type=click.Choice(["vote", "medoid", "random", "max_likelihood", "kdpe"]),
+    show_default=True,
+    help="BoN selector to time via the real predict_action_adaptive path. "
+    "Non-vote signals write separate mode keys / default output file.",
+)
+@click.option(
+    "--kdpe_bandwidth",
+    default=0.05,
+    type=float,
+    show_default=True,
+    help="KDPE base bandwidth (sigma pos/rot/grip = b/5b/20b); only with --bon_signal kdpe",
+)
+@click.option(
     "--include_single/--no_single",
     default=True,
     show_default=True,
@@ -304,6 +319,8 @@ def main(
     fair_kv: bool,
     skip_awr: bool,
     bon_ns: str,
+    bon_signal: str,
+    kdpe_bandwidth: float,
     include_single: bool,
     base_ckpt: Optional[str],
     awr16_ckpt: Optional[str],
@@ -369,6 +386,8 @@ def main(
     )
     if out:
         out_path = Path(out)
+    elif bon_signal != "vote":
+        out_path = suite_dir / f"latency_bon_{bon_signal}.json"
     elif fair_kv and extended:
         out_path = suite_dir / "latency_fair_kv_n16.json"
     elif fair_kv:
@@ -406,6 +425,10 @@ def main(
     print(f"awr_ckpt={awr_ckpt if not skip_awr else '(skipped)'}")
     print(f"awr16_ckpt={awr16_ckpt or '(none)'}")
     print(f"bon_ns={bon_list} include_single={include_single} skip_awr={skip_awr}")
+    print(
+        f"bon_signal={bon_signal}"
+        + (f" kdpe_bandwidth={kdpe_bandwidth}" if bon_signal == "kdpe" else "")
+    )
     print(f"device={device} gpu={gpu_name} batch=1 reps={reps} trials={trials} warmup={warmup}")
     print(f"out={out_path}")
 
@@ -498,6 +521,11 @@ def main(
 
         for n_bon in bon_list:
             mode_key = "bon" if n_bon == 8 else f"bon{n_bon}"
+            if bon_signal != "vote":
+                mode_key = f"bon{n_bon}_{bon_signal}"
+            bon_extra: Dict[str, Any] = (
+                {"kdpe_bandwidth": kdpe_bandwidth} if bon_signal == "kdpe" else {}
+            )
 
             def run_bon(n_bon=n_bon):
                 base_policy.predict_action_adaptive(
@@ -507,7 +535,8 @@ def main(
                     temperature=1.0,
                     topk=10,
                     bon_free=n_bon,
-                    bon_signal="vote",
+                    bon_signal=bon_signal,
+                    **bon_extra,
                 )
 
             modes[mode_key] = {
@@ -519,12 +548,13 @@ def main(
                     "temperature": 1.0,
                     "topk": 10,
                     "bon_free": n_bon,
-                    "bon_signal": "vote",
+                    "bon_signal": bon_signal,
+                    **bon_extra,
                 },
                 **_time_mode_trials(
                     run_bon,
                     prep=_prep_mode,
-                    label=f"bon N={n_bon} vote",
+                    label=f"bon N={n_bon} {bon_signal}",
                     warmup=warmup,
                     reps=reps,
                     trials=trials,
@@ -708,7 +738,7 @@ def main(
 
     sr = {
         "baseline": summary.get("baseline_n5") or summary.get("baseline"),
-        "bon": summary.get("bon_n8_n5") or summary.get("bon"),
+        "bon": (summary.get("bon_n8_n5") or summary.get("bon")) if bon_signal == "vote" else None,
         "awr": summary.get("awr_n5"),
         "note": "SR from Table P / summary — not remeasured",
     }
@@ -734,6 +764,8 @@ def main(
         "fair_kv": fair_kv,
         "fair_single": fair_kv,
         "skip_awr": skip_awr,
+        "bon_signal": bon_signal,
+        "kdpe_bandwidth": kdpe_bandwidth if bon_signal == "kdpe" else None,
         "extended_bon": extended,
         "fairness": {
             "obs_counter_reset_per_mode": True,

@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from typing import Dict, Optional, Tuple
 
 from oat.policy.base_policy import BasePolicy
+from oat.policy.kdpe import kdpe_endpoint_scores
 from oat.tokenizer.oat.tokenizer import OATTok
 from oat.perception.base_obs_encoder import BaseObservationEncoder
 # from oat.model.autoregressive.transformer import AutoregressiveModel
@@ -264,13 +265,16 @@ class OATPolicy(BasePolicy):
     def _bon_select(self, cand_b: torch.Tensor, R: int, bon_signal: str,
                     features_b: Optional[torch.Tensor] = None,
                     seq_logprob_b: Optional[torch.Tensor] = None,
-                    sel_generator: Optional[torch.Generator] = None) -> int:
+                    sel_generator: Optional[torch.Generator] = None,
+                    kdpe_bandwidth: float = 0.05) -> int:
         """Pick the best candidate index from [N, H, D] by a ranking signal over the executed
         prefix R (normalizer space).
         - 'vote' = mode-seeking KDE density (CS / paper primary)
         - 'medoid' = min sum of distances to the others
         - 'max_likelihood' = argmax sum token log-prob under sampling distribution
         - 'random' = Uniform{0..N-1} via sel_generator (does not touch global RNG)
+        - 'kdpe' = KDPE-style endpoint KDE (OAT adaptation): density of the LAST executed
+          action cand_b[:, R-1] only, raw (de-normalized) 7-D actions, SO(3)-aware kernel
         - 'value' = argmax ChunkQ (needs features_b)
         """
         N = cand_b.shape[0]
@@ -285,6 +289,10 @@ class OATPolicy(BasePolicy):
                 raise ValueError("max_likelihood requires seq_logprob_b [N]")
             # deterministic tie-break: lowest index
             return int(seq_logprob_b.argmax().item())
+        if bon_signal == 'kdpe':
+            # cand_b is already raw env actions (detokenize un-normalizes): no normalizer here.
+            scores = kdpe_endpoint_scores(cand_b, execution_horizon=R, bandwidth=kdpe_bandwidth)
+            return int(scores.argmax().item())
         norm = self.action_tokenizer.normalizer['action']
         a = norm.normalize(cand_b[:, :R])             # [N, R, D]
         if bon_signal == 'value' and getattr(self, 'chunk_q', None) is not None:
@@ -340,6 +348,7 @@ class OATPolicy(BasePolicy):
         bon_prefix_k: int = 0,
         bon_first_temp: float = 0.0,
         selector_seed: Optional[int] = None,
+        kdpe_bandwidth: float = 0.05,
     ) -> Dict[str, torch.Tensor]:
         """Verifier-free best-of-N. Per env: encode vision ONCE (amortized), sample bon_n
         candidate plans from the cheap AR head, pick by a FREE consensus signal (see
@@ -363,6 +372,10 @@ class OATPolicy(BasePolicy):
             topk = self.topk
 
         coarse_to_fine = 0 < bon_prefix_k < use_k_tokens
+        if bon_signal == 'kdpe' and (coarse_to_fine or bon_first_temp > 0):
+            raise ValueError(
+                "bon_signal='kdpe' is defined only for flat BoN: need bon_prefix_k=0 and "
+                "bon_first_temp=0")
         gen_k = bon_prefix_k if coarse_to_fine else use_k_tokens
         need_lp = (bon_signal == 'max_likelihood')
 
@@ -398,6 +411,7 @@ class OATPolicy(BasePolicy):
                 cand[b], R, bon_signal, features[b],
                 seq_logprob_b=(None if seq_lp is None else seq_lp[b]),
                 sel_generator=sel_gen,
+                kdpe_bandwidth=kdpe_bandwidth,
             ) for b in range(B)],
             device=self.device, dtype=torch.long)
         ar = torch.arange(B, device=self.device)
@@ -444,6 +458,7 @@ class OATPolicy(BasePolicy):
         bon_prefix_k: int = 0,
         bon_first_temp: float = 0.0,
         selector_seed: Optional[int] = None,
+        kdpe_bandwidth: float = 0.05,
     ) -> Dict[str, torch.Tensor]:
         # verifier-free best-of-N: sample bon_free candidate plans (vision encoded ONCE,
         # amortized), pick by a free intrinsic signal (mode-seeking consensus / likelihood).
@@ -453,7 +468,7 @@ class OATPolicy(BasePolicy):
                 obs_dict, bon_n=bon_free, use_k_tokens=use_k_tokens,
                 temperature=temperature, topk=topk, bon_signal=bon_signal,
                 bon_prefix_k=bon_prefix_k, bon_first_temp=bon_first_temp,
-                selector_seed=selector_seed,
+                selector_seed=selector_seed, kdpe_bandwidth=kdpe_bandwidth,
             )
         # variable-R execution (GATE 1): hold K fixed (= use_k_tokens, default full
         # budget) and adapt the executed chunk length R per observation. Distinct axis
