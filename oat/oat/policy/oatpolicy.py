@@ -281,9 +281,10 @@ class OATPolicy(BasePolicy):
         if N == 1:
             return 0
         if bon_signal == 'random':
+            # CPU-only draw — must NOT use CUDA default device (Generator is CPU).
             if sel_generator is None:
-                return int(torch.randint(0, N, (1,)).item())
-            return int(torch.randint(0, N, (1,), generator=sel_generator).item())
+                return int(torch.randint(0, N, (1,), device='cpu').item())
+            return int(torch.randint(0, N, (1,), generator=sel_generator, device='cpu').item())
         if bon_signal == 'max_likelihood':
             if seq_logprob_b is None:
                 raise ValueError("max_likelihood requires seq_logprob_b [N]")
@@ -295,7 +296,11 @@ class OATPolicy(BasePolicy):
             return int(scores.argmax().item())
         norm = self.action_tokenizer.normalizer['action']
         a = norm.normalize(cand_b[:, :R])             # [N, R, D]
-        if bon_signal == 'value' and getattr(self, 'chunk_q', None) is not None:
+        if bon_signal == 'value':
+            if getattr(self, 'chunk_q', None) is None:
+                raise ValueError("bon_signal='value' requires set_chunk_q(...)")
+            if features_b is None:
+                raise ValueError("bon_signal='value' requires features_b")
             feat = features_b.unsqueeze(0).expand(a.shape[0], -1, -1)   # [N, To, d]
             return int(self.chunk_q.score(feat, a).argmax())
         flat = a.reshape(cand_b.shape[0], -1)         # [N, R*D]
@@ -303,10 +308,15 @@ class OATPolicy(BasePolicy):
         if bon_signal == 'medoid':
             # min sum L2 to others; diagonal 0 does not change argmin; tie -> min index
             return int(dist.sum(dim=1).argmin())
-        off = dist[dist > 0]                          # 'vote' = mode-seeking KDE density
-        sigma = (off.median() if off.numel() > 0 else dist.new_tensor(1.0)) + 1e-6
-        dens = torch.exp(-(dist ** 2) / (2 * sigma ** 2)).sum(dim=1)
-        return int(dens.argmax())
+        if bon_signal == 'vote':
+            off = dist[dist > 0]
+            sigma = (off.median() if off.numel() > 0 else dist.new_tensor(1.0)) + 1e-6
+            dens = torch.exp(-(dist ** 2) / (2 * sigma ** 2)).sum(dim=1)
+            return int(dens.argmax())
+        raise ValueError(
+            f"unknown bon_signal={bon_signal!r}; "
+            "expected one of vote|medoid|max_likelihood|random|value"
+        )
 
     def _bon_sample(self, cond, n_new, temperature, topk, first_temp,
                     return_logprobs: bool = False):
@@ -400,11 +410,16 @@ class OATPolicy(BasePolicy):
         R = min(self.n_action_steps, H)               # rank over the executed prefix only
         sel_gen = None
         if bon_signal == 'random':
-            # CPU generator — isolated from CUDA sampling RNG / torch default RNG
-            sel_gen = torch.Generator(device='cpu')
-            seed = 0 if selector_seed is None else int(selector_seed)
-            # per-call uniqueness without touching global RNG: hash seed with batch id
-            sel_gen.manual_seed(seed)
+            # Persistent CPU Generator: re-seeding every replan with a fixed seed made
+            # every episode pick the SAME first index (useless random baseline). Advance
+            # a call counter so each replan draws a fresh index, still reproducible.
+            if getattr(self, '_bon_sel_gen', None) is None:
+                self._bon_sel_gen = torch.Generator(device='cpu')
+                base = 0 if selector_seed is None else int(selector_seed)
+                self._bon_sel_gen.manual_seed(base)
+                self._bon_sel_calls = 0
+            sel_gen = self._bon_sel_gen
+            self._bon_sel_calls = int(getattr(self, '_bon_sel_calls', 0)) + 1
 
         best_idx = torch.tensor(
             [self._bon_select(
