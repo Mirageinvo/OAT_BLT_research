@@ -216,3 +216,12 @@ ccm (V100, EGL, код = копия `oat_code_kdpe` с aic4, `/workspace/oat/_kd
 - **P1 (идёт на aic4, старт ~10:42 MSK):** square base (GPU2), square vote2 (GPU0) и kdpe2 (GPU1) +5 повторов → слить в 10 exps и пересчитать парный CI; box-close vote → kdpe (GPU0); stick-pull vote → KDPE coffee-pull → KDPE disassemble (GPU1); после square base на GPU2 — lift vote → lift kdpe.
 - **P2 (воспроизводимость):** в `eval_policy_sim.py` добавлен `--policy_seed` (exp i сидится `policy_seed + i`: random/numpy/torch/cuda + cudnn.deterministic), пишется в `eval_log.json` и в каждую строку `episodes.jsonl`. По умолчанию выключен → очереди работают как раньше. Smoke: can vote, 2 раза с `--policy_seed 0` (2 exp × 8 эпизодов, изолированная копия `~/oat_code_seed`). Если совпадёт бит в бит → перепрогнать ключевые ячейки (square vote/kdpe, can vote/kdpe) с сидом. Если нет → в статье пишем «5 повторов на 50 фиксированных сценах».
 - **P3:** GPU-латентность CS vs KDPE, N=8/16/32, batch 1, протокол Table 5 (8 trials × 10 reps), на H100 aic4, когда GPU освободится. CPU уже есть: CS 0.027 мс, KDPE 0.098 мс. Если на GPU CS тоже быстрее → аргумент Парето, если нет → про преимущество в латентности не пишем.
+
+## Вечер 30 Sep (19:10 MSK)
+
+- **square (10 повторов, [E]):** CS 36.0 против KDPE 33.0, Δ +3.0, CI [−3.6, +9.8], p=0.42 — **не значимо**. Ночное +8.4 для CS по 5 повторам не подтвердилось (второй прогон: 33.2 против 35.6). Square base 32.4±3.3.
+- **box-close:** CS 68.8 против KDPE 58.8, Δ +10.0, CI [+3.6, +16.8], p=0.005. **stick-pull:** 28.8 против 18.0, Δ +10.8, CI [+3.6, +18.0], p=0.005.
+- **coffee-pull KDPE:** 41.6±3.0 (CS 44.4±3.8 непарно, Δ +2.8). **lift CS парно:** 94.8±1.1 против base 96.0 (Δ −1.2, CI [−5.2, +3.2]).
+- **Сбой GPU2 около 14:30:** lift KDPE упал 3 раза (`CUDA error: invalid argument`), square CS с сидом завис. GPU2 проверен, в порядке; обе ячейки перезапущены 18:55.
+- **Confirmatory:** square KDPE с сидом 33.6±7.9 ≈ [E] 33.0 (парно Δ +0.6).
+- **GPU0 освобождён** (снят seed stick-pull CS/KDPE).
