@@ -215,7 +215,7 @@ ccm (V100, EGL, код = копия `oat_code_kdpe` с aic4, `/workspace/oat/_kd
 ### Приоритеты
 - **P1 (идёт на aic4, старт ~10:42 MSK):** square base (GPU2), square vote2 (GPU0) и kdpe2 (GPU1) +5 повторов → слить в 10 exps и пересчитать парный CI; box-close vote → kdpe (GPU0); stick-pull vote → KDPE coffee-pull → KDPE disassemble (GPU1); после square base на GPU2 — lift vote → lift kdpe.
 - **P2 (воспроизводимость):** в `eval_policy_sim.py` добавлен `--policy_seed` (exp i сидится `policy_seed + i`: random/numpy/torch/cuda + cudnn.deterministic), пишется в `eval_log.json` и в каждую строку `episodes.jsonl`. По умолчанию выключен → очереди работают как раньше. Smoke: can vote, 2 раза с `--policy_seed 0` (2 exp × 8 эпизодов, изолированная копия `~/oat_code_seed`). Если совпадёт бит в бит → перепрогнать ключевые ячейки (square vote/kdpe, can vote/kdpe) с сидом. Если нет → в статье пишем «5 повторов на 50 фиксированных сценах».
-- **P3:** GPU-латентность CS vs KDPE, N=8/16/32, batch 1, протокол Table 5 (8 trials × 10 reps), на H100 aic4, когда GPU освободится. CPU уже есть: CS 0.027 мс, KDPE 0.098 мс. Если на GPU CS тоже быстрее → аргумент Парето, если нет → про преимущество в латентности не пишем.
+- **P3: DONE (H100 GPU1, warmup=50, 8×20).** Selector-only CS 0.264/0.321/0.429 мс vs KDPE 0.535/0.676/0.680 мс при N=8/16/32; IQR CS и KDPE не пересекаются. Матрицы KDPE N×N (в т.ч. 32×32). Profiler: KDPE ~72 CUDA launches при любом N → launch-bound, не баг. Формулировка: §2.7 `AAMAS27_DUMP.md`.
 
 ## Вечер 30 Sep (19:10 MSK)
 
@@ -225,3 +225,4 @@ ccm (V100, EGL, код = копия `oat_code_kdpe` с aic4, `/workspace/oat/_kd
 - **Сбой GPU2 около 14:30:** lift KDPE упал 3 раза (`CUDA error: invalid argument`), square CS с сидом завис. GPU2 проверен, в порядке; обе ячейки перезапущены 18:55.
 - **Confirmatory:** square KDPE с сидом 33.6±7.9 ≈ [E] 33.0 (парно Δ +0.6).
 - **GPU0 освобождён** (снят seed stick-pull CS/KDPE).
+- **Latency H100 GPU1 (warmup=50, 8×20):** CS 0.264/0.321/0.429 vs KDPE 0.535/0.676/0.680 мс (N=8/16/32). KDPE 32×32 подтверждён; launches ~72 при любом N → launch-bound. IQR CS vs KDPE не пересекаются.

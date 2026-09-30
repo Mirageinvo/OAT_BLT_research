@@ -39,7 +39,7 @@
   - Fig. 2: схема single-deviation.
   - Fig. 3: масштабирование по N и CS против base по R.
   - Tables 1–3: диагностика K/R.
-  - Table 5: латентность на V100, batch 1, 8 trials × 10 повторов.
+  - Table 5: латентность на V100, batch 1, 8 trials × 10 повторов (PDF). Колонка KDPE на H100 — §2.7, не смешивать с V100.
 
 ---
 
@@ -128,6 +128,44 @@ coffee-pull CS − KDPE: +2.8 (44.4 против 41.6), **только непа�
 | stick-pull | — | — | — | — | **снят** 19:00: GPU0 освобождён под другую задачу |
 | coffee-pull | — | — | — | — | в очереди |
 | disassemble | — | — | — | — | в очереди |
+
+### 2.7 Table 5 — латентность селектора, H100 [канон]
+
+Карта: aic4 GPU1, H100 80GB, **пустая до старта** (0.0 MiB, util 0%). ckpt can ep-1700, R=16, K=8, batch 1, реальные кандидаты политики (KV-cache generate), одинаковый тензор на все селекторы. **warmup=50, 8 trials × 20 reps** (160 сэмплов), `cudnn.deterministic=True`, torch 2.10.0+cu128 / CUDA 12.8 / driver 595.71.05. Это не V100-числа PDF Table 5: другой GPU и меряется **шаг селектора**, не весь forward.
+
+Проверки, без которых формулировку не писали:
+- форма матриц KDPE **N×N** для каждого N: `(8,8)`, `(16,16)`, `(32,32)`; `scores.numel()=N`. N=32 **считается**.
+- `torch.profiler` CUDA launches: KDPE 74 / 73 / 71 при N=8/16/32 — **график операций не зависит от N** (те же ~72 kernel'а, больше элементов в тензоре). Это не баг усечения: при баге N=32 матрица была бы 16×16.
+- CS launches растут на N=32 (28 → 27 → 37): один `cdist` плюс median по off-diagonal.
+
+Selector-only, median [p25, p75] мс (все методы — **тот же прогон**, одинаковые кандидаты):
+
+| N | random | max_ll | medoid | CS (vote) | KDPE |
+|---|---|---|---|---|---|
+| 8 | 0.010 [0.010, 0.010] | 0.023 [0.023, 0.023] | 0.101 [0.100, 0.105] | 0.264 [0.261, 0.271] | 0.535 [0.528, 0.541] |
+| 16 | 0.010 [0.010, 0.011] | 0.027 [0.027, 0.027] | 0.120 [0.118, 0.123] | 0.321 [0.318, 0.327] | 0.676 [0.670, 0.680] |
+| 32 | 0.011 [0.010, 0.011] | 0.027 [0.027, 0.028] | 0.232 [0.230, 0.237] | 0.429 [0.423, 0.436] | 0.680 [0.673, 0.686] |
+
+CUDA launches N=8/16/32: random 0/0/0 · max_ll 2/1/0 · medoid 7/6/16 · CS 28/27/37 · KDPE 74/73/71.
+
+Скейл 32/16: CS **1.34×**; KDPE **1.01×** (IQR пересекаются) → launch-bound. Medoid 16→32: **1.94×** ≈ O(N) (один `cdist`, без KDE/median по всем парам в плотности).
+
+Полный пайплайн (vision+sample+select) ~28 мс — селектор <3% даже у KDPE. Pareto в статье — про **шаг селектора**.
+
+**Medoid vs CS (доминирует ли дешёвый метод).** Medoid в 2.6× быстрее CS при N=8. SR [E]:
+
+| | can | lift | square | stick-pull | box-close | coffee-pull |
+|---|---|---|---|---|---|---|
+| CS | 88.8 | 95.2 | **36.0** | **28.8** | **68.8** | 44.4 |
+| medoid | 88.8 | 96.8 | 29.6 | 18.8 | 67.2 | 44.0 |
+
+На can/lift (потолок) селекторы неразличимы. На задачах с запасом CS лучше: square +6.4, stick-pull +10.0. **Medoid не доминирует CS.** Формулировка: *on near-ceiling tasks all selectors are equivalent; CS is the only consensus method that keeps SR on headroom tasks while staying ~2× faster than KDPE.*
+
+Фигуры: `oat/docs/figures/table5_selector_latency.png`, `oat/docs/figures/table5_selector_pareto.png`.
+
+Артефакты: `~/oat_eval_out/latency/selector_latency_gpu1_n32diag.{json,md}`. Черновик на занятой GPU0 не использовать.
+
+**Формулировка CS vs KDPE:** CS is ~2× faster than KDPE on H100 (0.264–0.429 ms vs 0.535–0.680 ms for N=8–32). KDPE is launch-bound at N≥16 due to many small quaternion operations, while CS's single vectorized distance computation scales more efficiently.
 
 ---
 
@@ -239,7 +277,7 @@ coffee-pull CS − KDPE: +2.8 (44.4 против 41.6), **только непа�
 | can CS → KDPE | в очереди (после disassemble KDPE) | ~21:30 → ~01:00 |
 | coffee-pull, disassemble CS/KDPE | в очереди (после can) | завтра к вечеру |
 | stick-pull CS → KDPE [C] | **снят** (GPU0 освобождён по запросу) | — |
-| Латентность CS против KDPE на GPU (N=8/16/32, batch 1, 8×10) | не начато; нужна свободная карта | — |
+| Латентность CS против KDPE на GPU (H100 GPU1, warmup=50, 8×20) | **готово**, §2.7; KDPE launch-bound N≥16 | — |
 | V100: RoboCasa microwave max_ll | статус не проверен (GPU был на 0%) | неопределённость |
 
 Итого: основные exploratory-числа будут к ~22:00 сегодня (сдвиг из-за сбоя GPU2 около 14:30), confirmatory с сидом — к завтрашнему вечеру. GPU0 aic4 с 19:00 свободен от наших эвалов. Латентность на CPU уже есть: CS 0.027 мс, KDPE 0.098 мс, medoid 0.013 мс на выбор. На GPU не мерили.
@@ -258,7 +296,7 @@ coffee-pull CS − KDPE: +2.8 (44.4 против 41.6), **только непа�
 6. **RoboCasa KDPE.** Писать «not applicable (12D mobile-manipulation action with base/torso/mode dims; KDPE defined for arm-only D=4/7)» или адаптировать KDPE к 12D (новая реализация и новые прогоны)?
 7. **Таблица селекторов.** Показываем отдельной таблицей в нашем протоколе, с нашим CS как опорной строкой. Сравнение наших random, medoid, max_ll с CS из Table 4 было бы смешением пайплайнов (особенно на RoboCasa, где наш random ≥ наш CS). Согласен?
 8. **Повторы.** Добивать до 10 повторов на ключевых парах CS против KDPE?
-9. **Латентность.** На какой карте мерить CS против KDPE: H100 aic4, когда освободится, или V100, как в Table 5?
+9. **Латентность.** Замерено на **H100 aic4 GPU1** (чистая карта), не на V100 Table 5. Колонка KDPE и формулировка — §2.7. V100 Table 5 из PDF не пересчитывали.
 
 ---
 
@@ -289,6 +327,7 @@ coffee-pull CS − KDPE: +2.8 (44.4 против 41.6), **только непа�
 - Сводка по селекторам: `oat/docs/SELECTOR_BASELINES_STATUS.md`.
 - Протокол: `oat/docs/SELECTOR_BASELINES_PROTOCOL.md`.
 - CS против KDPE (основные и с сидом): `oat/docs/CS_VS_KDPE_TABLE.md`.
+- **Латентность Table 5 (полная таблица + комментарии агента): `oat/docs/TABLE5_LATENCY.md`.**
 - aic4:
   - журнал очередей `~/oat_eval_out/queues.log`;
   - парные прогоны `~/oat_eval_out/paired/<task>/<method>/`;
