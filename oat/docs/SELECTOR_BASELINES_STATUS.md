@@ -1,8 +1,8 @@
 # Selector baselines — status ledger (branch `aamas27_selector_baselines`)
 
-Updated: **2026-10-01 17:55 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG selectors (GPU0, no SR yet).
+Updated: **2026-10-01 21:20 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG.
 
-**1 Oct 17:55 — CS vs KDPE (не смешивать [E]/[C]):** [`CS_VS_KDPE_TABLE.md`](CS_VS_KDPE_TABLE.md), дамп [`AAMAS27_DUMP.md`](AAMAS27_DUMP.md) §2.5–2.6. [C] 6/7 пар готовы (остался coffee kdpe). GPU0 = LIBERO vote+random; GPU1 = coffee kdpe **[C]** + disassemble kdpe **[E]**; GPU2 = stick kdpe **[E]**. Leftover coffee kdpe **[E]** на cuda:0 — SIGSTOP.
+**1 Oct 21:20 — CS vs KDPE:** [C] **7/7 готово**. [E] stick jsonl 23.2 (p=0.12, старый 18.0 не использовать); disassemble 63.6; coffee kdpe [E] на GPU1. GPU0 = LIBERO vote (Exp1 0.672) + random (exp1 ~85/125).
 
 **Progress (paper cells):** **40 / 44** done · **2** running on aic4 (close max_ll, mw vote) · **2** queued (mw medoid/max_ll) · KDPE 2/3 RoboMimic  
 **Hosts:** ccm EGL 2/GPU `n_par=2` · aic4 GPU2 OSMesa ≤2 RC `n_par=1` (GPU0/1 = VLA fits only)
