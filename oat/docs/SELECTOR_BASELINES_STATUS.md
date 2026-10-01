@@ -1,8 +1,8 @@
 # Selector baselines — status ledger (branch `aamas27_selector_baselines`)
 
-Updated: **2026-10-01 21:20 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG.
+Updated: **2026-10-02 00:40 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG.
 
-**1 Oct 21:20 — CS vs KDPE:** [C] **7/7 готово**. [E] stick jsonl 23.2 (p=0.12, старый 18.0 не использовать); disassemble 63.6; coffee kdpe [E] на GPU1. GPU0 = LIBERO vote (Exp1 0.672) + random (exp1 ~85/125).
+**2 Oct 00:40 — CS vs KDPE:** [E] coffee jsonl **готово** 42.8 vs 45.6 Δ−2.8 p=0.25 (старый 41.6 не использовать). [C] 7/7. LIBERO: vote Exp1/2 = 0.672/0.66 exp3~40/125; random exp1~124/125; kdpe Exp1 0.582; medoid Exp1 0.686.
 
 **Progress (paper cells):** **40 / 44** done · **2** running on aic4 (close max_ll, mw vote) · **2** queued (mw medoid/max_ll) · KDPE 2/3 RoboMimic  
 **Hosts:** ccm EGL 2/GPU `n_par=2` · aic4 GPU2 OSMesa ≤2 RC `n_par=1` (GPU0/1 = VLA fits only)
@@ -61,7 +61,7 @@ PDF columns = Table 4 of `oat-aaai.pdf` (± = **SE** across 5 seeds). Our column
 | Task | ckpt | PDF base | PDF CS-8 | vote | random | medoid | max_ll | KDPE | Δvote | check |
 |------|------|----------|----------|------|--------|--------|--------|------|-------|-------|
 | box-close | ep-2000 | 59.6±3.5 | 66.4±3.0 | **69.6±1.7** | 61.6±5.4 | 67.2±3.0 | 66.4±3.3 | 62.4±3.8 | +3.2 | **ok** |
-| coffee-pull | ep-1000 | 40.8±2.3 | 43.2±4.8 | **42.8±3.3** (парно; старый 44.4±3.8) | 43.2±3.9 | 44.0±0.0 | 46.0±3.2 | 41.6±3.0 (jsonl [E] rerun GPU2) | −0.4 vs PDF | **ok** |
+| coffee-pull | ep-1000 | 40.8±2.3 | 43.2±4.8 | **42.8±3.3** (парно; старый 44.4±3.8) | 43.2±3.9 | 44.0±0.0 | 46.0±3.2 | **45.6±3.0 (jsonl)** / старый 41.6 не использовать | −0.4 vs PDF | **ok** |
 | stick-pull | ep-0800 | 15.6±6.2 | 25.6±2.6 | **26.8±4.1** | 16.4±2.2 | 18.8±2.7 | 14.8±7.4 | 18.0±4.2 | +1.2 | **pass** |
 | disassemble | ep-1400 | 62.4±5.2 | 63.2±6.3 | **60.4±2.6** (парно; старый 65.6±4.3) | 56.8±4.6 | 63.2±3.0 | 64.0±4.9 | [E] kdpe queued GPU2 | −2.8 vs PDF | **ok** |
 
