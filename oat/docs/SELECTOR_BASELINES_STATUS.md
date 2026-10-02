@@ -1,8 +1,8 @@
 # Selector baselines — status ledger (branch `aamas27_selector_baselines`)
 
-Updated: **2026-10-02 00:40 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG.
+Updated: **2026-10-02 10:05 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG.
 
-**2 Oct 00:40 — CS vs KDPE:** [E] coffee jsonl **готово** 42.8 vs 45.6 Δ−2.8 p=0.25 (старый 41.6 не использовать). [C] 7/7. LIBERO: vote Exp1/2 = 0.672/0.66 exp3~40/125; random exp1~124/125; kdpe Exp1 0.582; medoid Exp1 0.686.
+**2 Oct 10:05 — LIBERO vote [E] готово 0.665±0.025.** random exp5 ~11/125 (4/5: ~0.55); kdpe exp5 ~19/125 (4/5: ~0.60); medoid застрял exp4 92/125 (тот же IPC wedge). Coffee [E] 42.8 vs 45.6 p=0.25. [C] 7/7.
 
 **Progress (paper cells):** **40 / 44** done · **2** running on aic4 (close max_ll, mw vote) · **2** queued (mw medoid/max_ll) · KDPE 2/3 RoboMimic  
 **Hosts:** ccm EGL 2/GPU `n_par=2` · aic4 GPU2 OSMesa ≤2 RC `n_par=1` (GPU0/1 = VLA fits only)

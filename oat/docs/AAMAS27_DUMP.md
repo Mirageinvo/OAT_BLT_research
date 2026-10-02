@@ -139,10 +139,10 @@ OAT8, n_test=500, `-n 5`. В статью — `mean_success_rate_mean`; per-task
 
 | Селектор | SR | Статус |
 |---|---|---|
-| vote | Exp1 **0.672**, Exp2 **0.66** (ещё 3/5) | GPU0, exp 3 ~40/125 |
-| random | — | GPU0, exp 1 ~124/125 (рестарт 18:38 UTC) |
-| kdpe | Exp1 **0.582** (ещё 4/5) | GPU1, exp 2 ~3/125 |
-| medoid | Exp1 **0.686** (ещё 4/5) | GPU2, exp 2 ~8/125 |
+| vote (CS) | **0.665±0.025** | **готово** (5/5; 0.672/0.660/0.704/0.652/0.638) |
+| random | Exp1–4: 0.558/0.568/0.558/0.528 | GPU0, exp 5 ~11/125 |
+| kdpe | Exp1–4: 0.582/0.636/0.564/0.632 | GPU1, exp 5 ~19/125 |
+| medoid | Exp1–3: 0.686/0.678/0.630 | GPU2, **застрял** exp4 ~92/125 (~1.7 ч, тот же IPC wedge) |
 | max_ll / base | — | очередь после random/medoid |
 
 ### 2.7 Table 5 — латентность селектора, H100 [канон]
@@ -272,7 +272,7 @@ CUDA launches N=8/16/32: random 0/0/0 · max_ll 2/1/0 · medoid 7/6/16 · CS 28/
 
 ---
 
-## 5. Статус ячеек (2 Oct 00:40 MSK)
+## 5. Статус ячеек (2 Oct 10:05 MSK)
 
 | Ячейка | Статус | Готово |
 |---|---|---|
@@ -281,10 +281,10 @@ CUDA launches N=8/16/32: random 0/0/0 · max_ll 2/1/0 · medoid 7/6/16 · CS 28/
 | disassemble CS / KDPE [E] | **готово** 60.4 vs 63.6, Δ −3.2 p=0.38 | — |
 | coffee-pull CS / KDPE [E] jsonl | **готово** 42.8 vs 45.6, Δ −2.8 p=0.25 | — |
 | **[C] все 7 пар** | **готово** (coffee 42.0 vs 44.4, Δ −2.4 p=0.18) | — |
-| LIBERO vote | Exp1 0.672, Exp2 0.66; exp3 ~40/125 | утро |
-| LIBERO random | exp1 ~124/125 (рестарт) | день |
-| LIBERO kdpe | Exp1 0.582; exp2 ~3/125 GPU1 | день |
-| LIBERO medoid | Exp1 0.686; exp2 ~8/125 GPU2 | день |
+| LIBERO vote (CS) | **готово 0.665±0.025** | — |
+| LIBERO random | Exp1–4 0.558/0.568/0.558/0.528; exp5 ~11/125 | ~2 ч |
+| LIBERO kdpe | Exp1–4 0.582/0.636/0.564/0.632; exp5 ~19/125 | ~2 ч |
+| LIBERO medoid | Exp1–3 0.686/0.678/0.630; **застрял** exp4 92/125 | рестарт как random |
 | LIBERO max_ll / base | очередь | после random/medoid |
 
 Leftover coffee-[E] на cuda:0 убит; новый [E] kdpe на GPU1. Старые GPU1-lane по-прежнему SIGSTOP (не CONT).
