@@ -142,7 +142,7 @@ OAT8, n_test=500, `-n 5`. В статью — `mean_success_rate_mean`; per-task
 | vote (CS) | **0.665±0.025** | **готово** (5/5; 0.672/0.660/0.704/0.652/0.638) |
 | random | Exp1–4: 0.558/0.568/0.558/0.528 | GPU0, exp 5 ~11/125 |
 | kdpe | Exp1–4: 0.582/0.636/0.564/0.632 | GPU1, exp 5 ~19/125 |
-| medoid | Exp1–3: 0.686/0.678/0.630 | GPU2, **застрял** exp4 ~92/125 (~1.7 ч, тот же IPC wedge) |
+| medoid | — (рестарт 07:06 UTC, IPC wedge; старые Exp1–3 снесены `--force`) | GPU2, exp 1 живой |
 | max_ll / base | — | очередь после random/medoid |
 
 ### 2.7 Table 5 — латентность селектора, H100 [канон]
@@ -284,7 +284,7 @@ CUDA launches N=8/16/32: random 0/0/0 · max_ll 2/1/0 · medoid 7/6/16 · CS 28/
 | LIBERO vote (CS) | **готово 0.665±0.025** | — |
 | LIBERO random | Exp1–4 0.558/0.568/0.558/0.528; exp5 ~11/125 | ~2 ч |
 | LIBERO kdpe | Exp1–4 0.582/0.636/0.564/0.632; exp5 ~19/125 | ~2 ч |
-| LIBERO medoid | Exp1–3 0.686/0.678/0.630; **застрял** exp4 92/125 | рестарт как random |
+| LIBERO medoid | рестарт 07:06 UTC на GPU2 (клин как у random) | ~12 ч |
 | LIBERO max_ll / base | очередь | после random/medoid |
 
 Leftover coffee-[E] на cuda:0 убит; новый [E] kdpe на GPU1. Старые GPU1-lane по-прежнему SIGSTOP (не CONT).

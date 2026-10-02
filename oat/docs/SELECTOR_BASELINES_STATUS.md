@@ -2,7 +2,7 @@
 
 Updated: **2026-10-02 10:05 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG.
 
-**2 Oct 10:05 — LIBERO vote [E] готово 0.665±0.025.** random exp5 ~11/125 (4/5: ~0.55); kdpe exp5 ~19/125 (4/5: ~0.60); medoid застрял exp4 92/125 (тот же IPC wedge). Coffee [E] 42.8 vs 45.6 p=0.25. [C] 7/7.
+**2 Oct 10:07 — LIBERO vote [E] 0.665±0.025.** random/kdpe на exp5. medoid рестарт GPU2 (IPC wedge, `--force`). Coffee [E] 42.8 vs 45.6 p=0.25. [C] 7/7.
 
 **Progress (paper cells):** **40 / 44** done · **2** running on aic4 (close max_ll, mw vote) · **2** queued (mw medoid/max_ll) · KDPE 2/3 RoboMimic  
 **Hosts:** ccm EGL 2/GPU `n_par=2` · aic4 GPU2 OSMesa ≤2 RC `n_par=1` (GPU0/1 = VLA fits only)
