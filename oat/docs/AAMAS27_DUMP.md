@@ -139,11 +139,12 @@ OAT8, n_test=500, `-n 5`. В статью — `mean_success_rate_mean`; per-task
 
 | Селектор | SR | Статус |
 |---|---|---|
-| vote (CS) | **0.665±0.025** | **готово** (5/5; 0.672/0.660/0.704/0.652/0.638) |
-| random | Exp1–4: 0.558/0.568/0.558/0.528 | GPU0, exp 5 ~11/125 |
-| kdpe | Exp1–4: 0.582/0.636/0.564/0.632 | GPU1, exp 5 ~19/125 |
-| medoid | — (рестарт 07:06 UTC, IPC wedge; старые Exp1–3 снесены `--force`) | GPU2, exp 1 живой |
-| max_ll / base | — | очередь после random/medoid |
+| vote (CS) | **0.665±0.025** | **готово** (0.672/0.660/0.704/0.652/0.638) |
+| random | **0.554±0.015** | **готово** (0.558/0.568/0.558/0.528/0.558) |
+| kdpe | — | умер exp5 ~80/125; json нет; рестарт ждёт OSMesa |
+| medoid | — | умер exp3 рестарта (0.692/0.668); рестарт ждёт OSMesa |
+| max_ll | — | умер exp2 (Exp1 0.602); рестарт ждёт OSMesa |
+| base | — | не стартовал |
 
 ### 2.7 Table 5 — латентность селектора, H100 [канон]
 
@@ -272,7 +273,7 @@ CUDA launches N=8/16/32: random 0/0/0 · max_ll 2/1/0 · medoid 7/6/16 · CS 28/
 
 ---
 
-## 5. Статус ячеек (2 Oct 10:05 MSK)
+## 5. Статус ячеек (3 Oct 16:15 MSK)
 
 | Ячейка | Статус | Готово |
 |---|---|---|
@@ -282,10 +283,9 @@ CUDA launches N=8/16/32: random 0/0/0 · max_ll 2/1/0 · medoid 7/6/16 · CS 28/
 | coffee-pull CS / KDPE [E] jsonl | **готово** 42.8 vs 45.6, Δ −2.8 p=0.25 | — |
 | **[C] все 7 пар** | **готово** (coffee 42.0 vs 44.4, Δ −2.4 p=0.18) | — |
 | LIBERO vote (CS) | **готово 0.665±0.025** | — |
-| LIBERO random | Exp1–4 0.558/0.568/0.558/0.528; exp5 ~11/125 | ~2 ч |
-| LIBERO kdpe | Exp1–4 0.582/0.636/0.564/0.632; exp5 ~19/125 | ~2 ч |
-| LIBERO medoid | рестарт 07:06 UTC на GPU2 (клин как у random) | ~12 ч |
-| LIBERO max_ll / base | очередь | после random/medoid |
+| LIBERO random | **готово 0.554±0.015** | — |
+| LIBERO kdpe / medoid / max_ll | убиты без json; рестарт падает без OSMesa | ждать GL |
+| LIBERO base | не стартовал | после GL |
 
 Leftover coffee-[E] на cuda:0 убит; новый [E] kdpe на GPU1. Старые GPU1-lane по-прежнему SIGSTOP (не CONT).
 
