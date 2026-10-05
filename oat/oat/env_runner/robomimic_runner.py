@@ -53,7 +53,8 @@ class RoboMimicRunner(BaseRunner):
         n_parallel_envs = min(n_parallel_envs, n_test)
 
         assert n_parallel_envs > 0, "n_parallel_envs must be positive"
-        assert n_test_vis <= n_test, "n_test_vis must be <= n_test"
+        if n_test_vis > n_test:
+            n_test_vis = n_test  # clamp when CLI overrides n_test
 
         env_seeds = []
         env_fns = []

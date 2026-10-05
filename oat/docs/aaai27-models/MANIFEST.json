@@ -1,0 +1,34 @@
+{
+  "pack_name": "aaai27-models",
+  "description": "Curated OAT paper artifact pack: checkpoints, matched eval outputs, latency JSON, logs, Hydra configs, and protocol docs.",
+  "dataset_repo": "hackhackhack66666/aaai-datasets",
+  "model_repo": "hackhackhack66666/aaai27-models",
+  "artifact_classes": [
+    "paper_locked_checkpoints",
+    "awr_checkpoints",
+    "matched_eval_outputs",
+    "latency_outputs",
+    "replan_probes",
+    "hydra_configs",
+    "protocol_docs",
+    "logs"
+  ],
+  "notes": [
+    "Curated review pack, not a full cluster dump.",
+    "Datasets live in the separate aaai-datasets repo.",
+    "Some RoboCasa AWR16 checkpoints were not retained locally; only recoverable HF ones are mirrored if present."
+  ],
+  "expected_roots": [
+    "docs",
+    "checkpoints/my_models",
+    "checkpoints/selected_from_output",
+    "checkpoints/awr16_from_hf",
+    "hydra",
+    "eval/matched_s10000",
+    "eval/replan_probes",
+    "logs",
+    "MANIFEST.json",
+    "INVENTORY.txt",
+    "README.md"
+  ]
+}

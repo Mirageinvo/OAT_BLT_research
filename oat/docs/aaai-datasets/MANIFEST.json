@@ -1,0 +1,60 @@
+{
+  "upload_date": "2026-08-13",
+  "source_cluster_path": "/home/askhabaliev_gs/mipt_paper/oat/data",
+  "total_approx_gb": 18,
+  "suites": {
+    "robomimic": {
+      "paper_table_p": true,
+      "zarr": [
+        {"path": "robomimic/zarr/lift_N200.zarr", "episodes": 200, "action_dim": 7},
+        {"path": "robomimic/zarr/can_N200.zarr", "episodes": 200, "action_dim": 7},
+        {"path": "robomimic/zarr/square_N200.zarr", "episodes": 200, "action_dim": 7}
+      ],
+      "hdf5": [
+        "robomimic/hdf5/lift_mh_image.hdf5",
+        "robomimic/hdf5/can_mh_image.hdf5",
+        "robomimic/hdf5/square_mh_image.hdf5",
+        "robomimic/hdf5/can/mh/demo_v15.hdf5",
+        "robomimic/hdf5/can/mh/image_v15.hdf5"
+      ]
+    },
+    "metaworld": {
+      "paper_table_p": "single-task only",
+      "generated_locally": true,
+      "success_rule": "any_timestep_success",
+      "zarr": [
+        {"path": "metaworld/zarr/mt4_N50.zarr", "episodes": 200, "paper": false},
+        {"path": "metaworld/zarr/box-close_N50.zarr", "episodes": 50, "paper": true},
+        {"path": "metaworld/zarr/coffee-pull_N50.zarr", "episodes": 50, "paper": true},
+        {"path": "metaworld/zarr/disassemble_N50.zarr", "episodes": 50, "paper": true},
+        {"path": "metaworld/zarr/stick-pull_N50.zarr", "episodes": 50, "paper": true}
+      ]
+    },
+    "robocasa": {
+      "paper_table_p": true,
+      "mix": "50_human_150_mg_seed0",
+      "action_dim": 12,
+      "zarr": [
+        "robocasa/zarr/close_drawer_N200.zarr",
+        "robocasa/zarr/coffee_press_button_N200.zarr",
+        "robocasa/zarr/turn_off_sink_faucet_N200.zarr",
+        "robocasa/zarr/turn_off_microwave_N200.zarr"
+      ],
+      "hdf5_retained": [
+        "robocasa/hdf5/CloseDrawer/human/demo_gentex_im128_randcams.hdf5",
+        "robocasa/hdf5/CoffeePressButton/human/demo_gentex_im128_randcams.hdf5"
+      ]
+    },
+    "libero_legacy": {
+      "paper_table_p": false,
+      "note": "legacy OAT-format backup; not physical-intelligence/libero parquet",
+      "zarr": [
+        {
+          "path": "libero/zarr/libero10_N500.zarr",
+          "episodes": 500,
+          "action_dim": 7
+        }
+      ]
+    }
+  }
+}

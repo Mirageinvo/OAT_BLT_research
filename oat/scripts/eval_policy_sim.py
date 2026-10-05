@@ -205,6 +205,10 @@ def eval_policy_sim(
         if n_test is not None:
             runner_overrides['n_test'] = n_test
             print(f"Override n_test = {n_test}")
+            # Always disable video when CLI overrides n_test: cfg n_test_vis=10 writes
+            # mp4s that blow disk on shared lab hosts (and assert n_test_vis<=n_test).
+            runner_overrides['n_test_vis'] = 0
+            print(f"Override n_test_vis = 0 (videos off)")
         if test_start_seed is not None:
             runner_overrides['test_start_seed'] = test_start_seed
             print(f"Override test_start_seed = {test_start_seed}")

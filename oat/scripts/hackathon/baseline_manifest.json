@@ -1,0 +1,62 @@
+{
+  "model_repo": "hackhackhack66666/robomimic-oattok-policy",
+  "dataset_repo": "hackhackhack66666/robomimic_zarr",
+  "eval_repo": "hackhackhack66666/aaai27-models",
+  "protocol": {
+    "test_start_seed": 10000,
+    "n_test": 50,
+    "num_exp": 5,
+    "use_k_tokens": 8,
+    "entropy_threshold": 0
+  },
+  "tasks": {
+    "lift": {
+      "title_ru": "Lift — поднять куб",
+      "title_en": "Lift — pick cube",
+      "baseline_sr_pct": "82.0 ± 3.2%",
+      "baseline_sr_mean": 0.82,
+      "tokenizer_hf": "tokenizers/lift/ep-1970_mse-0.006.ckpt",
+      "policy_hf": "policies/lift/ep-0900_sr-0.930.ckpt",
+      "dataset": "lift_N200.zarr",
+      "dataset_episodes": 200,
+      "eval_summary_hf": "eval/matched_s10000/lift/summary.json",
+      "eval_media_hf_glob": "eval/matched_s10000/lift/baseline_n5/media/lift/*.mp4",
+      "hdf5": "lift_mh_image.hdf5",
+      "hydra_config_hf": "hydra/output/20260719/144024_train_oatpolicy_lift_N200/.hydra/config.yaml",
+      "train_run_id": "20260719/144024_train_oatpolicy_lift_N200",
+      "policy_epoch": 900
+    },
+    "can": {
+      "title_ru": "Can — поднять банку",
+      "title_en": "Can — pick can",
+      "baseline_sr_pct": "76.4 ± 3.0%",
+      "baseline_sr_mean": 0.764,
+      "tokenizer_hf": "tokenizers/can/ep-0520_mse-0.005.ckpt",
+      "policy_hf": "policies/can/ep-1700_sr-0.940.ckpt",
+      "dataset": "can_N200.zarr",
+      "dataset_episodes": 200,
+      "eval_summary_hf": "eval/matched_s10000/can/summary.json",
+      "eval_media_hf_glob": "eval/matched_s10000/can/baseline_n5/media/can/*.mp4",
+      "hdf5": "can_mh_image.hdf5",
+      "hydra_config_hf": "hydra/output/20260706/173343_train_oatpolicy_can_N200/.hydra/config.yaml",
+      "train_run_id": "20260706/173343_train_oatpolicy_can_N200",
+      "policy_epoch": 1700
+    },
+    "square": {
+      "title_ru": "Square — pick + place (peg in hole)",
+      "title_en": "Square — pick + place",
+      "baseline_sr_pct": "36.0 ± 7.5%",
+      "baseline_sr_mean": 0.36,
+      "tokenizer_hf": "tokenizers/square/ep-0690_mse-0.004.ckpt",
+      "policy_hf": "policies/square/ep-0700_sr-0.420.ckpt",
+      "dataset": "square_N200.zarr",
+      "dataset_episodes": 200,
+      "eval_summary_hf": "eval/matched_s10000/square/summary.json",
+      "eval_media_hf_glob": "eval/matched_s10000/square/baseline_n5/media/square/*.mp4",
+      "hdf5": "square_mh_image.hdf5",
+      "hydra_config_hf": "hydra/output/20260720/215024_train_oatpolicy_square_N200/.hydra/config.yaml",
+      "train_run_id": "20260720/215024_train_oatpolicy_square_N200",
+      "policy_epoch": 700
+    }
+  }
+}
