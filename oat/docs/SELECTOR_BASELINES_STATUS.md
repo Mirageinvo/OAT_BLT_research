@@ -1,8 +1,8 @@
 # Selector baselines — status ledger (branch `aamas27_selector_baselines`)
 
-Updated: **2026-10-05 11:05 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG. SSH: [`AICENTER4_ACCESS.md`](AICENTER4_ACCESS.md).
+Updated: **2026-10-05 17:05 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG. SSH: [`AICENTER4_ACCESS.md`](AICENTER4_ACCESS.md).
 
-**5 Oct.** Latency GPU2 **закрыта** (`LANE_COMPLETE` 4 Oct 12:17 UTC): can + lift/square/box-close/coffee/stick/disassemble. LIBERO vote/random json целы. kdpe/medoid/max_ll/base убиты вчера без json → **рестарт 08:01 UTC** на 3 GPU.
+**5 Oct 17:05.** Диск: корень **164G** свободно (было 144G). Снесли `~/.cache/uv`, `.venv_robocasa`, `_runtime_robocasa_src`, дубли can hdf5. LIBERO **рестарт 14:03 UTC**: GPU0 max_ll+base, GPU1 kdpe, GPU2 medoid (GL ~5.8 it/s, Exp1). vote/random json целы.
 
 **Progress:** RC+RM+MW SR закрыты · LIBERO 2/6 json · Table 5 канон + доп. ckpt **готовы**.
 **Hosts:** GPU0 max_ll+base · GPU1 kdpe · GPU2 medoid.
@@ -54,7 +54,7 @@ PDF columns = Table 4 of `oat-aaai.pdf` (± = **SE** across 5 seeds). Our column
 |------|------|----------|----------|----------|------|--------|--------|--------|------|-------|-------|
 | can | ep-1700 | 76.3±2.4 | **85.6±2.2** | **84.0±4.0** / paired 87.6±3.0 | **85.6±3.6** | 85.2±3.0 | 88.8±2.7 | 90.4±4.3 | 89.2±5.8 | 0.0 | **pass** |
 | lift | ep-1400 | 90.5±1.3 | 93.2±1.2 | **96.0±3.7** | **95.2±2.7** | 96.4±1.7 | 96.8±3.6 | **96.4±3.0** | 94.8±3.3 | +2.0 | **ok** |
-| square | ep-0700 | 30.7±1.0 | 30.5±2.2 | — | **32.0±3.2** | 30.0±7.9 | 29.6±4.3 | 34.4±7.4 | 32.4±7.8 | +1.5 | **pass** |
+| square | ep-0700 | 30.7±1.0 | 30.5±2.2 | **32.4±3.3** | **32.0±3.2** | 30.0±7.9 | 29.6±4.3 | 34.4±7.4 | 32.4±7.8 | +1.5 | **pass** |
 
 ### 3.2 MetaWorld (aic4)
 
@@ -87,16 +87,16 @@ Per-exp coffee vote (aic4): .56 / .46 / .52 / .46 / .50.
 
 ---
 
-## 5. Live NOW (2026-10-05 11:05 MSK)
+## 5. Live NOW (2026-10-05 17:05 MSK)
 
 | Host | Jobs |
 |------|------|
-| aic4 GPU0 | LIBERO [E] max_likelihood + base |
+| aic4 GPU0 | LIBERO [E] max_likelihood + base (старт 14:03 UTC) |
 | aic4 GPU1 | LIBERO [E] kdpe |
 | aic4 GPU2 | LIBERO [E] medoid |
 | ccm | hop only; не paper |
 
-Latency очередь GPU2 **закончилась** 4 Oct 12:17 UTC. Ниже 29–30 Sep — история.
+Корень **164G** свободно. Latency очередь закрыта. Ниже 29–30 Sep — история.
 
 Overnight incident (aic4): the old `fill_rc_aic4.sh` woke up and started faucet max_ll + mw random alongside the coffee queue → coffee random died at 1/50 (3rd concurrent OSMesa). Both old schedulers replaced by one queue (`queue_rc_aic4.sh`, log `logs/queue_rc_aic4.log`).
 
