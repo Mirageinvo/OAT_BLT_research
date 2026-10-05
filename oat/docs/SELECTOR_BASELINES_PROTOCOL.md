@@ -6,7 +6,7 @@ RoboMimic + MetaWorld + RoboCasa only (matched Table P). Not LIBERO.
 ## Repo / branch
 - Code branch: `aamas27_selector_baselines`
 - Artifact HF: `hackhackhack66666/aaai27-models`
-- Cluster: `lab-c-0` (`100.98.200.162`), **GPU 2 only** (`CUDA_VISIBLE_DEVICES=2`)
+- Cluster: **aicenter4** (`lab-c-0`). SSH: [`AICENTER4_ACCESS.md`](AICENTER4_ACCESS.md) (`ssh aicenter4-jump`). Latency GPU must be empty.
 
 ## Matched eval (canonical)
 ```

@@ -1,4 +1,4 @@
-# AAMAS27 — дамп для научника (обновлено 1 Oct 2026, 21:20 MSK)
+# AAMAS27 — дамп для научника (обновлено 5 Oct 2026, 11:05 MSK)
 
 Все числа — success rate в %. Для каждого числа указаны источник и тип ±. Сокращения:
 - **CS** — Consensus Selection (в коде `bon_signal=vote`), N=8, если не сказано иное.
@@ -13,7 +13,7 @@
 
 - **CS против base.** Воспроизводится на MetaWorld и RoboCasa: числа PDF прослеживаются до артефактов, где base и CS посчитаны в одном прогоне. На RoboMimic в нашем текущем пайплайне base заметно выше, чем в PDF (can 87.6 против 76.3), и CS ≈ base: насыщение.
 - **CS против KDPE.** Значимый выигрыш CS остался **только box-close** ([E] +10.0 p=0.005; [C] +6.8 p=0.028). stick-pull jsonl-rerun [E] **23.2±3.0**, Δ +5.6 p=0.12 (старый 18.0 p=0.005 не использовать). disassemble [E] −3.2 p=0.38. Потолок RM ничья. **[C] все 7 пар готовы**; coffee [C] −2.4 p=0.18 (KDPE чуть выше).
-- **Воспроизводимость.** `--policy_seed`: smoke совпал. [C] закрыт. LIBERO vote Exp1 = 0.672 (ещё 4/5); random exp1 ~85/125. Coffee [E] kdpe jsonl перезапущен на GPU1.
+- **Воспроизводимость.** `--policy_seed`: smoke совпал. [C] закрыт. LIBERO vote **0.665±0.025**, random **0.554±0.015**; kdpe/medoid/max_ll/base рестарт 5 Oct на 3 GPU. RC microwave vote **46.4±4.6** aic4. Table 5 GPU2 доп. ckpt **готово**.
 
 Решения, которые нужны от тебя:
 1. Как подать расхождение base на RoboMimic.
@@ -133,7 +133,7 @@
 | coffee-pull | 42.0±4.0 | 44.4±2.2 | −2.4 | [−5.2, +0.4], p=0.18 | готово |
 | disassemble | 65.6±4.3 | 61.2±3.0 | +4.4 | [−1.2, +10.0], p=0.18 | готово |
 
-### 2.6b LIBERO-LONG [E] (HF `Mirageinv/CS-libero`, GPU0)
+### 2.6b LIBERO-LONG [E] (HF `Mirageinv/CS-libero`)
 
 OAT8, n_test=500, `-n 5`. В статью — `mean_success_rate_mean`; per-task ключи будут в том же json.
 
@@ -141,10 +141,10 @@ OAT8, n_test=500, `-n 5`. В статью — `mean_success_rate_mean`; per-task
 |---|---|---|
 | vote (CS) | **0.665±0.025** | **готово** (0.672/0.660/0.704/0.652/0.638) |
 | random | **0.554±0.015** | **готово** (0.558/0.568/0.558/0.528/0.558) |
-| kdpe | — | умер exp5 ~80/125; json нет; рестарт ждёт OSMesa |
-| medoid | — | умер exp3 рестарта (0.692/0.668); рестарт ждёт OSMesa |
-| max_ll | — | умер exp2 (Exp1 0.602); рестарт ждёт OSMesa |
-| base | — | не стартовал |
+| kdpe | — | рестарт 5 Oct GPU1; json ещё нет |
+| medoid | — | рестарт 5 Oct GPU2; json ещё нет |
+| max_ll | — | рестарт 5 Oct GPU0; json ещё нет |
+| base | — | рестарт 5 Oct GPU0; json ещё нет |
 
 ### 2.7 Table 5 — латентность селектора, H100 [канон]
 
@@ -183,6 +183,18 @@ CUDA launches N=8/16/32: random 0/0/0 · max_ll 2/1/0 · medoid 7/6/16 · CS 28/
 Фигуры: `oat/docs/figures/table5_selector_latency.png`, `oat/docs/figures/table5_selector_pareto.png`.
 
 Артефакты: `~/oat_eval_out/latency/selector_latency_gpu1_n32diag.{json,md}`. Черновик на занятой GPU0 не использовать.
+
+Доп. GPU2 (LANE_COMPLETE 4 Oct 12:17 UTC), N=8 median ms, тот же протокол. **Не канон.** KDPE D=7 ≠ D=4:
+
+| Задача | D | CS | KDPE | KDPE/CS |
+|---|---|---|---|---|
+| can (канон GPU1) | 7 | 0.264 | 0.535 | 2.02× |
+| lift | 7 | 0.267 | 0.533 | 2.00× |
+| square | 7 | 0.263 | 0.539 | 2.05× |
+| box-close | 4 | 0.270 | 0.206 | 0.76× |
+| coffee-pull | 4 | 0.271 | 0.205 | 0.76× |
+| stick-pull | 4 | 0.269 | 0.203 | 0.75× |
+| disassemble | 4 | 0.264 | 0.200 | 0.76× |
 
 **Формулировка CS vs KDPE:** CS is ~2× faster than KDPE on H100 (0.264–0.429 ms vs 0.535–0.680 ms for N=8–32). KDPE is launch-bound at N≥16 due to many small quaternion operations, while CS's single vectorized distance computation scales more efficiently.
 
@@ -273,7 +285,7 @@ CUDA launches N=8/16/32: random 0/0/0 · max_ll 2/1/0 · medoid 7/6/16 · CS 28/
 
 ---
 
-## 5. Статус ячеек (3 Oct 16:15 MSK)
+## 5. Статус ячеек (5 Oct 11:05 MSK)
 
 | Ячейка | Статус | Готово |
 |---|---|---|
@@ -284,10 +296,11 @@ CUDA launches N=8/16/32: random 0/0/0 · max_ll 2/1/0 · medoid 7/6/16 · CS 28/
 | **[C] все 7 пар** | **готово** (coffee 42.0 vs 44.4, Δ −2.4 p=0.18) | — |
 | LIBERO vote (CS) | **готово 0.665±0.025** | — |
 | LIBERO random | **готово 0.554±0.015** | — |
-| LIBERO kdpe / medoid / max_ll | убиты без json; рестарт падает без OSMesa | ждать GL |
-| LIBERO base | не стартовал | после GL |
+| LIBERO kdpe / medoid / max_ll / base | рестарт 5 Oct на 3 GPU (`gl-prefix`); json ещё нет | дождаться eval_log |
+| Table 5 latency GPU2 доп. ckpt | **готово** LANE_COMPLETE 4 Oct 12:17 UTC | канон = can |
+| RC microwave vote | **готово 46.4±4.6** aic4 | не перегонять |
 
-Leftover coffee-[E] на cuda:0 убит; новый [E] kdpe на GPU1. Старые GPU1-lane по-прежнему SIGSTOP (не CONT).
+LIBERO live: GPU0 max_ll+base, GPU1 kdpe, GPU2 medoid. Latency очередь закрыта. Старые SIGSTOP lane не CONT.
 
 ---
 

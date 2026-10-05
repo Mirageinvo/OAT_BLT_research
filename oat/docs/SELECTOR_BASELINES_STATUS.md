@@ -1,11 +1,11 @@
 # Selector baselines — status ledger (branch `aamas27_selector_baselines`)
 
-Updated: **2026-10-03 16:15 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG.
+Updated: **2026-10-05 11:05 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG. SSH: [`AICENTER4_ACCESS.md`](AICENTER4_ACCESS.md).
 
-**3 Oct 16:15 — aic4 снова up (новый IP).** Vote **0.665±0.025** и random **0.554±0.015** на диске. kdpe/medoid/max_ll убиты без json; base не стартовал. Рестарт падает: нет `libOSMesa`, `glGetError`. Coffee [E] 42.8 vs 45.6 p=0.25. [C] 7/7.
+**5 Oct.** Latency GPU2 **закрыта** (`LANE_COMPLETE` 4 Oct 12:17 UTC): can + lift/square/box-close/coffee/stick/disassemble. LIBERO vote/random json целы. kdpe/medoid/max_ll/base убиты вчера без json → **рестарт 08:01 UTC** на 3 GPU.
 
-**Progress (paper cells):** **40 / 44** done · **2** running on aic4 (close max_ll, mw vote) · **2** queued (mw medoid/max_ll) · KDPE 2/3 RoboMimic  
-**Hosts:** ccm EGL 2/GPU `n_par=2` · aic4 GPU2 OSMesa ≤2 RC `n_par=1` (GPU0/1 = VLA fits only)
+**Progress:** RC+RM+MW SR закрыты · LIBERO 2/6 json · Table 5 канон + доп. ckpt **готовы**.
+**Hosts:** GPU0 max_ll+base · GPU1 kdpe · GPU2 medoid.
 
 **⚠ ccm RoboCasa looks systematically low on some tasks** (coffee 34 vs aic4 50; faucet medoid 41.6 vs aic4 56.8; microwave random 25.2 vs aic4 43.6). ccm close-drawer matches the paper. Until this is explained, **aic4 is the reference host for RC**.
 
@@ -25,7 +25,7 @@ Updated: **2026-10-03 16:15 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIB
 | close-drawer (RC) | 56.4±2.3 | **56.8±5.6** | +0.4 | **pass** |
 | coffee-button (RC) | 55.6±2.7 | aic4 **50.0±4.2** (ccm 34.4 discarded) | −5.6 | ok (−2σ; ccm artifact confirmed) |
 | faucet-off (RC) | 56.0±3.4 | **52.4±9.1** | −3.6 | ok (noisy) |
-| microwave-off (RC) | 54.8±2.5 | — | — | vote killed (hung); restart pending |
+| microwave-off (RC) | 54.8±2.5 | aic4 **46.4±4.6** | −8.4 | **готово** (29 Sep `vote_n8`; hung в шапке был ложный) |
 
 Protocol: N=8 K=8 T=1.0 topk=10, `-n 5`×50, `test_start_seed=10000`.
 
@@ -38,8 +38,8 @@ Protocol: N=8 K=8 T=1.0 topk=10, `-n 5`×50, `test_start_seed=10000`.
 | Selectors code | done | |
 | SR RoboMimic | **done** | lift = ep-1400 (`lift1400/`) |
 | SR MetaWorld | **done** | stick recheck pass |
-| SR RoboCasa | **partial** | **12/16** cells trusted; close max_ll + mw vote live on aic4; mw medoid/max_ll queued |
-| Latency | not started | unloaded H100 later |
+| SR RoboCasa | **done** (aic4) | все 16 ячеек; microwave vote **46.4±4.6**; ccm discarded |
+| Latency | **done** | канон can GPU1; доп. 6 ckpt GPU2 (тот же протокол). RC KDPE не мерили (D=12) |
 
 ---
 
@@ -62,8 +62,8 @@ PDF columns = Table 4 of `oat-aaai.pdf` (± = **SE** across 5 seeds). Our column
 |------|------|----------|----------|------|--------|--------|--------|------|-------|-------|
 | box-close | ep-2000 | 59.6±3.5 | 66.4±3.0 | **69.6±1.7** | 61.6±5.4 | 67.2±3.0 | 66.4±3.3 | 62.4±3.8 | +3.2 | **ok** |
 | coffee-pull | ep-1000 | 40.8±2.3 | 43.2±4.8 | **42.8±3.3** (парно; старый 44.4±3.8) | 43.2±3.9 | 44.0±0.0 | 46.0±3.2 | **45.6±3.0 (jsonl)** / старый 41.6 не использовать | −0.4 vs PDF | **ok** |
-| stick-pull | ep-0800 | 15.6±6.2 | 25.6±2.6 | **26.8±4.1** | 16.4±2.2 | 18.8±2.7 | 14.8±7.4 | 18.0±4.2 | +1.2 | **pass** |
-| disassemble | ep-1400 | 62.4±5.2 | 63.2±6.3 | **60.4±2.6** (парно; старый 65.6±4.3) | 56.8±4.6 | 63.2±3.0 | 64.0±4.9 | [E] kdpe queued GPU2 | −2.8 vs PDF | **ok** |
+| stick-pull | ep-0800 | 15.6±6.2 | 25.6±2.6 | **26.8±4.1** | 16.4±2.2 | 18.8±2.7 | 14.8±7.4 | **[E] 23.2±3.0** (jsonl; старый 18.0 не использовать) | +1.2 | **pass** |
+| disassemble | ep-1400 | 62.4±5.2 | 63.2±6.3 | **60.4±2.6** (парно; старый 65.6±4.3) | 56.8±4.6 | 63.2±3.0 | 64.0±4.9 | **[E] 63.6±5.5** | −2.8 vs PDF | **ok** |
 
 ### 3.3 RoboCasa
 
@@ -80,22 +80,23 @@ Per-exp coffee vote (aic4): .56 / .46 / .52 / .46 / .50.
 
 | Status | Count / tasks |
 |--------|----------------|
-| pass/ok | RM+MW all 7; close-drawer vote; coffee vote (aic4) |
-| RC done (trusted) | close vote/random/medoid; coffee vote/random/medoid; faucet ×4; microwave random (**11/16**) |
-| live | aic4: coffee max_ll, close max_ll · ccm: mw medoid/max_ll (not for paper) |
-| queued aic4 | mw vote → mw medoid → mw max_ll |
+| pass/ok | RM+MW all 7; RC все 4 задачи × 4 селектора на aic4 |
+| RC done (trusted) | **16/16** aic4, включая microwave vote **46.4±4.6** |
+| live | aic4: LIBERO max_ll+base GPU0, kdpe GPU1, medoid GPU2 |
 | discarded | coffee ×4 ccm; faucet medoid ccm (41.6 vs 56.8); microwave ccm (random 25.2 vs 43.6) |
 
 ---
 
-## 5. Live NOW (2026-09-29 23:25 MSK) — see «Очереди на aic4» below; older text in this section is stale
+## 5. Live NOW (2026-10-05 11:05 MSK)
 
 | Host | Jobs |
 |------|------|
-| aic4 GPU0 | VLA fit + base can (P1) → then base lift (queued) |
-| aic4 GPU1 | VLA fit + KDPE square (Exp2+) + KDPE MetaWorld queue (box-close live; coffee+ get episodes.jsonl) |
-| aic4 GPU2 | close max_ll (Exp5) · mw vote (Exp1); then mw medoid/max_ll via `/tmp/queue_rc_aic4_mw.sh` |
-| ccm | mw medoid · mw max_ll (kept for ccm-vs-aic4 diagnosis only) |
+| aic4 GPU0 | LIBERO [E] max_likelihood + base |
+| aic4 GPU1 | LIBERO [E] kdpe |
+| aic4 GPU2 | LIBERO [E] medoid |
+| ccm | hop only; не paper |
+
+Latency очередь GPU2 **закончилась** 4 Oct 12:17 UTC. Ниже 29–30 Sep — история.
 
 Overnight incident (aic4): the old `fill_rc_aic4.sh` woke up and started faucet max_ll + mw random alongside the coffee queue → coffee random died at 1/50 (3rd concurrent OSMesa). Both old schedulers replaced by one queue (`queue_rc_aic4.sh`, log `logs/queue_rc_aic4.log`).
 
@@ -161,9 +162,10 @@ Kernel is graded, not binary (most pairs have 1e-3<k<0.999; exact duplicates onl
 
 ## 7. Next
 
-1. aic4: coffee max_ll + close max_ll live (~5h).
-2. Then aic4 queue 2 (`/tmp/queue_rc_aic4_mw.sh`): microwave vote/medoid/max_ll (ccm microwave numbers not for paper; mw random already live on aic4).
-3. Latency when unloaded.
+1. Дождаться LIBERO json: kdpe / medoid / max_ll / base → вписать suite `mean_success_rate_mean`.
+2. Latency GPU2 **закрыта** — цифры в `TABLE5_LATENCY.md` (канон статьи = can).
+3. RC microwave — **не перегонять**.
+
 
 ## Очереди на aic4 (переписаны 29 Sep, ~21:55 MSK)
 

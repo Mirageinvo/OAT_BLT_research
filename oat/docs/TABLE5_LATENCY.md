@@ -49,6 +49,28 @@ n=160 на каждую ячейку.
 
 ---
 
+## 1b. Доп. ckpt на GPU2 (тот же протокол, не канон статьи)
+
+Очередь `lane_latency_table5_gpu2.sh`, **LANE_COMPLETE 2026-10-04T12:17:26Z**. Пустая H100 GPU2, warmup=50, 8×20, R=16, `smi_before=0.0`. Канон статьи остаётся **can GPU1**. RC KDPE не мерили (D=12).
+
+N=8 selector-only **median ms**. KDPE **не усреднять** D=7 с D=4.
+
+| Задача | D | CS (vote) | KDPE | KDPE/CS |
+|---|---|---|---|---|
+| can (канон, GPU1) | 7 | 0.264 | 0.535 | 2.02× |
+| lift | 7 | 0.267 | 0.533 | 2.00× |
+| square | 7 | 0.263 | 0.539 | 2.05× |
+| box-close | 4 | 0.270 | 0.206 | 0.76× |
+| coffee-pull | 4 | 0.271 | 0.205 | 0.76× |
+| stick-pull | 4 | 0.269 | 0.203 | 0.75× |
+| disassemble | 4 | 0.264 | 0.200 | 0.76× |
+
+RM (D=7): CS ≈ can, KDPE ≈ 0.53 — репрезентативно. MW (D=4): CS тот же ~0.26, KDPE дешевле (~0.20), потому что кватернионный граф короче.
+
+Артефакты: `~/oat_eval_out/latency/selector_latency_gpu2_{lift,square,box-close,coffee-pull,stick-pull,disassemble}.json`.
+
+---
+
 ## 2. CUDA kernel launches на один вызов (`torch.profiler`)
 
 | N | random | max_ll | medoid | CS | KDPE |
