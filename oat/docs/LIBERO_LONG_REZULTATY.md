@@ -1,6 +1,6 @@
 # LIBERO-LONG — результаты селекторов (CS / KDPE / baselines)
 
-Состояние на **6 Oct 2026, 09:30 MSK**. Хост aic4 (`lab-c-0`). Метка **[E]** = paper (без `--policy_seed`). Не смешивать с **[C]** (`--policy_seed 0`).
+Состояние на **6 Oct 2026, 09:50 MSK**. Хост aic4 (`lab-c-0`). Метка **[E]** = paper (без `--policy_seed`). Не смешивать с **[C]** (`--policy_seed 0`).
 
 Один скаляр в статью: `mean_success_rate_mean` ± `mean_success_rate_std` (n=5 экспа).  
 Полный разбор латентности селектора: [`TABLE5_LATENCY.md`](TABLE5_LATENCY.md).  
@@ -10,22 +10,22 @@
 
 ## 0. Репрезентативность латентности LIBERO vs Table 5 — вердикт
 
-**Отдельного замера `measure_selector_latency_gpu.py` на LIBERO-ckpt нет.** На кластере нет файлов `~/oat_eval_out/latency/*libero*`. Table 5 и сегодняшний replicate сняты на **RoboMimic can ep-1700**, не на `policy_ep-0250`.
+**LIBERO ckpt замерен** 6 Oct 06:47 UTC, пустая GPU1 (smi_before **0.0 MiB**), тот же протокол Table 5 (warmup=50, 8×20, `oat_code_seed`): `~/oat_eval_out/latency/selector_latency_gpu1_libero10.json`.
 
-Что **можно** переносить на LIBERO, а что нельзя:
+Два часов — не смешивать:
 
-| Вопрос | Ответ |
-|---|---|
-| Action dim LIBERO | **D=7** (`libero10.yaml` `action.shape: [7]`) — как can / lift / square |
-| Селектор (vote / KDPE / medoid / …) | Тот же `_bon_select` + `kdpe_endpoint_scores`; N=8, R=16, batch 1 |
-| Table 5 can (D=7) как proxy шага селектора на LIBERO | **да, репрезентативно** |
-| GPU2 lift/square (D=7) | CS 0.267 / 0.263, KDPE 0.533 / 0.539 — совпадает с can 0.264 / 0.535 |
-| MetaWorld D=4 (KDPE ~0.20 ms) | **нельзя** цитировать для LIBERO |
-| RoboCasa D=12 | KDPE не мерили и не переносить |
-| Полный пайплайн (vision + sample N + select) ~28 ms с can | **не** LIBERO-wall-clock: другой CNN/obs; без замера на `policy_ep-0250` не писать как latency LIBERO |
-| Сегодняшний replicate 6 Oct, пустая GPU1 | can, тот же протокол: CS 0.268 vs канон 0.264; KDPE 0.552 vs 0.535. IQR CS vs KDPE по-прежнему не пересекаются |
+| Часы | Что | LIBERO N=8 | can D=7 (replicate) |
+|---|---|---|---|
+| **Selector-only** | индекс по готовому `[N,R,7]` | CS **0.272** / KDPE **0.553** (~2.0×) | 0.268 / 0.552 |
+| **Generation** | CNN + AR×N + detokenize | **22.73** ms | 22.68 |
+| **Full forward** | gen + select | CS **27.76** / KDPE **28.09** (Δ +0.33) | 27.64 / 27.89 |
+| single KV | без BoN | **24.78** | 24.91 |
 
-Итог для текста: *selector-only latency LIBERO = Table 5 can (D=7). CS ≈ 2× быстрее KDPE при N=8 (0.264 vs 0.535 ms). Это не ускорение всего инференса.*
+Совпадает с can/lift (D=7). Table 5 selector-only канон (can `n32diag` 0.264 / 0.535) остаётся колонками статьи; LIBERO — подтверждение, не замена.
+
+MW D=4: CS тот же ~0.27, **KDPE ~0.20 — не LIBERO**. Full MW ~31–33 ms (другой gen).
+
+Итог: *на селекторе CS ≈ 2× KDPE (0.27 vs 0.55 ms). End-to-end оба ~28 ms; селектор <2% forward.*
 
 ---
 
@@ -101,37 +101,40 @@ SE по задачам лежат в тех же json (`…/mean_success_rate_st
 
 ---
 
-## 4. Латентность (Table 5, для LIBERO — D=7 proxy)
+## 4. Латентность (замер на LIBERO ckpt + Table 5)
 
-Канон статьи = **can, пустая GPU1, 30 Sep**. Протокол: warmup=50, 8×20, Ns=8/16/32, batch 1, реальные кандидаты, `oat_code_seed`, `cudnn.deterministic=True`.
+Протокол: aic4 GPU1 пустая, warmup=50, 8×20, Ns=8/16/32, batch 1, реальные кандидаты, `oat_code_seed`.
 
-### 4.1 Selector-only, median [p25, p75] ms — канон (ставить в Table 5)
+**Selector-only** = выбор индекса по уже сгенерированному чанку (Table 5).  
+**Full forward** = `predict_action_bon_free` = vision + sample N + detokenize + select.  
+**Generation** = full минус select.
 
-| N | random | max_ll | medoid | CS (vote) | KDPE | KDPE/CS |
+### 4.1 LIBERO `policy_ep-0250`, пустая GPU1, 6 Oct 06:47 UTC
+
+Артефакт: `~/oat_eval_out/latency/selector_latency_gpu1_libero10.json`.
+
+| N | selector CS | selector KDPE | KDPE/CS | gen | full CS | full KDPE |
 |---|---|---|---|---|---|---|
-| 8 | 0.010 [0.010, 0.010] | 0.023 [0.023, 0.023] | 0.101 [0.100, 0.105] | **0.264 [0.261, 0.271]** | **0.535 [0.528, 0.541]** | **2.02×** |
-| 16 | 0.010 | 0.027 | 0.120 | 0.321 | 0.676 | 2.11× |
-| 32 | 0.011 | 0.027 | 0.232 | 0.429 | 0.680 | 1.58× |
+| 8 | **0.272 [0.269, 0.279]** | **0.553 [0.549, 0.559]** | 2.03× | 22.73 [22.67, 22.86] | **27.76 [27.67, 27.82]** | 28.09 [28.02, 28.16] |
+| 16 | 0.329 [0.325, 0.336] | 0.689 [0.684, 0.694] | 2.09× | 26.98 | 27.31 | 27.88 |
+| 32 | 0.439 [0.432, 0.453] | 0.696 [0.689, 0.715] | 1.59× | 27.57 | 27.80 | 28.28 |
 
-IQR CS vs KDPE **не пересекаются**.
+single KV: **24.78 [24.67, 24.87]** ms. IQR selector CS vs KDPE не пересекаются.
 
-### 4.2 Replicate 6 Oct, пустая GPU1 (не замена канона)
+KDPE verify N=8/16/32: матрицы `(8,8)` / `(16,16)` / `(32,32)`, `LAST_CALL` есть.
 
-`selector_latency_gpu1_clean_20261006.json`, smi_before **0.0 MiB**.
+### 4.2 Рядом с каноном can (Table 5 блок 1) и replicate
 
-| N | CS | KDPE | KDPE/CS |
+| | can канон `n32diag` | can replicate 6 Oct | LIBERO 6 Oct |
 |---|---|---|---|
-| 8 | 0.268 [0.266, 0.277] | 0.552 [0.546, 0.559] | 2.06× |
-| 16 | 0.325 | 0.691 | 2.13× |
-| 32 | 0.434 | 0.694 | 1.60× |
+| selector N=8 CS / KDPE | **0.264 / 0.535** | 0.268 / 0.552 | 0.272 / 0.553 |
+| full N=8 CS / KDPE | нет в `n32diag` | 27.64 / 27.89 | 27.76 / 28.09 |
 
-Отклонение от канона ~1–3%. Сюжет тот же.
+Колонки Table 5 = can канон selector-only. LIBERO/replicate — подтверждение D=7.
 
-### 4.3 Другие D=7 ckpt (GPU2, 4 Oct) — проверка, что can не уникален
+### 4.3 MW D=4 (не LIBERO)
 
-N=8: lift CS 0.267 / KDPE 0.533; square 0.263 / 0.539. Для LIBERO (тоже D=7) этого достаточно. **Не усреднять с MW D=4.**
-
-Полный пайплайн на can (~28 ms CS vs KDPE, разница <0.5 ms) — контекст, не Table 5 и не LIBERO-wall-clock.
+Selector CS ~0.26–0.27 (как D=7). KDPE ~0.20. Full ~31–33 ms. Не усреднять KDPE с D=7.
 
 ---
 
@@ -160,10 +163,10 @@ HF моделей: `Mirageinv/CS-libero`
 
 | Файл | Что |
 |---|---|
-| `~/oat_eval_out/latency/selector_latency_gpu1_n32diag.json` (+ `.md`) | **канон Table 5**, can, GPU1, 2026-09-30 16:42 UTC |
-| `~/oat_eval_out/latency/selector_latency_gpu1_clean_20261006.json` (+ `.md`) | replicate, пустая GPU1, 2026-10-06 06:31 UTC |
-| `~/oat_eval_out/latency/selector_latency_gpu2_{lift,square,box-close,coffee-pull,stick-pull,disassemble}.json` | доп. ckpt, GPU2, LANE_COMPLETE 2026-10-04 12:17 UTC |
-| `~/oat_eval_out/latency/selector_latency_gpu1.json` | старый прогон; не канон |
+| `~/oat_eval_out/latency/selector_latency_gpu1_libero10.json` (+ `.md`) | **LIBERO** selector+gen+full, GPU1 empty, 2026-10-06 06:50 UTC |
+| `~/oat_eval_out/latency/selector_latency_gpu1_n32diag.json` (+ `.md`) | **канон Table 5** selector+gen (без full), can, 2026-09-30 |
+| `~/oat_eval_out/latency/selector_latency_gpu1_clean_20261006.json` (+ `.md`) | can replicate с full, GPU1 empty, 2026-10-06 06:31 |
+| `~/oat_eval_out/latency/selector_latency_gpu2_{lift,square,box-close,coffee-pull,stick-pull,disassemble}.json` | доп. ckpt, GPU2, LANE_COMPLETE 2026-10-04 (full уже был) |
 
 Код замера: `~/oat_code_seed/scripts/measure_selector_latency_gpu.py` (нужен `LAST_CALL` в `kdpe.py`; **не** `oat_code_kdpe`).
 
@@ -172,8 +175,8 @@ HF моделей: `Mirageinv/CS-libero`
 ## 6. Что не делать при выгрузке / в тексте
 
 - Не подставлять MW KDPE (D=4, ~0.20 ms) как latency LIBERO.
-- Не писать «CS ускоряет инференс в 2 раза» — только шаг селектора.
+- Не писать «CS ускоряет инференс в 2 раза» — только selector-only; full ~28 ms, Δ~0.3 ms.
 - Не смешивать [E] с `--policy_seed 0`.
 - Не перегонять vote/random: json уже paper-числа.
-- Не выдавать can full-pipeline ~28 ms за LIBERO.
-- Канон Table 5 не заменять replicate 6 Oct (оставить как подтверждение).
+- Не цитировать warmup-10 full (~28 ms GPU1.json) вместо 8×20.
+- Канон Table 5 selector = `n32diag`; LIBERO full/selector = `libero10.json`.
