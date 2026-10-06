@@ -1,11 +1,11 @@
 # Selector baselines — status ledger (branch `aamas27_selector_baselines`)
 
-Updated: **2026-10-05 17:05 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG. SSH: [`AICENTER4_ACCESS.md`](AICENTER4_ACCESS.md).
+Updated: **2026-10-06 09:30 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG. SSH: [`AICENTER4_ACCESS.md`](AICENTER4_ACCESS.md). LIBERO ledger: [`LIBERO_LONG_REZULTATY.md`](LIBERO_LONG_REZULTATY.md).
 
-**5 Oct 17:05.** Диск: корень **164G** свободно (было 144G). Снесли `~/.cache/uv`, `.venv_robocasa`, `_runtime_robocasa_src`, дубли can hdf5. LIBERO **рестарт 14:03 UTC**: GPU0 max_ll+base, GPU1 kdpe, GPU2 medoid (GL ~5.8 it/s, Exp1). vote/random json целы.
+**6 Oct.** LIBERO-LONG **[E] 6/6 json**: vote 0.665 · medoid 0.663 · kdpe 0.605 · max_ll 0.584 · base 0.558 · random 0.554. Latency replicate на пустой GPU1 (can) CS 0.268 / KDPE 0.552 @ N=8. Карты свободны.
 
-**Progress:** RC+RM+MW SR закрыты · LIBERO 2/6 json · Table 5 канон + доп. ckpt **готовы**.
-**Hosts:** GPU0 max_ll+base · GPU1 kdpe · GPU2 medoid.
+**Progress:** RC+RM+MW SR закрыты · LIBERO 6/6 · Table 5 канон + доп. ckpt + replicate **готовы**.
+**Hosts:** idle.
 
 **⚠ ccm RoboCasa looks systematically low on some tasks** (coffee 34 vs aic4 50; faucet medoid 41.6 vs aic4 56.8; microwave random 25.2 vs aic4 43.6). ccm close-drawer matches the paper. Until this is explained, **aic4 is the reference host for RC**.
 
@@ -39,7 +39,7 @@ Protocol: N=8 K=8 T=1.0 topk=10, `-n 5`×50, `test_start_seed=10000`.
 | SR RoboMimic | **done** | lift = ep-1400 (`lift1400/`) |
 | SR MetaWorld | **done** | stick recheck pass |
 | SR RoboCasa | **done** (aic4) | все 16 ячеек; microwave vote **46.4±4.6**; ccm discarded |
-| Latency | **done** | канон can GPU1; доп. 6 ckpt GPU2 (тот же протокол). RC KDPE не мерили (D=12) |
+| Latency | **done** | канон can GPU1; доп. 6 ckpt GPU2; replicate 6 Oct. RC KDPE не мерили (D=12). LIBERO selector-only = can D=7 (см. LIBERO_LONG_REZULTATY §0) |
 
 ---
 
@@ -76,27 +76,33 @@ PDF columns = Table 4 of `oat-aaai.pdf` (± = **SE** across 5 seeds). Our column
 
 Per-exp coffee vote (aic4): .56 / .46 / .52 / .46 / .50.
 
-### 3.4 Check summary
+### 3.4 LIBERO-LONG [E] (aic4, n_test=500)
+
+Полный ledger: [`LIBERO_LONG_REZULTATY.md`](LIBERO_LONG_REZULTATY.md). Скаляр = `mean_success_rate_mean`.
+
+| vote | medoid | kdpe | max_ll | base | random |
+|------|--------|------|--------|------|--------|
+| **0.665±0.025** | 0.663±0.028 | 0.605±0.009 | 0.584±0.010 | 0.558±0.018 | 0.554±0.015 |
+
+### 3.5 Check summary
 
 | Status | Count / tasks |
 |--------|----------------|
 | pass/ok | RM+MW all 7; RC все 4 задачи × 4 селектора на aic4 |
 | RC done (trusted) | **16/16** aic4, включая microwave vote **46.4±4.6** |
-| live | aic4: LIBERO max_ll+base GPU0, kdpe GPU1, medoid GPU2 |
+| live | aic4 idle (LIBERO 6/6 done 6 Oct 04:37–05:08 UTC) |
 | discarded | coffee ×4 ccm; faucet medoid ccm (41.6 vs 56.8); microwave ccm (random 25.2 vs 43.6) |
 
 ---
 
-## 5. Live NOW (2026-10-05 17:05 MSK)
+## 5. Live NOW (2026-10-06 09:30 MSK)
 
 | Host | Jobs |
 |------|------|
-| aic4 GPU0 | LIBERO [E] max_likelihood + base (старт 14:03 UTC) |
-| aic4 GPU1 | LIBERO [E] kdpe |
-| aic4 GPU2 | LIBERO [E] medoid |
+| aic4 GPU0–2 | idle |
 | ccm | hop only; не paper |
 
-Корень **164G** свободно. Latency очередь закрыта. Ниже 29–30 Sep — история.
+LIBERO json готовы. Latency replicate `selector_latency_gpu1_clean_20261006.json`. Ниже 29–30 Sep — история.
 
 Overnight incident (aic4): the old `fill_rc_aic4.sh` woke up and started faucet max_ll + mw random alongside the coffee queue → coffee random died at 1/50 (3rd concurrent OSMesa). Both old schedulers replaced by one queue (`queue_rc_aic4.sh`, log `logs/queue_rc_aic4.log`).
 
@@ -162,8 +168,8 @@ Kernel is graded, not binary (most pairs have 1e-3<k<0.999; exact duplicates onl
 
 ## 7. Next
 
-1. Дождаться LIBERO json: kdpe / medoid / max_ll / base → вписать suite `mean_success_rate_mean`.
-2. Latency GPU2 **закрыта** — цифры в `TABLE5_LATENCY.md` (канон статьи = can).
+1. LIBERO json **готовы** — [`LIBERO_LONG_REZULTATY.md`](LIBERO_LONG_REZULTATY.md). Выгрузка артефактов с aic4 (eval_log + latency json) — следующий шаг.
+2. Latency: канон = can GPU1 `n32diag`; replicate 6 Oct не заменяет канон. RC KDPE не мерили (D=12).
 3. RC microwave — **не перегонять**.
 
 

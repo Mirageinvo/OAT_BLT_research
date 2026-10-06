@@ -6,7 +6,7 @@ SR в %, ± = std по повторам. Δ = CS − KDPE (плюс = наш м�
 - **Основные** — текущие прогоны без `--policy_seed`, это числа для статьи.
 - **Seed** — те же ячейки с `--policy_seed 0` (повтор i сидится 0+i). Нужны только для проверки воспроизводимости, с основными не смешиваем.
 
-Состояние на **5 Oct, 11:05 MSK**. [E] и [C] не смешивать. RC microwave vote **не дыра** — 46.4±4.6 на aic4 (см. STATUS §0 / §3.3). Latency GPU2 **закрыта**. LIBERO kdpe/medoid/max_ll/base — рестарт на 3 GPU.
+Состояние на **6 Oct, 09:30 MSK**. [E] и [C] не смешивать. RC microwave vote **не дыра** — 46.4±4.6 на aic4. Latency GPU2 **закрыта**. LIBERO-LONG **6/6 json готовы** — см. [`LIBERO_LONG_REZULTATY.md`](LIBERO_LONG_REZULTATY.md).
 
 ## Основные [E] (без `--policy_seed`)
 
@@ -35,16 +35,16 @@ SR в %, ± = std по повторам. Δ = CS − KDPE (плюс = наш м�
 
 ## LIBERO-LONG [E] (HF `Mirageinv/CS-libero`, OAT8, n_test=500)
 
-Один скаляр в статью: `mean_success_rate_mean`. Per-task ключи будут в том же `eval_log.json`.
+Один скаляр в статью: `mean_success_rate_mean`. Per-task и артефакты: [`LIBERO_LONG_REZULTATY.md`](LIBERO_LONG_REZULTATY.md).
 
 | Селектор | SR | Статус |
 |---|---|---|
 | vote (CS) | **0.665±0.025** | **готово** (0.672/0.660/0.704/0.652/0.638) |
+| medoid | **0.663±0.028** | **готово** 6 Oct 04:37 UTC |
+| kdpe | **0.605±0.009** | **готово** 6 Oct 04:53 UTC |
+| max_ll | **0.584±0.010** | **готово** 6 Oct 05:08 UTC |
+| base | **0.558±0.018** | **готово** 6 Oct 05:05 UTC |
 | random | **0.554±0.015** | **готово** (0.558/0.568/0.558/0.528/0.558) |
-| kdpe | — | рестарт 5 Oct GPU1; json ещё нет |
-| medoid | — | рестарт 5 Oct GPU2; json ещё нет |
-| max_ll | — | рестарт 5 Oct GPU0; json ещё нет |
-| base | — | рестарт 5 Oct GPU0; json ещё нет |
 
 Smoke воспроизводимости пройден: два прогона can vote с `--policy_seed 0` совпали эпизод в эпизод.
 

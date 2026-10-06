@@ -130,3 +130,5 @@ CPU (отдельный старый замер, не этот GPU-прогон)
 6. **Не смешивать.** Не подставлять эти мс в V100-строку PDF. Не писать «CS ускоряет весь инференс в 2 раза» — только селектор. Не усреднять канон (warmup 50, 8×20) с полным пайплайном (warmup 10, 8×10).
 
 7. **Фраза в текст.** CS is ~2× faster than KDPE on H100 (0.264–0.429 ms vs 0.535–0.680 ms for N=8–32). KDPE is launch-bound at N≥16 due to many small quaternion kernels, while CS’s single vectorized distance scales more efficiently.
+
+8. **LIBERO.** Отдельного latency-прогона на `policy_ep-0250` нет. LIBERO action **D=7** = can/lift/square → selector-only Table 5 can **репрезентативен**. Не цитировать MW D=4 KDPE (~0.20 ms). Replicate 6 Oct (пустая GPU1): CS 0.268 / KDPE 0.552 @ N=8 vs канон 0.264 / 0.535. См. [`LIBERO_LONG_REZULTATY.md`](LIBERO_LONG_REZULTATY.md) §0 и §4.
