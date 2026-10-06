@@ -4,7 +4,6 @@ Ledgers (also in git `aamas27_selector_baselines`):
 
 | File | Contents |
 |------|----------|
-| `AAMAS27_NARRATIVE.md` | council synthesis: AAMAS narrative |
 | `LIBERO_LONG_REZULTATY.md` | LIBERO SR (suite + per-task) + latency |
 | `TABLE5_LATENCY.md` | H100 selector-only vs full forward |
 | `CS_VS_KDPE_TABLE.md` | [E]/[C] CS vs KDPE |
