@@ -27,6 +27,7 @@ Paper track: **Consensus Selection (CS-D) on OAT** — matched baseline / BoN / 
 | If you need… | Open this first |
 |--------------|-----------------|
 | Final paper numbers + protocol | `docs/RESULTS.md` |
+| **Selector baselines on top of PDF (AAMAS27)** | **`docs/aamas27/README.md`** (this pack) + `eval/aamas27_selector/` |
 | RoboCasa-specific protocol / literal-5 seeds | `docs/RESULTS_ROBOCASA.md` |
 | Machine-readable file list | `INVENTORY.txt` |
 | Per-suite SR summaries | `eval/matched_s10000/<suite>/summary.json` or `.../robocasa/<task>/summary_literal5.json` |
@@ -71,6 +72,28 @@ hydra/
 eval/
   matched_s10000/                 # Table P source-of-truth eval outputs
   eval_out/                       # replan probes + RoboCasa obs audit artifacts
+  aamas27_selector/               # CS vs KDPE / selector baselines (on top of PDF)
+    aic4/                         # dump from lab-c-0 (only cluster with these runs)
+      paired/                     # [E] paired vote/kdpe (+ LIBERO 6 methods)
+      paired_seed/                # [C] --policy_seed 0
+      aamas27_selector_baselines/ # vote/random/medoid/max_ll (+ RC)
+      kdpe_n8/                    # earlier KDPE cells + episodes.jsonl
+      latency/                    # Table 5 selector + full-forward JSON/MD/logs
+      queues/                     # cell_*.sh / lane_*.sh launchers (reproduce evals)
+    ccm/                          # dump from ccmplanner (V100 cells; RC discarded from paper)
+      aamas27_selector_baselines/ # close-drawer vote/random/medoid json live here
+      ccm_v100_paired/            # can/lift base+vote V100 paired
+    INDEX.txt                     # every eval_log.json + latency json
+    MANIFEST_AAMAS27.json
+
+docs/aamas27/
+  LIBERO_LONG_REZULTATY.md        # LIBERO SR + latency (Russian ledger)
+  TABLE5_LATENCY.md
+  CS_VS_KDPE_TABLE.md
+  SELECTOR_BASELINES_STATUS.md
+  AAMAS27_DUMP.md
+  SELECTOR_BASELINES_PROTOCOL.md
+
 
 logs/
   matched_s10000_*.log
@@ -178,6 +201,77 @@ Protocol details: `docs/AGENT_GUIDE_TABLE_C_PRIME_LATENCY.md`.
 
 ---
 
+## AAMAS27 — selector baselines **on top of the PDF** (CS / KDPE / random / medoid / max_ll)
+
+These are **not** Table P BoN-vs-base. They are the extra selector comparison (Consensus Selection vs KDPE and ablations) plus Table 5 H100 selector latency.
+
+**Clusters scanned:** aicenter4/`lab-c-0` (**paper host**, 102 `eval_log.json` + latency), ccmplanner (**audit dump**, 28 `eval_log.json` including close-drawer vote/random/medoid), aicenter1 (**empty**), cds2 (**empty**). aicenter3 not used.
+
+Git branch: `aamas27_selector_baselines`  
+Code eval: cluster `~/oat_code_kdpe`  
+Latency: cluster `~/oat_code_seed` (`LAST_CALL` in `kdpe.py`)  
+Do **not** mix **[E]** (`eval/aamas27_selector/aic4/paired/`, no `--policy_seed`) with **[C]** (`…/paired_seed/`, `--policy_seed 0`).
+
+### Two clocks (latency)
+
+| Clock | What | Typical N=8 D=7 | Paper table |
+|-------|------|-----------------|-------------|
+| **Selector-only** | `_bon_select` / KDPE on tensor `[N,R,D]` | CS **0.264–0.272 ms**, KDPE **0.53–0.55 ms** (~2×) | **Table 5** |
+| **Full forward** | vision CNN + AR sample N + detokenize + select | CS/KDPE both **~28 ms** (Δ ~0.3 ms, ~1%) | context only |
+
+Do not write “CS speeds up inference 2×”. That 2× is selector-only. LIBERO D=7 matches RoboMimic can. MetaWorld D=4: CS still ~0.27 ms, **KDPE ~0.20 ms — do not pool with D=7**.
+
+### Where the numbers live
+
+Root on Hub: `eval/aamas27_selector/aic4/`  
+Cluster original: `~/oat_eval_out/` (same relative paths).
+
+| Need | Path under `eval/aamas27_selector/` |
+|------|--------------------------------------|
+| LIBERO-LONG [E] suite + per-task | `aic4/paired/libero10/{vote,medoid,kdpe,max_likelihood,base,random}/eval_log.json` |
+| RM/MW [E] CS vs KDPE (paired) | `aic4/paired/<task>/{vote,kdpe}/eval_log.json` (+ `base/` on can/lift/square) |
+| RM/MW [E] random/medoid/max_ll | `aic4/aamas27_selector_baselines/<task>/{vote,random,medoid,max_likelihood}_n8/eval_log.json` |
+| RoboCasa [E] (aic4 trusted) | `aic4/aamas27_selector_baselines/{close-drawer,coffee-button,faucet-off,microwave-off}/` |
+| Confirmatory [C] | `aic4/paired_seed/<task>/{vote,kdpe}/eval_log.json` |
+| Episode-level jsonl (paired) | `aic4/paired/<task>/<method>/episodes.jsonl` |
+| Table 5 canon (can, selector+gen) | `aic4/latency/selector_latency_gpu1_n32diag.json` |
+| can full-forward replicate | `aic4/latency/selector_latency_gpu1_clean_20261006.json` |
+| **LIBERO latency** (selector+gen+full) | `aic4/latency/selector_latency_gpu1_libero10.json` |
+| lift/square + MW D=4 latency | `aic4/latency/selector_latency_gpu2_{lift,square,box-close,coffee-pull,stick-pull,disassemble}.json` |
+| Human ledgers | `docs/aamas27/*.md` |
+| Launch scripts (aic4) | `aic4/queues/` (`cell_*.sh`, `lane_*.sh`) |
+| ccm close-drawer vote/random/medoid json | `ccm/aamas27_selector_baselines/close-drawer/{vote,random,medoid}_n8/eval_log.json` |
+| ccm V100 paired can/lift | `ccm/ccm_v100_paired/{can,lift}/{base,vote}/eval_log.json` |
+
+Paper scalars:
+
+| Suite | File | Key |
+|-------|------|-----|
+| LIBERO | `paired/libero10/<method>/eval_log.json` | `mean_success_rate_mean` (± `…_std`, n=5) |
+| RM/MW/RC | same `eval_log.json` | `mean_success_rate_mean` (reported as % in git docs) |
+
+LIBERO [E] (n_test=500, seed 10000, N=8): vote **0.665±0.025** · medoid **0.663±0.028** · kdpe **0.605±0.009** · max_ll **0.584±0.010** · base **0.558±0.018** · random **0.554±0.015**.
+
+LIBERO latency N=8 empty GPU1: selector CS **0.272** / KDPE **0.553**; full **27.76 / 28.09**; gen **22.73**.
+
+### Discarded / do not use as paper
+
+- **ccm RoboCasa coffee/microwave/faucet** — dumped under `ccm/` for audit, **not paper** (systematically low vs aic4).
+- `aic4/latency/selector_latency_gpu0.json` and `gpu1.json` (warmup-10 / occupied-GPU drafts). Canon = `n32diag`. Full can = `*_clean_20261006`.
+- `aic4/paired/square/{vote2,kdpe2}` extra repeats — keep for audit; primary square cells are `vote`/`kdpe`.
+- close-drawer vote/medoid: **json on ccm**, aic4 dirs may lack `eval_log.json`. Paper close-drawer vote **56.8±5.6** is the aic4-trusted number in STATUS (not the discarded ccm RC SR).
+
+### Download this pack only
+
+```bash
+huggingface-cli download hackhackhack66666/aaai27-models \
+  --include "eval/aamas27_selector/**" \
+  --include "docs/aamas27/**" \
+  --local-dir ./aaai27-models
+```
+
+---
+
 ## Known missing artifacts (documented honestly)
 
 These were **never saved** locally during the latency workflow (`download → measure → delete`):
@@ -235,3 +329,4 @@ huggingface-cli download hackhackhack66666/aaai-datasets --repo-type dataset --l
 |------|------|
 | 2026-08-19 | Initial upload: matched eval, my_models, selected ckpts, latency, logs, hydra, docs |
 | 2026-08-19 | Added `checkpoints/all_training/` (full TopK archive), expanded README navigation |
+| 2026-10-06 | Added `eval/aamas27_selector/` + `docs/aamas27/`: all aic4 selector-baseline evals, LIBERO-LONG, Table 5 + full-forward latency |

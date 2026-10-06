@@ -14,10 +14,19 @@
     "logs"
   ],
   "notes": [
-    "Curated review pack, not a full cluster dump.",
+    "Primary copy for paper + AAMAS27 selector-baseline add-on (CS vs KDPE).",
     "Datasets live in the separate aaai-datasets repo.",
+    "eval/aamas27_selector/ is the aic4 dump of all selector/latency runs on top of the PDF.",
     "Some RoboCasa AWR16 checkpoints were not retained locally; only recoverable HF ones are mirrored if present."
   ],
+  "aamas27_selector": {
+    "cluster": "aicenter4 lab-c-0",
+    "hub_prefix": "eval/aamas27_selector/aic4",
+    "docs_prefix": "docs/aamas27",
+    "trees": ["paired", "paired_seed", "aamas27_selector_baselines", "kdpe_n8", "latency"],
+    "ccm_trees": ["aamas27_selector_baselines", "ccm_v100_paired"],
+    "other_clusters": {"aicenter1": "empty", "cds2": "empty"}
+  },
   "expected_roots": [
     "docs",
     "checkpoints/my_models",
@@ -25,6 +34,7 @@
     "checkpoints/awr16_from_hf",
     "hydra",
     "eval/matched_s10000",
+    "eval/aamas27_selector",
     "eval/replan_probes",
     "logs",
     "MANIFEST.json",
