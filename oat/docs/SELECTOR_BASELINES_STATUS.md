@@ -1,6 +1,6 @@
 # Selector baselines — status ledger (branch `aamas27_selector_baselines`)
 
-Updated: **2026-10-06 09:30 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG. SSH: [`AICENTER4_ACCESS.md`](AICENTER4_ACCESS.md). LIBERO ledger: [`LIBERO_LONG_REZULTATY.md`](LIBERO_LONG_REZULTATY.md).
+Updated: **2026-10-06 09:30 MSK**. Scope: RoboMimic / MetaWorld / RoboCasa + LIBERO-LONG. LIBERO ledger: [`LIBERO_LONG_REZULTATY.md`](LIBERO_LONG_REZULTATY.md).
 
 **6 Oct.** LIBERO-LONG **[E] 6/6 json**: vote 0.665 · medoid 0.663 · kdpe 0.605 · max_ll 0.584 · base 0.558 · random 0.554. Latency replicate на пустой GPU1 (can) CS 0.268 / KDPE 0.552 @ N=8. Карты свободны.
 
