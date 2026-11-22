@@ -700,12 +700,16 @@ def _async_worker(
 
             if command == "reset":
                 observation, info = env.reset(**data)
+                # An explicit reset always starts a fresh episode, so a pending autoreset
+                # from the previous episode must be dropped. Upstream cleared it only in
+                # the shared_memory branch; with shared_memory=False (LIBERO) the first
+                # step after reset silently re-reset the env and discarded the action.
+                autoreset = False
                 if shared_memory:
                     write_to_shared_memory(
                         observation_space, index, observation, shared_memory
                     )
                     observation = None
-                    autoreset = False
                 pipe.send(((observation, info), True))
             elif command == "step":
                 if autoreset:

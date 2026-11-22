@@ -32,8 +32,15 @@ def _scene_hash(env):
 
 
 def _n_env_steps(env):
-    """Executed env steps of the current (first) episode in the worker."""
+    """Executed env steps of the worker's current episode (call before the worker
+    autoresets, i.e. right after the step on which the episode ended)."""
     return len(env.get_rewards())
+
+
+def _n_resets(env):
+    """LiberoEnv reset counter; used to detect a hidden worker-side reset between the
+    explicit reset of a chunk and its first executed step."""
+    return int(getattr(env.env.env, 'n_resets', -1))
 
 
 def maybe_to_torch(x, device, dtype):
@@ -268,11 +275,20 @@ class LiberoRunner(BaseRunner):
                 args_list=[(x,) for x in this_init_fns]
             )
 
-            # start rollout
-            obs, _ = self.env.reset()
+            # start rollout. The FINAL reset of every episode is seeded with its label
+            # (10000+i), so the initial scene depends only on (task, seed label), not on
+            # how many resets the worker did before (env reuse across chunks / repeats).
+            reset_seeds = list(self.env_seeds[this_global_slice])
+            reset_seeds += [self.env_seeds[0]] * (n_envs - len(reset_seeds))
+            obs, _ = self.env.reset(seed=reset_seeds)
             policy.reset()
             scene_hashes = self.env.call_each(
                 'run_dill_function', args_list=[(dill.dumps(_scene_hash),)] * n_envs)
+            resets_at_start = self.env.call_each(
+                'run_dill_function', args_list=[(dill.dumps(_n_resets),)] * n_envs)
+            hidden_reset = np.zeros(this_n_active_envs, dtype=bool)
+            ep_steps = np.full(this_n_active_envs, -1, dtype=int)
+            first_step = True
             if gen_seed is not None:
                 torch.manual_seed((int(gen_seed) * 1_000_003 + start) % (2 ** 62))
             calls_active = np.zeros(this_n_active_envs, dtype=int)
@@ -324,7 +340,7 @@ class LiberoRunner(BaseRunner):
                             self.last_decision_rows.append(dict(
                                 task=self.env_task_names[gi], init_id=gi,
                                 seed_label=self.env_seeds[gi], repeat_seed=gen_seed,
-                                replan_id=int(calls_active[j]) - 1,
+                                replan_id=int(calls_active[j]) - 1, R=int(result['bon_R']),
                                 executed_idx=int(sel[j]), **diag[j]))
                     if 'n_tokens' in result:
                         all_token_counts.append(result['n_tokens'])
@@ -353,6 +369,14 @@ class LiberoRunner(BaseRunner):
 
                 # step env
                 obs, reward, env_done, _, _ = self.env.step(action) # NOTE: reward=1 if success
+                if first_step:
+                    # the first step must execute the action in the scene we hashed, not
+                    # trigger a pending autoreset (would discard the action + change scene)
+                    r_now = self.env.call_each(
+                        'run_dill_function', args_list=[(dill.dumps(_n_resets),)] * n_envs)
+                    hidden_reset = np.array(
+                        [r_now[j] != resets_at_start[j] for j in range(this_n_active_envs)])
+                    first_step = False
 
                 # first-episode bookkeeping (variable-R desync safety, see episode_done).
                 # success is counted only while the env is still in its first episode;
@@ -365,6 +389,14 @@ class LiberoRunner(BaseRunner):
                 first_ep = ~ep_done_local
                 cur_success = np.asarray(all_success[this_global_slice], dtype=bool)
                 all_success[this_global_slice] = (cur_success | (succ_local & first_ep)).tolist()
+                newly_done = first_ep & (env_done_local | succ_local)
+                if newly_done.any():
+                    # read step counts now: the worker autoresets on the next step, after
+                    # which get_rewards() would describe the 2nd (ignored) episode
+                    st = self.env.call_each(
+                        'run_dill_function', args_list=[(dill.dumps(_n_env_steps),)] * n_envs)
+                    for j in np.flatnonzero(newly_done):
+                        ep_steps[j] = int(st[j])
                 episode_done[start:end] = ep_done_local | env_done_local | succ_local
                 done = bool(np.all(episode_done[start:end]))
 
@@ -378,13 +410,19 @@ class LiberoRunner(BaseRunner):
                 'run_dill_function', args_list=[(dill.dumps(_n_env_steps),)] * n_envs)
             for j in range(this_n_active_envs):
                 gi = start + j
+                steps_j = int(ep_steps[j]) if ep_steps[j] >= 0 else int(env_steps[j])
+                status = 'ok'
+                if hidden_reset[j]:
+                    status = 'hidden_reset'
+                elif str(scene_hashes[j]).startswith('err:'):
+                    status = 'scene_hash_error'
                 self.last_episode_rows.append(dict(
                     task=self.env_task_names[gi], init_id=gi, seed_label=self.env_seeds[gi],
                     repeat_seed=gen_seed, success=int(bool(all_success[gi])),
                     episode_finished=int(bool(episode_done[gi])),
-                    env_steps=int(env_steps[j]), policy_calls=int(calls_active[j]),
+                    env_steps=steps_j, policy_calls=int(calls_active[j]),
                     inference_ms=float(infer_ms_active[j]), batch_envs=int(n_envs),
-                    scene_hash=scene_hashes[j], status='ok'))
+                    scene_hash=scene_hashes[j], status=status))
 
             # collect data for this round
             all_video_paths[this_global_slice] = self.env.render()[this_local_slice]

@@ -71,6 +71,7 @@ class LiberoEnv(gymnasium.Env):
         self.max_episode_steps = max_episode_steps
         self.done = False
         self.cur_step = 0
+        self.n_resets = 0
 
         # setup gym spaces
         obs_dict = env.env._get_observations()
@@ -141,6 +142,12 @@ class LiberoEnv(gymnasium.Env):
         return self._extract_obs(obs), reward, self.done, False, info
     
     def reset(self, seed=None, options=None):
+        # LIBERO's ControlEnv.seed -> np.random.seed in this process; object placement on
+        # reset draws from np.random, so seeding right before reset fixes the scene for
+        # (task, seed) independently of the worker's history.
+        if seed is not None:
+            self.env.seed(int(seed))
+        self.n_resets += 1
         obs = self.env.reset()
         obs_dict = self._extract_obs(obs)
         self.done = False

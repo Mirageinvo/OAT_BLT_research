@@ -47,8 +47,19 @@ for V in cs_prefix cs_endpoint; do
 done
 uv run python scripts/rebuttal/aggregate_ablation.py ablation $OUT/smoke/cs_prefix $OUT/smoke/cs_endpoint --n_boot 200
 ```
-Check: episodes.csv has 20 rows, scene hashes equal across the two variants, policy_calls ≈ 20–35,
-selector_decisions.csv non-empty, wall-clock per variant → throughput estimate.
+Check (all must hold before step 3):
+- aggregator exits 0 (it refuses paired stats on any status != ok, unfinished episode, duplicate,
+  invalid/mismatching scene hash, or differing (task, init_id, repeat_seed) key sets);
+- episodes.csv has 20 rows per variant, all `status=ok` (`hidden_reset` = worker re-reset the scene
+  after it was hashed — must never appear), `episode_finished=1`;
+- "Executed index vs the variant's own shadow decision": 0 mismatches for both variants, R values [16];
+- policy_calls ≈ 20–35; wall-clock per variant → throughput estimate.
+
+Scene protocol (v2, differs from the historical S3 runs): the final reset of every episode is
+seeded with its seed label, and the vector-env worker clears a pending autoreset on explicit
+reset (upstream bug: with shared_memory=False the first step of every chunk after the first
+re-reset the env, discarding one action chunk and changing the scene). Report as: same
+checkpoint and S3 settings, new common scene set shared by all variants.
 
 Determinism check (optional, cheap): rerun `cs_prefix` smoke into `$OUT/smoke/cs_prefix_rerun`
 and diff the `success` / `policy_calls` columns.

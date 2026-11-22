@@ -77,24 +77,61 @@ def cmd_ablation(a):
     lines = []
     P = lines.append
 
-    # ---- integrity ----
+    # ---- integrity (strict: paired statistics are refused if pairing is not exact) ----
     P("## Integrity\n")
+    errors = []
+    key = ['task', 'init_id', 'repeat_seed']
+    variants = list(dict.fromkeys(ep['variant']))
     bad = ep[ep['status'] != 'ok']
-    P(f"- episodes: {len(ep)}; non-ok status: {len(bad)}; unfinished (hit loop cap without done): "
-      f"{int((ep['episode_finished'] == 0).sum())}")
-    dup = ep.duplicated(['variant', 'init_id', 'repeat_seed']).sum()
-    P(f"- duplicate (variant, init_id, repeat_seed) rows: {int(dup)}")
-    hs = ep.groupby(['init_id'])['scene_hash'].nunique()
-    P(f"- init_ids whose initial-scene hash differs across variants/repeats: {int((hs > 1).sum())} / {len(hs)}")
+    P(f"- episodes: {len(ep)}; variants: {variants}")
+    P(f"- non-ok status rows: {len(bad)} {dict(bad['status'].value_counts()) if len(bad) else ''}")
+    if len(bad):
+        errors.append(f"{len(bad)} rows with status != ok")
+    unfinished = int((ep['episode_finished'] == 0).sum())
+    P(f"- unfinished episodes (loop cap without done): {unfinished}")
+    if unfinished:
+        errors.append(f"{unfinished} unfinished episodes")
+    dup = int(ep.duplicated(['variant'] + key).sum())
+    P(f"- duplicate (variant, task, init_id, repeat_seed) rows: {dup}")
+    if dup:
+        errors.append(f"{dup} duplicate rows")
+    h = ep['scene_hash'].astype(str)
+    invalid_h = ep[ep['scene_hash'].isna() | h.str.startswith('err:') | (h.str.len() != 16)]
+    P(f"- rows with missing/invalid scene_hash: {len(invalid_h)}")
+    if len(invalid_h):
+        errors.append(f"{len(invalid_h)} rows with invalid scene_hash")
+    keysets = {v: set(map(tuple, ep.loc[ep['variant'] == v, key].itertuples(index=False)))
+               for v in variants}
+    ref = keysets[variants[0]]
+    for v in variants[1:]:
+        if keysets[v] != ref:
+            msg = (f"key set of `{v}` != `{variants[0]}` "
+                   f"(only in {variants[0]}: {len(ref - keysets[v])}, only in {v}: {len(keysets[v] - ref)})")
+            P(f"- {msg}")
+            errors.append(msg)
+    hk = ep.groupby(key)['scene_hash'].nunique()
+    n_hk = int((hk > 1).sum())
+    P(f"- (task, init_id, repeat_seed) keys whose scene hash differs across variants: {n_hk} / {len(hk)}")
+    if n_hk:
+        errors.append(f"{n_hk} keys with mismatching scene hashes across variants")
+    hr = ep.groupby(['task', 'init_id'])['scene_hash'].nunique()
+    P(f"- (task, init_id) whose hash differs across repeat seeds (expected 0 with seeded resets): "
+      f"{int((hr > 1).sum())} / {len(hr)}")
     tk = ep.groupby('init_id')['task'].nunique()
     P(f"- init_ids mapped to >1 task: {int((tk > 1).sum())}")
     cnt = ep.groupby(['variant', 'repeat_seed']).size().unstack(fill_value=0)
     P("\nEpisodes per variant × repeat_seed:\n")
     P(_md(cnt, ))
     P("")
+    if errors and not a.no_strict:
+        txt = "\n".join(lines)
+        print(txt)
+        sys.exit("INTEGRITY FAILURE — paired statistics not computed:\n  - " + "\n  - ".join(errors)
+                 + "\n(--no_strict prints the tables anyway; never report numbers from such a run)")
+    elif errors:
+        P("**WARNING: integrity failures above; numbers below are NOT valid paired comparisons.**\n")
 
     # ---- SR ----
-    variants = list(dict.fromkeys(ep['variant']))
     P("## Success rate\n")
     rep_sr = ep.groupby(['variant', 'repeat_seed'])['success'].mean()
     rows = []
@@ -145,6 +182,15 @@ def cmd_ablation(a):
         if (dc.cs_prefix_fixed_idx >= 0).any():
             dc = dc.assign(idx_cs_fixed=(dc.cs_prefix_idx != dc.cs_prefix_fixed_idx))
             cols.append('idx_cs_fixed')
+        own = {'cs_prefix': 'cs_prefix_idx', 'medoid_prefix': 'medoid_prefix_idx',
+               'cs_endpoint': 'cs_endpoint_idx', 'cs_prefix_fixed': 'cs_prefix_fixed_idx'}
+        P("Executed index vs the variant's own shadow decision (must be 0 mismatches):\n")
+        for v, g in dec.groupby('variant'):
+            if v in own:
+                mm = int((g['executed_idx'] != g[own[v]]).sum())
+                Rs = sorted(g['R'].unique().tolist()) if 'R' in g else 'n/a'
+                P(f"- `{v}`: {mm} / {len(g)} mismatches; R values: {Rs}")
+        P("")
         tot = (100 * dc[cols].mean()).to_frame('all_decisions_%').T
         tot.insert(0, 'decisions', len(dc))
         P(_md(tot, index=False, floatfmt='.1f'))
@@ -192,6 +238,8 @@ def main():
     b.add_argument('--control', default='cs_prefix')
     b.add_argument('--n_boot', type=int, default=10000)
     b.add_argument('--out', default=None)
+    b.add_argument('--no_strict', action='store_true',
+                   help='print tables even if pairing integrity fails (diagnostics only)')
     a = ap.parse_args()
     {'calib': cmd_calib, 'ablation': cmd_ablation}[a.cmd](a)
 
