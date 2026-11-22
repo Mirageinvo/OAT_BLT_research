@@ -21,6 +21,7 @@ import os
 import pathlib
 import click
 import hydra
+from omegaconf import OmegaConf
 import torch
 import wandb
 import json
@@ -66,7 +67,8 @@ from typing import List, Optional
 @click.option('--bon_free', default=0, type=int,
               help="verifier-free best-of-N: sample N candidate plans per replan (vision "
                    "amortized), pick by a FREE signal (no trained verifier). 0=off.")
-@click.option('--bon_signal', default='vote', type=click.Choice(['vote', 'medoid', 'value', 'random', 'max_likelihood', 'kdpe']),
+@click.option('--bon_signal', default='vote', type=click.Choice(['vote', 'medoid', 'value', 'random', 'max_likelihood', 'kdpe',
+                                                                 'cs_prefix', 'cs_endpoint', 'medoid_prefix', 'cs_prefix_fixed']),
               help="ranking signal: 'vote'=mode-seeking KDE density, 'medoid'=min sum dist, "
                    "'max_likelihood'=argmax token seq logprob, 'random'=uniform, "
                    "'kdpe'=KDPE-style endpoint KDE (OAT adaptation; flat BoN only), "
@@ -74,6 +76,15 @@ from typing import List, Optional
 @click.option('--kdpe_bandwidth', default=0.05, type=float, show_default=True,
               help="KDPE base bandwidth b; sigma_pos/rot/grip = b/5b/20b (0.05/0.25/1.0). "
                    "Only used with --bon_signal kdpe.")
+@click.option('--cs_fixed_h', default=None, type=float,
+              help="pre-registered bandwidth for --bon_signal cs_prefix_fixed (also used for "
+                   "the shadow cs_prefix_fixed index in --log_diagnostics)")
+@click.option('--gen_seeds', default=None, type=str,
+              help="comma-separated generation seeds, one per repeat (overrides --num_exp). "
+                   "torch RNG is re-seeded per env batch from (seed, batch start index).")
+@click.option('--log_diagnostics', is_flag=True, default=False,
+              help="log per-decision shadow indices of all CS-ablation variants on the SAME "
+                   "candidates (selector_decisions.csv). Computed outside the timed region.")
 @click.option('--selector_seed', default=0, type=int,
               help="isolated CPU RNG seed for --bon_signal random")
 @click.option('--chunk_q', default=None, type=str,
@@ -119,6 +130,9 @@ def eval_policy_sim(
     bon_signal: str = 'vote',
     selector_seed: int = 0,
     kdpe_bandwidth: float = 0.05,
+    cs_fixed_h: Optional[float] = None,
+    gen_seeds: Optional[str] = None,
+    log_diagnostics: bool = False,
     chunk_q: Optional[str] = None,
     bon_prefix_k: int = 0,
     bon_first_temp: float = 0.0,
@@ -136,6 +150,20 @@ def eval_policy_sim(
             click.confirm(f"Output path {output_dir} already exists! Overwrite?", abort=True)
             os.system(f"rm -rf {output_dir}")
     pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    # ---- AAMAS-27 rebuttal: variant names, seeds, determinism ----
+    from oat.policy.cs_ablation import VARIANT_TO_SIGNAL
+    variant_label = bon_signal if bon_free > 1 else 'base'
+    if bon_signal in VARIANT_TO_SIGNAL:
+        bon_signal = VARIANT_TO_SIGNAL[bon_signal]      # cs_prefix->vote, medoid_prefix->medoid
+    if bon_free > 1 and bon_signal == 'cs_prefix_fixed' and (cs_fixed_h is None or cs_fixed_h <= 0):
+        raise click.UsageError("--bon_signal cs_prefix_fixed requires --cs_fixed_h > 0")
+    seed_list = None
+    if gen_seeds is not None:
+        seed_list = [int(x) for x in gen_seeds.split(',') if x.strip() != '']
+        num_exp = len(seed_list)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
     
     # grab all checkpoints
     ckpts: List[str]    # file paths to checkpoints to evaluate
@@ -247,6 +275,8 @@ def eval_policy_sim(
             kwargs['bon_prefix_k'] = bon_prefix_k
             kwargs['bon_first_temp'] = bon_first_temp
             kwargs['selector_seed'] = selector_seed
+            if cs_fixed_h is not None:
+                kwargs['cs_fixed_h'] = cs_fixed_h
             if bon_signal == 'kdpe':
                 if bon_prefix_k > 0 or bon_first_temp > 0:
                     raise click.UsageError(
@@ -257,11 +287,34 @@ def eval_policy_sim(
             mode = f"coarse-to-fine prefix_k={bon_prefix_k}" if 0 < bon_prefix_k else "flat"
             if bon_first_temp > 0:
                 mode += f", first_token_temp={bon_first_temp}"
-            print(f"verifier-free BoN: N={bon_free}, signal={bon_signal}, selector_seed={selector_seed}, {mode}")
-        runner_log = env_runner.run(
-            policy,
-            **kwargs
-        )
+            print(f"verifier-free BoN: N={bon_free}, signal={bon_signal} (variant={variant_label}), "
+                  f"selector_seed={selector_seed}, cs_fixed_h={cs_fixed_h}, {mode}")
+        if log_diagnostics:
+            kwargs['log_diagnostics'] = True
+            if not (bon_free and bon_free > 1):
+                print("[warn] --log_diagnostics has no effect without --bon_free > 1")
+
+        from oat.common.rebuttal_io import RebuttalLogger
+        rlog = RebuttalLogger(output_dir, variant_label)
+        rlog.write_manifest(dict(
+            argv=sys.argv, checkpoint=ckpt, variant=variant_label, bon_signal=bon_signal,
+            bon_free=bon_free, use_k_tokens=use_k_tokens, temperature=temperature, topk=topk,
+            entropy_threshold=entropy_threshold, n_action_steps=n_action_steps,
+            cs_fixed_h=cs_fixed_h, selector_seed=selector_seed, gen_seeds=seed_list,
+            n_test=n_test, test_start_seed=test_start_seed, n_parallel_envs=n_parallel_envs,
+            device=str(device), cfg_env_runner=OmegaConf.to_container(cfg.task.policy.env_runner, resolve=False),
+            env_task_names=list(getattr(env_runner, "env_task_names", [])),
+            env_seeds=[int(x) for x in getattr(env_runner, "env_seeds", [])],
+        ))
+
+        def _run_one(rep_idx):
+            if seed_list is not None:
+                kwargs['gen_seed'] = seed_list[rep_idx]
+            out = env_runner.run(policy, **kwargs)
+            rlog.append(env_runner)
+            return out
+
+        runner_log = _run_one(0)
         
         # Store all runs for computing statistics
         all_runs = []
@@ -272,7 +325,7 @@ def eval_policy_sim(
         print(f"Exp 1: success rate = {runner_log['mean_success_rate']}, mean tokens used = {runner_log.get('mean_tokens_used', 'N/A')}, mean R = {runner_log.get('mean_r_exec', 'N/A')}, mean replans = {runner_log.get('mean_replans_per_episode', 'N/A')}")
 
         for i in range(num_exp - 1):
-            this_log = env_runner.run(policy, **kwargs)
+            this_log = _run_one(i + 1)
             print(f"Exp {i + 2}: success rate = {this_log['mean_success_rate']}, mean tokens used = {this_log.get('mean_tokens_used', 'N/A')}")
             all_runs.append({k: v for k, v in this_log.items() if not isinstance(v, list)})
             # merge logs

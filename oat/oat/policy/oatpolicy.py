@@ -4,6 +4,8 @@ from typing import Dict, Optional, Tuple
 
 from oat.policy.base_policy import BasePolicy
 from oat.policy.kdpe import kdpe_endpoint_scores
+from oat.policy.cs_ablation import (
+    select_cs_endpoint, select_cs_prefix_fixed, shadow_decisions)
 from oat.tokenizer.oat.tokenizer import OATTok
 from oat.perception.base_obs_encoder import BaseObservationEncoder
 # from oat.model.autoregressive.transformer import AutoregressiveModel
@@ -266,7 +268,8 @@ class OATPolicy(BasePolicy):
                     features_b: Optional[torch.Tensor] = None,
                     seq_logprob_b: Optional[torch.Tensor] = None,
                     sel_generator: Optional[torch.Generator] = None,
-                    kdpe_bandwidth: float = 0.05) -> int:
+                    kdpe_bandwidth: float = 0.05,
+                    cs_fixed_h: Optional[float] = None) -> int:
         """Pick the best candidate index from [N, H, D] by a ranking signal over the executed
         prefix R (normalizer space).
         - 'vote' = mode-seeking KDE density (CS / paper primary)
@@ -313,10 +316,28 @@ class OATPolicy(BasePolicy):
             sigma = (off.median() if off.numel() > 0 else dist.new_tensor(1.0)) + 1e-6
             dens = torch.exp(-(dist ** 2) / (2 * sigma ** 2)).sum(dim=1)
             return int(dens.argmax())
+        # ---- AAMAS-27 rebuttal CS ablation (see oat/policy/cs_ablation.py) ----
+        if bon_signal == 'cs_endpoint':
+            return select_cs_endpoint(a, R)
+        if bon_signal == 'cs_prefix_fixed':
+            if cs_fixed_h is None or cs_fixed_h <= 0:
+                raise ValueError("bon_signal='cs_prefix_fixed' requires cs_fixed_h > 0")
+            return select_cs_prefix_fixed(a, R, cs_fixed_h)
         raise ValueError(
             f"unknown bon_signal={bon_signal!r}; "
-            "expected one of vote|medoid|max_likelihood|random|value"
+            "expected one of vote|medoid|max_likelihood|random|value|kdpe|"
+            "cs_endpoint|cs_prefix_fixed"
         )
+
+    @torch.inference_mode()
+    def bon_diagnostics(self, cand: torch.Tensor, R: int,
+                        cs_fixed_h: Optional[float] = None) -> list:
+        """Shadow decisions of all CS-ablation variants on the SAME candidates.
+        cand: [B, N, H, D] raw decoded candidates (as returned with return_candidates=True).
+        Returns one dict per batch row. Diagnostics only — call outside timing."""
+        norm = self.action_tokenizer.normalizer['action']
+        return [shadow_decisions(norm.normalize(cand[b, :, :R]), R, fixed_h=cs_fixed_h)
+                for b in range(cand.shape[0])]
 
     def _bon_sample(self, cond, n_new, temperature, topk, first_temp,
                     return_logprobs: bool = False):
@@ -359,6 +380,8 @@ class OATPolicy(BasePolicy):
         bon_first_temp: float = 0.0,
         selector_seed: Optional[int] = None,
         kdpe_bandwidth: float = 0.05,
+        cs_fixed_h: Optional[float] = None,
+        return_candidates: bool = False,
     ) -> Dict[str, torch.Tensor]:
         """Verifier-free best-of-N. Per env: encode vision ONCE (amortized), sample bon_n
         candidate plans from the cheap AR head, pick by a FREE consensus signal (see
@@ -427,6 +450,7 @@ class OATPolicy(BasePolicy):
                 seq_logprob_b=(None if seq_lp is None else seq_lp[b]),
                 sel_generator=sel_gen,
                 kdpe_bandwidth=kdpe_bandwidth,
+                cs_fixed_h=cs_fixed_h,
             ) for b in range(B)],
             device=self.device, dtype=torch.long)
         ar = torch.arange(B, device=self.device)
@@ -449,7 +473,12 @@ class OATPolicy(BasePolicy):
         out = {'action': action, 'action_pred': chosen,
                'n_tokens': float(use_k_tokens), 'bon_n': float(bon_n),
                'bon_prefix_k': float(gen_k),
-               'selected_idx': best_idx.detach().float().mean()}
+               'selected_idx': best_idx.detach().float().mean(),
+               'selected_idx_b': best_idx}
+        if return_candidates:
+            # reference only (no copy); consumed by bon_diagnostics OUTSIDE the timed region
+            out['bon_cand'] = cand
+            out['bon_R'] = R
         if seq_lp is not None:
             out['seq_logprob_selected'] = float(seq_lp[ar, best_idx].mean().item())
             out['seq_logprob_mean'] = float(seq_lp.mean().item())
@@ -474,6 +503,8 @@ class OATPolicy(BasePolicy):
         bon_first_temp: float = 0.0,
         selector_seed: Optional[int] = None,
         kdpe_bandwidth: float = 0.05,
+        cs_fixed_h: Optional[float] = None,
+        return_candidates: bool = False,
     ) -> Dict[str, torch.Tensor]:
         # verifier-free best-of-N: sample bon_free candidate plans (vision encoded ONCE,
         # amortized), pick by a free intrinsic signal (mode-seeking consensus / likelihood).
@@ -484,6 +515,7 @@ class OATPolicy(BasePolicy):
                 temperature=temperature, topk=topk, bon_signal=bon_signal,
                 bon_prefix_k=bon_prefix_k, bon_first_temp=bon_first_temp,
                 selector_seed=selector_seed, kdpe_bandwidth=kdpe_bandwidth,
+                cs_fixed_h=cs_fixed_h, return_candidates=return_candidates,
             )
         # variable-R execution (GATE 1): hold K fixed (= use_k_tokens, default full
         # budget) and adapt the executed chunk length R per observation. Distinct axis

@@ -3,6 +3,8 @@ import numpy as np
 import torch
 import tqdm
 import math
+import time
+import hashlib
 import pathlib
 import dill
 import wandb.sdk.data_types.video as wandb_video
@@ -17,6 +19,22 @@ from oat.policy.base_policy import BasePolicy
 from oat.common.pytorch_util import dict_apply
 
 from typing import Optional, List
+
+def _scene_hash(env):
+    """md5 of the MuJoCo state right after reset (env = MultiStepWrapper in the worker).
+    Used to verify that every variant starts from identical initial scenes."""
+    try:
+        st = env.env.env.env.get_sim_state()          # LiberoEnv.env = ControlEnv
+        st = np.round(np.asarray(st, dtype=np.float64), 8)
+        return hashlib.md5(st.tobytes()).hexdigest()[:16]
+    except Exception as e:                             # never break the eval for a diagnostic
+        return f"err:{type(e).__name__}"
+
+
+def _n_env_steps(env):
+    """Executed env steps of the current (first) episode in the worker."""
+    return len(env.get_rewards())
+
 
 def maybe_to_torch(x, device, dtype):
     if isinstance(x, np.ndarray):
@@ -200,6 +218,21 @@ class LiberoRunner(BaseRunner):
         dtype = policy.dtype
         policy_name = policy.get_policy_name()
 
+        # ---- AAMAS-27 rebuttal logging (popped: not policy kwargs) ----
+        # gen_seed: if set, torch RNG is re-seeded at the start of every env batch with
+        #   f(gen_seed, first global episode index). Batch membership is fixed by
+        #   (n_test, n_parallel_envs), and the policy is queried for all batch rows every
+        #   cycle (finished envs are frozen, not reset), so the generation RNG stream of a
+        #   batch does not depend on how long previous batches lasted.
+        gen_seed = kwargs.pop('gen_seed', None)
+        log_diagnostics = bool(kwargs.pop('log_diagnostics', False))
+        if log_diagnostics:
+            kwargs['return_candidates'] = True
+        cs_fixed_h = kwargs.get('cs_fixed_h', None)
+        use_cuda = (torch.device(device).type == 'cuda')
+        self.last_episode_rows = []
+        self.last_decision_rows = []
+
         # plan for rollout
         n_envs = len(self.env_fns)
         n_inits = len(self.env_init_fn_dills)
@@ -238,6 +271,12 @@ class LiberoRunner(BaseRunner):
             # start rollout
             obs, _ = self.env.reset()
             policy.reset()
+            scene_hashes = self.env.call_each(
+                'run_dill_function', args_list=[(dill.dumps(_scene_hash),)] * n_envs)
+            if gen_seed is not None:
+                torch.manual_seed((int(gen_seed) * 1_000_003 + start) % (2 ** 62))
+            calls_active = np.zeros(this_n_active_envs, dtype=int)
+            infer_ms_active = np.zeros(this_n_active_envs, dtype=float)
 
             pbar = tqdm.tqdm(
                 total=self.max_episode_steps,
@@ -248,6 +287,12 @@ class LiberoRunner(BaseRunner):
 
             done = False
             while not done and pbar.n < pbar.total:
+                active_before = ~episode_done[start:end]
+                # ---- timed region: obs -> device, perception, generation, decode, select,
+                # chunk back on host. Excludes env.step, diagnostics, logging. ----
+                if use_cuda:
+                    torch.cuda.synchronize(device)
+                _tic = time.perf_counter()
                 # create obs dict
                 obs_dict = dict_apply(
                     obs,
@@ -261,6 +306,26 @@ class LiberoRunner(BaseRunner):
                         for port in policy.get_observation_ports()
                     }, **kwargs)
                     action = result['action'].detach().cpu().numpy()
+                    if use_cuda:
+                        torch.cuda.synchronize(device)
+                    call_ms = (time.perf_counter() - _tic) * 1000.0
+                    # ---- end timed region ----
+                    calls_active += active_before.astype(int)
+                    infer_ms_active += active_before * call_ms
+                    if log_diagnostics and 'bon_cand' in result:
+                        diag = policy.bon_diagnostics(
+                            result['bon_cand'][:this_n_active_envs], result['bon_R'],
+                            cs_fixed_h=cs_fixed_h)
+                        sel = result['selected_idx_b'][:this_n_active_envs].tolist()
+                        for j in range(this_n_active_envs):
+                            if not active_before[j]:
+                                continue
+                            gi = start + j
+                            self.last_decision_rows.append(dict(
+                                task=self.env_task_names[gi], init_id=gi,
+                                seed_label=self.env_seeds[gi], repeat_seed=gen_seed,
+                                replan_id=int(calls_active[j]) - 1,
+                                executed_idx=int(sel[j]), **diag[j]))
                     if 'n_tokens' in result:
                         all_token_counts.append(result['n_tokens'])
                     if 'k_pred' in result:
@@ -308,6 +373,18 @@ class LiberoRunner(BaseRunner):
                 step_advance = int(r_exec.min()) if r_exec is not None else action.shape[1]
                 pbar.update(step_advance)
             pbar.close()
+
+            env_steps = self.env.call_each(
+                'run_dill_function', args_list=[(dill.dumps(_n_env_steps),)] * n_envs)
+            for j in range(this_n_active_envs):
+                gi = start + j
+                self.last_episode_rows.append(dict(
+                    task=self.env_task_names[gi], init_id=gi, seed_label=self.env_seeds[gi],
+                    repeat_seed=gen_seed, success=int(bool(all_success[gi])),
+                    episode_finished=int(bool(episode_done[gi])),
+                    env_steps=int(env_steps[j]), policy_calls=int(calls_active[j]),
+                    inference_ms=float(infer_ms_active[j]), batch_envs=int(n_envs),
+                    scene_hash=scene_hashes[j], status='ok'))
 
             # collect data for this round
             all_video_paths[this_global_slice] = self.env.render()[this_local_slice]
