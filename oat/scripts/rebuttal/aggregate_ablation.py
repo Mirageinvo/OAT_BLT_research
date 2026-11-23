@@ -70,7 +70,34 @@ def _paired_boot(diff_by_scene: pd.DataFrame, n_boot: int, seed: int = 0):
 
 
 def cmd_ablation(a):
-    ep = _load(a.dirs, 'episodes.csv')
+    # every DIR must hold exactly one variant's episodes.csv; nothing is skipped silently
+    pre = []
+    frames = []
+    for d in a.dirs:
+        p = os.path.join(d, 'episodes.csv')
+        if not os.path.isfile(p):
+            pre.append(f"missing {p}")
+            continue
+        f = pd.read_csv(p)
+        if f.empty:
+            pre.append(f"empty {p}")
+            continue
+        vs = sorted(f['variant'].astype(str).unique())
+        if len(vs) != 1:
+            pre.append(f"{p} holds {len(vs)} variants {vs} (expected exactly 1)")
+        frames.append(f)
+    ep = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    if not ep.empty:
+        per_dir = [sorted(f['variant'].astype(str).unique()) for f in frames]
+        flat = [v for vs in per_dir for v in vs]
+        if len(flat) != len(set(flat)):
+            pre.append(f"same variant in several DIRs: {flat}")
+        if a.control not in set(flat):
+            pre.append(f"control `{a.control}` not among loaded variants {sorted(set(flat))}")
+        if len(set(flat)) < 2:
+            pre.append(f"need >= 2 variants for a paired comparison, got {sorted(set(flat))}")
+    if pre and not a.no_strict:
+        sys.exit("INPUT FAILURE — paired statistics not computed:\n  - " + "\n  - ".join(pre))
     if ep.empty:
         sys.exit("no episodes.csv found")
     ep['repeat_seed'] = ep['repeat_seed'].fillna(-1).astype(int)
@@ -79,7 +106,7 @@ def cmd_ablation(a):
 
     # ---- integrity (strict: paired statistics are refused if pairing is not exact) ----
     P("## Integrity\n")
-    errors = []
+    errors = list(pre)          # only non-empty under --no_strict
     key = ['task', 'init_id', 'repeat_seed']
     variants = list(dict.fromkeys(ep['variant']))
     bad = ep[ep['status'] != 'ok']
