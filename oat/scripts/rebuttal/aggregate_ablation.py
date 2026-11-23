@@ -226,7 +226,11 @@ def cmd_ablation(a):
 
     # ---- disagreement (same candidates, on control trajectories) ----
     if not dec.empty:
-        dc = dec[dec['variant'] == ctrl] if ctrl in set(dec['variant']) else dec
+        # shadow log of ONE variant only (pooling trajectories of different selectors would
+        # mix decision distributions): cs_prefix if logged, else the control, else the first
+        have = list(dict.fromkeys(dec['variant']))
+        src = 'cs_prefix' if 'cs_prefix' in have else (ctrl if ctrl in have else have[0])
+        dc = dec[dec['variant'] == src]
         P(f"## Selector disagreement on the SAME 8 candidates (decisions on `{dc['variant'].iloc[0]}` trajectories)\n")
         dc = dc.assign(idx_cs_med=(dc.cs_prefix_idx != dc.medoid_prefix_idx),
                        pre_cs_med=(dc.d_cs_medoid > 0),
