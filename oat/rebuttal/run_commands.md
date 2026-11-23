@@ -11,7 +11,7 @@ cd /workspace/my_project/OAT_BLT_research
 #   (local)     git bundle create aamas27_rebuttal.bundle 52e55e6..aamas27_rebuttal   # copy file to container
 #   (container) git fetch /path/aamas27_rebuttal.bundle aamas27_rebuttal:aamas27_rebuttal
 git checkout aamas27_rebuttal
-git log --oneline -1          # must show fa07567 or later (seeded resets + strict aggregator)
+git log --oneline -1          # must match `git log --oneline -1` on the local branch
 git lfs pull --include="oat/my_models/policy_ep-0250_sr-0.596.ckpt,oat/my_models/tokenizer_ep-0950_mse-0.002.ckpt"
 cd oat
 sha256sum my_models/policy_ep-0250_sr-0.596.ckpt
@@ -39,26 +39,35 @@ S3="--use_k_tokens 8 --entropy_threshold 0 --temperature 1.0 --topk 10 \
     --selector_seed 0 --n_test 500 --n_parallel_envs 4 --test_start_seed 10000"
 ```
 
-## 1. Smoke (10–20 episodes/variant; NOT part of results)
+## 1. Smoke (20 episodes/variant; NOT part of results)
 
 `n_test 20` changes the task layout, so smoke scenes are not the main scenes — that is fine.
+`base` is included so the N=1 path and `--control base` aggregation are exercised before 500 scenes.
 
 ```bash
+SM="--use_k_tokens 8 --entropy_threshold 0 --temperature 1.0 --topk 10 --selector_seed 0 \
+    --n_test 20 --n_parallel_envs 4 --test_start_seed 10000 --gen_seeds 0"
+mkdir -p $OUT/smoke
+/usr/bin/time -v uv run python scripts/eval_policy_sim.py -c $CKPT -o $OUT/smoke/base --force $SM \
+  --bon_free 1 2>&1 | tee $OUT/smoke/base.log
 for V in cs_prefix cs_endpoint; do
-  /usr/bin/time -v uv run python scripts/eval_policy_sim.py -c $CKPT -o $OUT/smoke/$V --force \
-    --use_k_tokens 8 --entropy_threshold 0 --temperature 1.0 --topk 10 --bon_free 8 --selector_seed 0 \
-    --n_test 20 --n_parallel_envs 4 --test_start_seed 10000 \
-    --bon_signal $V --gen_seeds 0 --log_diagnostics 2>&1 | tee $OUT/smoke/$V.log
+  /usr/bin/time -v uv run python scripts/eval_policy_sim.py -c $CKPT -o $OUT/smoke/$V --force $SM \
+    --bon_free 8 --bon_signal $V --log_diagnostics 2>&1 | tee $OUT/smoke/$V.log
 done
-uv run python scripts/rebuttal/aggregate_ablation.py ablation $OUT/smoke/cs_prefix $OUT/smoke/cs_endpoint --n_boot 200
+D="$OUT/smoke/base $OUT/smoke/cs_prefix $OUT/smoke/cs_endpoint"
+uv run python scripts/rebuttal/aggregate_ablation.py ablation $D --control base      --n_boot 200; echo "exit=$?"
+uv run python scripts/rebuttal/aggregate_ablation.py ablation $D --control cs_prefix --n_boot 200; echo "exit=$?"
 ```
-Check (all must hold before step 3):
-- aggregator exits 0 (it refuses paired stats on any status != ok, unfinished episode, duplicate,
-  invalid/mismatching scene hash, or differing (task, init_id, repeat_seed) key sets);
-- episodes.csv has 20 rows per variant, all `status=ok` (`hidden_reset` = worker re-reset the scene
-  after it was hashed — must never appear), `episode_finished=1`;
-- "Executed index vs the variant's own shadow decision": 0 mismatches for both variants, R values [16];
-- policy_calls ≈ 20–35; wall-clock per variant → throughput estimate.
+Gate to step 3 (SR on these 20 episodes is NOT a criterion). Both aggregations must exit 0 in
+strict mode. Strict mode fails on:
+- status != ok (incl. `hidden_reset`), unfinished episodes, duplicates;
+- invalid/mismatching scene hashes or differing (task, init_id, repeat_seed) key sets;
+- generated tokens K != 8 or executed chunk length R != 16 in any episode (`k_tokens`/`r_exec`
+  columns; checked for base too);
+- any executed-index mismatch vs the variant's own shadow decision, or decision R != 16.
+
+Also eyeball: 20 rows per variant, policy_calls ≈ 20–35, wall-clock per variant (throughput).
+`base` has no selector_decisions.csv — expected.
 
 Scene protocol (v2, differs from the historical S3 runs): the final reset of every episode is
 seeded with its seed label, and the vector-env worker clears a pending autoreset on explicit

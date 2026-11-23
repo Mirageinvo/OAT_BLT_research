@@ -292,6 +292,9 @@ class LiberoRunner(BaseRunner):
             if gen_seed is not None:
                 torch.manual_seed((int(gen_seed) * 1_000_003 + start) % (2 ** 62))
             calls_active = np.zeros(this_n_active_envs, dtype=int)
+            # actual K (generated tokens) and R (executed chunk length) seen by each episode
+            k_seen = [set() for _ in range(this_n_active_envs)]
+            r_seen = [set() for _ in range(this_n_active_envs)]
             infer_ms_active = np.zeros(this_n_active_envs, dtype=float)
 
             pbar = tqdm.tqdm(
@@ -327,6 +330,10 @@ class LiberoRunner(BaseRunner):
                     call_ms = (time.perf_counter() - _tic) * 1000.0
                     # ---- end timed region ----
                     calls_active += active_before.astype(int)
+                    k_call = int(round(float(result['n_tokens']))) if 'n_tokens' in result else -1
+                    for j in np.flatnonzero(active_before):
+                        k_seen[j].add(k_call)
+                        r_seen[j].add(int(action.shape[1]))
                     infer_ms_active += active_before * call_ms
                     if log_diagnostics and 'bon_cand' in result:
                         diag = policy.bon_diagnostics(
@@ -422,6 +429,8 @@ class LiberoRunner(BaseRunner):
                     episode_finished=int(bool(episode_done[gi])),
                     env_steps=steps_j, policy_calls=int(calls_active[j]),
                     inference_ms=float(infer_ms_active[j]), batch_envs=int(n_envs),
+                    k_tokens=('|'.join(map(str, sorted(k_seen[j])))),
+                    r_exec=('|'.join(map(str, sorted(r_seen[j])))),
                     scene_hash=scene_hashes[j], status=status))
 
             # collect data for this round

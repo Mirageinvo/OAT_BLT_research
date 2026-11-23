@@ -119,6 +119,34 @@ def cmd_ablation(a):
       f"{int((hr > 1).sum())} / {len(hr)}")
     tk = ep.groupby('init_id')['task'].nunique()
     P(f"- init_ids mapped to >1 task: {int((tk > 1).sum())}")
+    if 'k_tokens' in ep and 'r_exec' in ep:
+        P("- generated tokens K / executed chunk length R per variant (values seen in any episode):")
+        for v in variants:
+            e = ep[ep['variant'] == v]
+            ks = sorted({x for s_ in e['k_tokens'].astype(str) for x in s_.split('|')})
+            rs = sorted({x for s_ in e['r_exec'].astype(str) for x in s_.split('|')})
+            P(f"  - `{v}`: K={ks}, R={rs}")
+            if a.expect_k is not None and ks != [str(a.expect_k)]:
+                errors.append(f"`{v}`: K values {ks} != [{a.expect_k}]")
+            if a.expect_r is not None and rs != [str(a.expect_r)]:
+                errors.append(f"`{v}`: R values {rs} != [{a.expect_r}]")
+    dec = _load(a.dirs, 'selector_decisions.csv')
+    if not dec.empty:
+        own = {'cs_prefix': 'cs_prefix_idx', 'medoid_prefix': 'medoid_prefix_idx',
+               'cs_endpoint': 'cs_endpoint_idx', 'cs_prefix_fixed': 'cs_prefix_fixed_idx'}
+        P("- executed index vs the variant's own shadow decision (must be 0 mismatches):")
+        for v, g in dec.groupby('variant'):
+            if v not in own:
+                continue
+            mm = int((g['executed_idx'] != g[own[v]]).sum())
+            Rs = sorted(g['R'].unique().tolist()) if 'R' in g else 'n/a'
+            P(f"  - `{v}`: {mm} / {len(g)} mismatches; decision R values: {Rs}")
+            if mm:
+                errors.append(f"`{v}`: {mm} executed-index mismatches vs own diagnostics")
+            if a.expect_r is not None and 'R' in g and Rs != [a.expect_r]:
+                errors.append(f"`{v}`: decision R values {Rs} != [{a.expect_r}]")
+    if not ('k_tokens' in ep and 'r_exec' in ep) and (a.expect_k is not None or a.expect_r is not None):
+        errors.append("episodes.csv has no k_tokens/r_exec columns (pre-08a1205 runner) — K/R unverifiable")
     cnt = ep.groupby(['variant', 'repeat_seed']).size().unstack(fill_value=0)
     P("\nEpisodes per variant × repeat_seed:\n")
     P(_md(cnt, ))
@@ -170,7 +198,6 @@ def cmd_ablation(a):
         P("")
 
     # ---- disagreement (same candidates, on control trajectories) ----
-    dec = _load(a.dirs, 'selector_decisions.csv')
     if not dec.empty:
         dc = dec[dec['variant'] == ctrl] if ctrl in set(dec['variant']) else dec
         P(f"## Selector disagreement on the SAME 8 candidates (decisions on `{dc['variant'].iloc[0]}` trajectories)\n")
@@ -182,15 +209,6 @@ def cmd_ablation(a):
         if (dc.cs_prefix_fixed_idx >= 0).any():
             dc = dc.assign(idx_cs_fixed=(dc.cs_prefix_idx != dc.cs_prefix_fixed_idx))
             cols.append('idx_cs_fixed')
-        own = {'cs_prefix': 'cs_prefix_idx', 'medoid_prefix': 'medoid_prefix_idx',
-               'cs_endpoint': 'cs_endpoint_idx', 'cs_prefix_fixed': 'cs_prefix_fixed_idx'}
-        P("Executed index vs the variant's own shadow decision (must be 0 mismatches):\n")
-        for v, g in dec.groupby('variant'):
-            if v in own:
-                mm = int((g['executed_idx'] != g[own[v]]).sum())
-                Rs = sorted(g['R'].unique().tolist()) if 'R' in g else 'n/a'
-                P(f"- `{v}`: {mm} / {len(g)} mismatches; R values: {Rs}")
-        P("")
         tot = (100 * dc[cols].mean()).to_frame('all_decisions_%').T
         tot.insert(0, 'decisions', len(dc))
         P(_md(tot, index=False, floatfmt='.1f'))
@@ -238,6 +256,8 @@ def main():
     b.add_argument('--control', default='cs_prefix')
     b.add_argument('--n_boot', type=int, default=10000)
     b.add_argument('--out', default=None)
+    b.add_argument('--expect_k', type=int, default=8, help='required generated-token count (strict)')
+    b.add_argument('--expect_r', type=int, default=16, help='required executed chunk length (strict)')
     b.add_argument('--no_strict', action='store_true',
                    help='print tables even if pairing integrity fails (diagnostics only)')
     a = ap.parse_args()
