@@ -11,7 +11,7 @@ PY=${PY:-.venv/bin/python}
 SEEDS=${SEEDS:-0}
 MAXJ=${MAXJ:-3}
 CKPT=my_models/policy_ep-0250_sr-0.596.ckpt
-OUT=eval_out/rebuttal_cs_ablation
+OUT=${OUT:-eval_out/rebuttal_cs_ablation}
 COMMON="--use_k_tokens 8 --entropy_threshold 0 --temperature 1.0 --topk 10 --selector_seed 0 --n_parallel_envs 4"
 S3="$COMMON --n_test 500 --test_start_seed 10000 --gen_seeds $SEEDS"
 mkdir -p $OUT/main
@@ -31,14 +31,21 @@ H_FIXED=$($PY -c "import json;print(json.load(open('$OUT/calib_h/h_calibration.j
 log "H_FIXED=$H_FIXED (frozen)"
 
 # ---- 2. main variants, same 500 scenes and seed list; order = priority ----
-run() {  # name, flags...
+FAIL=$OUT/main/.failures
+rm -f $FAIL
+run() {  # name, flags...   .done stores the exact config; a run is skipped only if it matches
   local name=$1; shift
-  if [ -f $OUT/main/$name/.done ]; then log "skip $name (done)"; return 0; fi
+  # line 1 = what must match to skip (flags + checkpoint); line 2 = commit, informational only
+  # (manifest.json of the run records the commit and diff hash as well)
+  local cfg="flags=$S3 $* | ckpt=$CKPT"
+  if [ -f $OUT/main/$name/.done ] && [ "$(head -1 $OUT/main/$name/.done)" = "$cfg" ]; then
+    log "skip $name (done with identical config)"; return 0
+  fi
   log "start $name"
   local t0=$(date +%s)
   $PY scripts/eval_policy_sim.py -c $CKPT -o $OUT/main/$name --force $S3 "$@" > $OUT/main/$name.log 2>&1
   local rc=$?
-  [ $rc -eq 0 ] && touch $OUT/main/$name/.done
+  if [ $rc -eq 0 ]; then printf '%s\ncommit=%s\n' "$cfg" "$(git rev-parse HEAD)" > $OUT/main/$name/.done; else echo "$name rc=$rc" >> $FAIL; fi
   log "end $name rc=$rc wall=$(( $(date +%s) - t0 ))s"
 }
 jobs_wait() { while [ "$(jobs -rp | wc -l)" -ge "$MAXJ" ]; do wait -n; done; }
@@ -50,11 +57,17 @@ jobs_wait; run medoid_prefix   --bon_free 8 --bon_signal medoid_prefix &
 jobs_wait; run cs_prefix_fixed --bon_free 8 --bon_signal cs_prefix_fixed --cs_fixed_h $H_FIXED &
 wait
 
-# ---- 3. aggregation (strict) ----
+# ---- 3. aggregation (strict: all 5 variants, exactly 500 episodes per seed in SEEDS) ----
 D="$OUT/main/base $OUT/main/cs_prefix $OUT/main/cs_endpoint $OUT/main/medoid_prefix $OUT/main/cs_prefix_fixed"
 for C in base cs_prefix; do
   $PY scripts/rebuttal/aggregate_ablation.py ablation $D --control $C --out $OUT/main/vs_${C}_auto.md \
-    > $OUT/main/agg_vs_$C.txt 2>&1
-  log "aggregate --control $C exit=$?  (see $OUT/main/agg_vs_$C.txt)"
+    --expect_seeds $SEEDS --expect_n_test 500 > $OUT/main/agg_vs_$C.txt 2>&1
+  rc=$?
+  [ $rc -ne 0 ] && echo "aggregate --control $C exit=$rc" >> $FAIL
+  log "aggregate --control $C exit=$rc  (see $OUT/main/agg_vs_$C.txt)"
 done
-log "DONE"
+if [ -s $FAIL ]; then
+  log "FAILED:"; sed 's/^/    /' $FAIL
+  exit 1
+fi
+log "ALL OK"

@@ -174,6 +174,21 @@ def cmd_ablation(a):
                 errors.append(f"`{v}`: decision R values {Rs} != [{a.expect_r}]")
     if not ('k_tokens' in ep and 'r_exec' in ep) and (a.expect_k is not None or a.expect_r is not None):
         errors.append("episodes.csv has no k_tokens/r_exec columns (pre-08a1205 runner) — K/R unverifiable")
+    if a.expect_seeds is not None:
+        want = sorted(int(x) for x in a.expect_seeds.split(','))
+        for v in variants:
+            got = sorted(ep.loc[ep['variant'] == v, 'repeat_seed'].unique().tolist())
+            if got != want:
+                errors.append(f"`{v}`: repeat seeds {got} != expected {want}")
+    if a.expect_n_test is not None:
+        per = ep.groupby(['variant', 'repeat_seed']).size()
+        badn = per[per != a.expect_n_test]
+        for (v, r), n in badn.items():
+            errors.append(f"`{v}` seed {r}: {n} episodes != expected {a.expect_n_test}")
+        ids = ep.groupby(['variant', 'repeat_seed'])['init_id'].agg(['min', 'max', 'nunique'])
+        badi = ids[(ids['min'] != 0) | (ids['max'] != a.expect_n_test - 1) | (ids['nunique'] != a.expect_n_test)]
+        for (v, r), _ in badi.iterrows():
+            errors.append(f"`{v}` seed {r}: init_ids are not exactly 0..{a.expect_n_test - 1}")
     cnt = ep.groupby(['variant', 'repeat_seed']).size().unstack(fill_value=0)
     P("\nEpisodes per variant × repeat_seed:\n")
     P(_md(cnt, ))
@@ -289,6 +304,8 @@ def main():
     b.add_argument('--out', default=None)
     b.add_argument('--expect_k', type=int, default=8, help='required generated-token count (strict)')
     b.add_argument('--expect_r', type=int, default=16, help='required executed chunk length (strict)')
+    b.add_argument('--expect_seeds', default=None, help="e.g. 0,1,2: every variant must have exactly these repeat seeds (strict)")
+    b.add_argument('--expect_n_test', type=int, default=None, help='episodes per (variant, seed), init_ids 0..n-1 (strict)')
     b.add_argument('--no_strict', action='store_true',
                    help='print tables even if pairing integrity fails (diagnostics only)')
     a = ap.parse_args()
