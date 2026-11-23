@@ -7,7 +7,11 @@ patch. All commands from `OAT_BLT_research/oat` (eval_policy_sim.py chdirs there
 
 ```bash
 cd /workspace/my_project/OAT_BLT_research
-git fetch origin && git checkout aamas27_rebuttal
+# branch is local-only until pushed. Either fetch it after the push, or carry it as a bundle:
+#   (local)     git bundle create aamas27_rebuttal.bundle 52e55e6..aamas27_rebuttal   # copy file to container
+#   (container) git fetch /path/aamas27_rebuttal.bundle aamas27_rebuttal:aamas27_rebuttal
+git checkout aamas27_rebuttal
+git log --oneline -1          # must show fa07567 or later (seeded resets + strict aggregator)
 git lfs pull --include="oat/my_models/policy_ep-0250_sr-0.596.ckpt,oat/my_models/tokenizer_ep-0950_mse-0.002.ckpt"
 cd oat
 sha256sum my_models/policy_ep-0250_sr-0.596.ckpt
@@ -30,7 +34,8 @@ export CUDA_VISIBLE_DEVICES=0 MUJOCO_GL=egl MUJOCO_EGL_DEVICE_ID=0
 CKPT=my_models/policy_ep-0250_sr-0.596.ckpt
 OUT=eval_out/rebuttal_cs_ablation
 # S3 protocol flags. n_test/n_parallel_envs/test_start_seed fix the (task, scene) map — do not change.
-S3="--use_k_tokens 8 --entropy_threshold 0 --temperature 1.0 --topk 10 --bon_free 8 \
+# --bon_free is passed per run (8 for selectors, 1 for the single-candidate base agent).
+S3="--use_k_tokens 8 --entropy_threshold 0 --temperature 1.0 --topk 10 \
     --selector_seed 0 --n_test 500 --n_parallel_envs 4 --test_start_seed 10000"
 ```
 
@@ -57,9 +62,12 @@ Check (all must hold before step 3):
 
 Scene protocol (v2, differs from the historical S3 runs): the final reset of every episode is
 seeded with its seed label, and the vector-env worker clears a pending autoreset on explicit
-reset (upstream bug: with shared_memory=False the first step of every chunk after the first
-re-reset the env, discarding one action chunk and changing the scene). Report as: same
-checkpoint and S3 settings, new common scene set shared by all variants.
+reset (upstream bug: with shared_memory=False, an env whose previous episode ended with a
+pending autoreset re-reset on its first step, discarding the first action chunk and changing the
+scene; whether that happened depended on how the previous batch ended, so its effect on the
+historical numbers is not assumed to be equal across methods). Compare only new-protocol runs with
+each other. Report as: same checkpoint and selection settings, corrected env reset, common scene
+pool for all variants.
 
 Determinism check (optional, cheap): rerun `cs_prefix` smoke into `$OUT/smoke/cs_prefix_rerun`
 and diff the `success` / `policy_calls` columns.
@@ -80,24 +88,35 @@ Freeze `h_median` → `H_FIXED` and record it in the report before running step 
 
 ## 3. Main runs (500 scenes; same generation seed list for every variant)
 
+Order: block A (base, cs_prefix, cs_endpoint) first, then medoid_prefix, then cs_prefix_fixed.
+All runs: same 500 scenes, same generation seed list.
+
 ```bash
 SEEDS=0          # minimum; target "0,1,2" if throughput allows (decide BEFORE looking at results)
-# a) control + same-candidate shadow log (CS vs medoid / endpoint / fixed)
-uv run python scripts/eval_policy_sim.py -c $CKPT -o $OUT/main/cs_prefix --force $S3 \
+# A1) single-candidate base agent (N=1): does selection still beat base under the fixed protocol?
+uv run python scripts/eval_policy_sim.py -c $CKPT -o $OUT/main/base --force $S3 \
+  --bon_free 1 --gen_seeds $SEEDS 2>&1 | tee $OUT/main/base.log
+# A2) control + same-candidate shadow log (CS vs medoid / endpoint / fixed)
+#     (omit --cs_fixed_h if H_FIXED is not frozen yet; shadow fixed idx is then -1)
+uv run python scripts/eval_policy_sim.py -c $CKPT -o $OUT/main/cs_prefix --force $S3 --bon_free 8 \
   --bon_signal cs_prefix --gen_seeds $SEEDS --log_diagnostics --cs_fixed_h $H_FIXED 2>&1 | tee $OUT/main/cs_prefix.log
-# b)
-uv run python scripts/eval_policy_sim.py -c $CKPT -o $OUT/main/cs_endpoint --force $S3 \
+# A3)
+uv run python scripts/eval_policy_sim.py -c $CKPT -o $OUT/main/cs_endpoint --force $S3 --bon_free 8 \
   --bon_signal cs_endpoint --gen_seeds $SEEDS 2>&1 | tee $OUT/main/cs_endpoint.log
-# c)
-uv run python scripts/eval_policy_sim.py -c $CKPT -o $OUT/main/medoid_prefix --force $S3 \
+# B)
+uv run python scripts/eval_policy_sim.py -c $CKPT -o $OUT/main/medoid_prefix --force $S3 --bon_free 8 \
   --bon_signal medoid_prefix --gen_seeds $SEEDS 2>&1 | tee $OUT/main/medoid_prefix.log
-# d)
-uv run python scripts/eval_policy_sim.py -c $CKPT -o $OUT/main/cs_prefix_fixed --force $S3 \
+# C)
+uv run python scripts/eval_policy_sim.py -c $CKPT -o $OUT/main/cs_prefix_fixed --force $S3 --bon_free 8 \
   --bon_signal cs_prefix_fixed --cs_fixed_h $H_FIXED --gen_seeds $SEEDS 2>&1 | tee $OUT/main/cs_prefix_fixed.log
 
-uv run python scripts/rebuttal/aggregate_ablation.py ablation \
-  $OUT/main/cs_prefix $OUT/main/cs_endpoint $OUT/main/medoid_prefix $OUT/main/cs_prefix_fixed \
-  --out $OUT/main/rebuttal_results_auto.md
+DIRS="$OUT/main/base $OUT/main/cs_prefix $OUT/main/cs_endpoint"   # add medoid_prefix / cs_prefix_fixed when done
+# selection vs base (every variant paired against N=1)
+uv run python scripts/rebuttal/aggregate_ablation.py ablation $DIRS --control base \
+  --out $OUT/main/vs_base_auto.md
+# CS ablation (every variant paired against cs_prefix)
+uv run python scripts/rebuttal/aggregate_ablation.py ablation $DIRS --control cs_prefix \
+  --out $OUT/main/vs_cs_prefix_auto.md
 ```
 If `--cs_fixed_h` is not known yet when starting (a), omit it: the shadow `cs_prefix_fixed_idx`
 is then -1; everything else is unaffected.
