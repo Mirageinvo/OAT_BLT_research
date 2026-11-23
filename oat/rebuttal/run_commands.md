@@ -142,3 +142,18 @@ indicative only. Measured latency (P2) = separate runs on an idle GPU.
   d_cs_medoid, d_cs_endpoint, n_unique_prefix
 - `manifest.json` — argv, git commit + diff sha, checkpoint sha256, scene list sha256, GPU, torch
 - `eval_log.json` — legacy aggregate (same format as S3)
+
+## P1. Table 2 source: single-deviation K/R data -> kr_continuations.csv
+
+Source npz = `oracle_grid_mt.npz` (branch_value_k.py grid mode; 120 states, 10 tasks, M=5,
+K 1 vs 8, R 8 vs 32). Verified against Table 2: mean K +0.043, R -0.028, corr 0.079.
+Only per-branch success fractions are stored -> CSV holds success counts out of M (script refuses
+if p*M is not an integer).
+
+```bash
+.venv/bin/python scripts/rebuttal/export_kr.py -i <path>/oracle_grid_mt.npz \
+  -o rebuttal/kr_continuations.csv --summary rebuttal/kr_summary.md \
+  --M 5 --k_coarse 1 --k_full 8 --r_short 8 --r_long 32
+```
+Summary: per contrast mean, within-task bootstrap CI, improved/unchanged/worse counts (ties split
+into 0/0, M/M, intermediate), exact sign test; two Table 2 contrasts + two supplementary ones.
