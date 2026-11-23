@@ -2,7 +2,8 @@
 
 usage: paired_view.py VIEW_DIR SEEDS CS_DIR RANDOM_DIR [BASE_DIR]
 Checks manifests (same commit/ckpt/scene protocol/config), row counts, K=8/R=16, status, and
-identical scene hashes per (task, init_id, repeat_seed); copies the seed-filtered episodes.csv of
+identical scene hashes per (task, init_id, repeat_seed). git_commit may differ between
+variants: the driver (rebuttal/random8.sh) checks that only rebuttal files changed in between; copies the seed-filtered episodes.csv of
 each variant into VIEW_DIR/<variant>/ for the strict aggregator. Any violation -> AssertionError.
 """
 import csv
@@ -18,7 +19,7 @@ sources = [Path(s) for s in sys.argv[3:]]
 variants = ("cs_prefix", "random", "base")[:len(sources)]
 manifests = [json.loads((src / "manifest.json").read_text()) for src in sources]
 ref = manifests[0]
-same = ("checkpoint_sha256", "git_commit", "git_diff_sha256", "scene_protocol",
+same = ("checkpoint_sha256", "git_diff_sha256", "scene_protocol",
         "scene_list_sha256", "cfg_env_runner", "n_test", "test_start_seed",
         "n_parallel_envs", "use_k_tokens", "n_action_steps", "temperature",
         "topk", "entropy_threshold")
@@ -27,6 +28,8 @@ expected = {"n_test": 500, "test_start_seed": 10000, "n_parallel_envs": 4,
 assert ref["checkpoint_sha256"] and ref["scene_list_sha256"] and ref["git_commit"]
 assert ref["scene_protocol"].startswith("seeded_final_reset_v2:")
 rows_by_variant = {}
+for v, src, m in zip(variants, sources, manifests):
+    print(f"{v}: git_commit={m['git_commit']} src={src}")
 scene_reference = None
 
 for variant, src, manifest in zip(variants, sources, manifests):

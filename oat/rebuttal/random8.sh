@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # AAMAS-27 rebuttal: Random-8 control vs CS-8 (cs_prefix from the P0 main block).
-# Must run from a checkout at the SAME commit as P0 (manifest git_commit is compared), so it is
-# meant to be fetched with `git show` into /tmp and run from OAT_BLT_research/oat:
-#   R8_SEEDS=0,1,2 nohup bash /tmp/random8.sh > random8_driver.log 2>&1 &
+# Run AFTER the P0 main block has finished, from OAT_BLT_research/oat:
+#   R8_SEEDS=0,1,2 nohup bash rebuttal/random8.sh > random8_driver.log 2>&1 &
+# The checkout may be newer than P0 only if the commits in between touch nothing but
+# oat/rebuttal/ and oat/scripts/rebuttal/ (checked below; eval/runner/env code must be identical).
 # Steps: smoke (20 ep, strict aggregation vs P0 smoke cs_prefix) -> main (500 scenes) ->
 # paired view (manifest/hash checks) -> strict aggregation --control random (and --control base).
 set -u
 cd "${OAT_DIR:-/workspace/my_project/OAT_BLT_research/oat}"
 export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0} MUJOCO_GL=egl MUJOCO_EGL_DEVICE_ID=${MUJOCO_EGL_DEVICE_ID:-0}
 PY=${PY:-.venv/bin/python}
-TOOLS=${TOOLS:-/tmp}                  # where paired_view.py was put (aggregator comes from the repo)
 CKPT=my_models/policy_ep-0250_sr-0.596.ckpt
 P0=eval_out/rebuttal_cs_ablation
 ROOT=eval_out/rebuttal_random8
@@ -27,9 +27,12 @@ die() { log "FAILED: $*"; exit 1; }
 
 log "SEEDS=$SEEDS commit=$(git rev-parse --short HEAD) dirty=[$(git status --short --untracked-files=no | tr '\n' ' ')]"
 test -x "$PY" || die "no $PY"
-test -f "$TOOLS/paired_view.py" || die "no $TOOLS/paired_view.py"
 P0_COMMIT=$($PY -c "import json;print(json.load(open('$P0/main/cs_prefix/manifest.json'))['git_commit'])")
-[ "$P0_COMMIT" = "$(git rev-parse HEAD)" ] || die "HEAD $(git rev-parse HEAD) != P0 commit $P0_COMMIT"
+# a newer commit is fine only if nothing outside the rebuttal helper dirs changed since P0
+CHANGED=$(git diff --name-only $P0_COMMIT HEAD)
+BAD=$(echo "$CHANGED" | grep -vE '^(oat/rebuttal/|oat/scripts/rebuttal/)' | grep -v '^$')
+log "P0 commit=${P0_COMMIT:0:7}; changed since P0: $(echo $CHANGED)"
+[ -z "$BAD" ] || die "code changed since P0 outside rebuttal dirs: $BAD"
 mkdir -p $ROOT/smoke $ROOT/main/$TAG
 
 # ---- 1. smoke: 20 episodes, paired with the P0 smoke cs_prefix (same smoke protocol) ----
@@ -65,7 +68,7 @@ for v in cs_prefix $( [ "$INCLUDE_BASE" = 1 ] && echo base ); do
 done
 IN="$P0/main/cs_prefix $RUN"; [ "$INCLUDE_BASE" = 1 ] && IN="$IN $P0/main/base"
 rm -rf $VIEW
-$PY $TOOLS/paired_view.py $VIEW $SEEDS $IN > $ROOT/paired_view_$TAG.txt 2>&1 \
+$PY scripts/rebuttal/paired_view.py $VIEW $SEEDS $IN > $ROOT/paired_view_$TAG.txt 2>&1 \
   || die "paired view checks (see $ROOT/paired_view_$TAG.txt)"
 DIRS="$VIEW/cs_prefix $VIEW/random"; [ "$INCLUDE_BASE" = 1 ] && DIRS="$DIRS $VIEW/base"
 AGG="--expect_k 8 --expect_r 16 --expect_seeds $SEEDS --expect_n_test 500 --n_boot 10000"
