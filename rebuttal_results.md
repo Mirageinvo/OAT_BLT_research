@@ -77,7 +77,30 @@ environment depended on when earlier episodes ended, so identical reset seeds di
 states across methods.
 </details>
 
+## Table 2 (P1): per-state distribution behind the averages
+
+Source: `oracle_grid_mt.npz` (120 states, 10 tasks; M=5 continuations per branch; k 1 vs 8, R 8 vs 32).
+Matches the published summaries: mean ΔK +0.043, mean ΔR −0.028, corr(ΔK, recon_gap) 0.08.
+"Unchanged" = same success count out of 5 in both branches.
+
+| change in one state | improved | unchanged | worse | mean |
+|---|---:|---:|---:|---:|
+| K 1→8 at long R | 24 (20.0%) | 81 (67.5%) | 15 (12.5%) | +4.3 pp |
+| shorter R at K=8 | 13 (10.8%) | 89 (74.2%) | 18 (15.0%) | −2.8 pp |
+
+With 5 continuations one outcome moves an estimate by 20 pp, so these counts cannot separate real heterogeneity
+from noise. Use counts only (no sign-test p: coarse M, and states share episodes).
+
+Draft text:
+
+We reanalyzed the 120 states underlying Table 2. Increasing token depth improved the observed success count in 24
+states, reduced it in 15, and left it unchanged in 81. Shortening the execution horizon improved it in 13 states,
+reduced it in 18, and left it unchanged in 89. These are empirical differences from five continuations per branch.
+They show why the average alone is insufficient, but do not establish how much of the variation a controller could
+exploit. Our conclusion remains limited to the tested controllers, which did not show a reliable advantage over
+matched random allocation.
+
 ## Pending
 
-- Table 2 (P1): run `scripts/rebuttal/export_kr.py` on `oracle_grid_mt.npz`, report improved/same/worse counts only.
+- (optional) `export_kr.py` split of the ties into 0/0, 5/5 and mid, if a reviewer asks what "unchanged" consists of.
 - P2 latency on an idle GPU.
