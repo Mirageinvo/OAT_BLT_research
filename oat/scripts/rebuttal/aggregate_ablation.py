@@ -142,10 +142,16 @@ def cmd_ablation(a):
     if n_hk:
         errors.append(f"{n_hk} keys with mismatching scene hashes across variants")
     hr = ep.groupby(['task', 'init_id'])['scene_hash'].nunique()
+    n_hr = int((hr > 1).sum())
     P(f"- (task, init_id) whose hash differs across repeat seeds (expected 0 with seeded resets): "
-      f"{int((hr > 1).sum())} / {len(hr)}")
+      f"{n_hr} / {len(hr)}")
+    if n_hr:
+        errors.append(f"{n_hr} scenes whose hash differs across repeat seeds")
     tk = ep.groupby('init_id')['task'].nunique()
-    P(f"- init_ids mapped to >1 task: {int((tk > 1).sum())}")
+    n_tk = int((tk > 1).sum())
+    P(f"- init_ids mapped to >1 task: {n_tk}")
+    if n_tk:
+        errors.append(f"{n_tk} init_ids mapped to >1 task")
     if 'k_tokens' in ep and 'r_exec' in ep:
         P("- generated tokens K / executed chunk length R per variant (values seen in any episode):")
         for v in variants:
@@ -158,6 +164,10 @@ def cmd_ablation(a):
             if a.expect_r is not None and rs != [str(a.expect_r)]:
                 errors.append(f"`{v}`: R values {rs} != [{a.expect_r}]")
     dec = _load(a.dirs, 'selector_decisions.csv')
+    # the control CS variant must carry its shadow log (it is what the index check verifies)
+    if 'cs_prefix' in variants and (dec.empty or not (dec['variant'] == 'cs_prefix').any()):
+        P("- `cs_prefix` shadow log (selector_decisions.csv): MISSING or empty")
+        errors.append("`cs_prefix` selector_decisions.csv missing or empty")
     if not dec.empty:
         own = {'cs_prefix': 'cs_prefix_idx', 'medoid_prefix': 'medoid_prefix_idx',
                'cs_endpoint': 'cs_endpoint_idx', 'cs_prefix_fixed': 'cs_prefix_fixed_idx'}
