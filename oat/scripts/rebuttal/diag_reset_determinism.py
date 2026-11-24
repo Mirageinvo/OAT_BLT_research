@@ -38,6 +38,11 @@ def joint_groups(sim):
     return groups
 
 
+def joint_names(sim):
+    m = sim.model
+    return [(j, m.joint_id2name(j), int(m.jnt_qposadr[j]), int(m.jnt_type[j])) for j in range(m.njnt)]
+
+
 def snapshot(env):
     sim = raw(env).sim
     st = np.asarray(env.env.get_sim_state(), dtype=np.float64)
@@ -71,6 +76,7 @@ def main():
     ap.add_argument('--manifest', required=True)
     ap.add_argument('--n_tasks', type=int, default=3)
     ap.add_argument('--steps', type=int, default=200)
+    ap.add_argument('--tasks', default='', help="comma-separated substrings; default = first n_tasks")
     a = ap.parse_args()
     man = json.load(open(a.manifest))
     names, seeds = man['env_task_names'], man['env_seeds']
@@ -80,17 +86,33 @@ def main():
             seen.add(t)
             picks.append((t, int(s)))
     rng = np.random.default_rng(0)
-    for task, seed in picks[:a.n_tasks]:
+    if a.tasks:
+        subs = [x for x in a.tasks.split(',') if x]
+        picks = [(t, s) for t, s in picks if any(x in t for x in subs)]
+    else:
+        picks = picks[:a.n_tasks]
+    for task, seed in picks:
         env = LiberoEnv(task)
         env.reset(seed=seed)
         A = snapshot(env)
         groups = joint_groups(raw(env).sim)
         print(f"\n== {task} seed={seed}  hash A={A['hash']}  groups: { {k: len(v) for k, v in groups.items()} }")
+        r = raw(env)
+        print(f"   hard_reset={getattr(r, 'hard_reset', '?')} deterministic_reset={getattr(r, 'deterministic_reset', '?')}")
         print("   carry-over attrs after reset A:", carry(env))
+        jn = joint_names(r.sim)
         cases = [('B: reset again', None), ('C: after gripper close', 1.0),
-                 ('D: after gripper open', -1.0), ('E: after random actions', 'random')]
+                 ('D: after gripper open', -1.0), ('E: after random actions', 'random'),
+                 ('G: after moving fixture joints', 'fixtures')]
         for label, grip in cases:
-            if grip is not None:
+            if grip == 'fixtures':
+                sim = raw(env).sim
+                for j, n, adr, typ in jn:
+                    if typ in (2, 3) and not n.startswith('robot0') and 'finger' not in n:  # slide/hinge
+                        sim.data.qpos[adr] += 0.05
+                sim.forward()
+                print(f"   before reset G: moved {sum(1 for x in jn if x[3] in (2, 3) and not x[1].startswith('robot0') and 'finger' not in x[1])} fixture joints by +0.05")
+            elif grip is not None:
                 run(env, a.steps, grip, rng)
                 print(f"   before reset {label[0]}:", carry(env))
             env.reset(seed=seed)
@@ -99,6 +121,8 @@ def main():
             print(f"   {label:26s} hash={X['hash']} same={X['hash'] == A['hash']}  "
                   f"max|dqpos| " + " ".join(f"{k}={v:.2e}" for k, v in diffs.items()) +
                   f"  max|dqvel|={float(np.abs(X['qvel'] - A['qvel']).max()):.2e}")
+            top = sorted(((float(np.abs(X['qpos'][adr] - A['qpos'][adr])), n) for _, n, adr, _ in jn), reverse=True)[:4]
+            print("      top joints:", [(n, f"{d:.2e}") for d, n in top if d > 0])
         env.close()
         env2 = LiberoEnv(task)          # fresh env object, as when a worker switches task
         env2.reset()                    # init_fn does an unseeded reset first
