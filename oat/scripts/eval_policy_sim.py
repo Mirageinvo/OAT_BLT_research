@@ -305,9 +305,12 @@ def eval_policy_sim(
             device=str(device), cfg_env_runner=OmegaConf.to_container(cfg.task.policy.env_runner, resolve=False),
             env_task_names=list(getattr(env_runner, "env_task_names", [])),
             env_seeds=[int(x) for x in getattr(env_runner, "env_seeds", [])],
-            scene_protocol=("seeded_final_reset_v2: every episode's final reset is seeded with "
+            scene_protocol=("seeded_final_reset_v3: every episode's final reset is seeded with "
                             "its seed label (np.random.seed via ControlEnv.seed); worker clears "
-                            "pending autoreset on explicit reset. Scene pool differs from the "
+                            "pending autoreset on explicit reset; LIBERO object_property_initializers "
+                            "cleared before each reset (upstream list grew by one sampler per "
+                            "articulated object per reset, making drawer/microwave/stove scenes "
+                            "depend on the env's reset count). Scene pool differs from the "
                             "historical S3 runs; identical across variants and repeat seeds."),
         ))
 

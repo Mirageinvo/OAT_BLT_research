@@ -157,3 +157,19 @@ if p*M is not an integer).
 ```
 Summary: per contrast mean, within-task bootstrap CI, improved/unchanged/worse counts (ties split
 into 0/0, M/M, intermediate), exact sign test; two Table 2 contrasts + two supplementary ones.
+
+## Scene protocol v3 (supersedes v2; P0 v2 results in eval_out/rebuttal_cs_ablation are NOT used)
+
+P0 v2 failed the strict gate: 432/1500 (task, init_id, seed) keys had different scene hashes across
+variants, only in the three tasks with articulated fixtures (KITCHEN_SCENE4 drawer, SCENE6
+microwave, SCENE8 stove). Cause (upstream LIBERO, bddl_base_domain.py): each hard reset re-runs
+_setup_placement_initializer, which appends Open/Close / TurnOn/Off samplers to
+object_property_initializers without clearing it; on the k-th reset of an env object k samplers
+draw from np.random, so the fixture joint and later placements depend on the env's reset count,
+which depends on how earlier episodes in that worker ended (early success -> extra autoreset).
+Fix: LiberoEnv.reset clears the list before each reset (oat/env/libero/env.py).
+
+Verify (2 min): `diag_reset_determinism.py --manifest <any manifest> --tasks KITCHEN_SCENE4,KITCHEN_SCENE6,KITCHEN_SCENE8`
+-> all cases same=True. Then `SEEDS=0,1,2 MAXJ=3 nohup bash rebuttal/main.sh > main_v3_driver.log 2>&1 &`
+(new OUT eval_out/rebuttal_cs_ablation_v3; step 0 = scene gate on 100 episodes x 2 seeds; Random-8
+is included as variant `random`; aggregations --control base / cs_prefix / random).

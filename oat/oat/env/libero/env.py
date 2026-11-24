@@ -147,6 +147,19 @@ class LiberoEnv(gymnasium.Env):
         # (task, seed) independently of the worker's history.
         if seed is not None:
             self.env.seed(int(seed))
+        # Upstream LIBERO bug: every hard reset re-runs _load_model ->
+        # _setup_placement_initializer, which APPENDS one Open/Close or TurnOn/Off sampler per
+        # articulated object to object_property_initializers, a list that is never cleared.
+        # On the k-th reset k samplers draw from np.random, so the articulated joint (drawer,
+        # microwave door, stove knob) and all later object placements depend on how many
+        # resets this env object has done, not only on the seed. Clearing the list makes the
+        # reset rebuild exactly one sampler per object, so the scene is a function of
+        # (task, seed) only. Requires hard_reset=True (ControlEnv default), checked here.
+        inner = self.env.env
+        if hasattr(inner, 'object_property_initializers'):
+            if not getattr(inner, 'hard_reset', False) or getattr(inner, 'deterministic_reset', False):
+                raise RuntimeError("LiberoEnv.reset expects hard_reset=True, deterministic_reset=False")
+            inner.object_property_initializers.clear()
         self.n_resets += 1
         obs = self.env.reset()
         obs_dict = self._extract_obs(obs)

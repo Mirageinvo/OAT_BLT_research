@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# AAMAS-27 rebuttal main block (500 scenes, S3 settings, new scene protocol v2).
+# AAMAS-27 rebuttal main block (500 scenes, S3 settings, scene protocol v3).
+# v3 = v2 + LIBERO object_property_initializers cleared before each reset (see oat/env/libero/env.py).
+# Random-8 (uniform choice among the same 8 candidates) is part of the block.
 # Run from OAT_BLT_research/oat:
 #   SEEDS=0,1,2 MAXJ=3 nohup bash rebuttal/main.sh > main_driver.log 2>&1 &
 # SEEDS: generation seed list, fixed BEFORE looking at results. MAXJ: concurrent eval processes
@@ -11,12 +13,35 @@ PY=${PY:-.venv/bin/python}
 SEEDS=${SEEDS:-0}
 MAXJ=${MAXJ:-3}
 CKPT=my_models/policy_ep-0250_sr-0.596.ckpt
-OUT=${OUT:-eval_out/rebuttal_cs_ablation}
+OUT=${OUT:-eval_out/rebuttal_cs_ablation_v3}
 COMMON="--use_k_tokens 8 --entropy_threshold 0 --temperature 1.0 --topk 10 --selector_seed 0 --n_parallel_envs 4"
 S3="$COMMON --n_test 500 --test_start_seed 10000 --gen_seeds $SEEDS"
 mkdir -p $OUT/main
 log() { echo "[$(date '+%F %T')] $*"; }
 log "SEEDS=$SEEDS MAXJ=$MAXJ commit=$(git rev-parse --short HEAD)"
+
+# ---- 0. scene-determinism gate: base, 100 episodes (all 10 tasks, env reuse across batches),
+#         generation seeds 0,1 -> every (task, init_id) must have ONE scene hash across seeds ----
+if [ ! -f $OUT/gate/.ok ]; then
+  log "start scene gate"
+  rm -rf $OUT/gate
+  $PY scripts/eval_policy_sim.py -c $CKPT -o $OUT/gate --force $COMMON --n_test 100 \
+    --test_start_seed 10000 --gen_seeds 0,1 --bon_free 1 > $OUT/gate.log 2>&1 \
+    || { log "gate run FAILED (see $OUT/gate.log)"; exit 1; }
+  $PY - $OUT/gate/episodes.csv <<'PYEOF' >> $OUT/gate.log 2>&1 || { log "scene gate FAILED (see $OUT/gate.log)"; exit 1; }
+import sys, pandas as pd
+ep = pd.read_csv(sys.argv[1])
+assert len(ep) == 200 and set(ep.repeat_seed) == {0, 1}, (len(ep), set(ep.repeat_seed))
+assert (ep.status == 'ok').all() and ~ep.scene_hash.astype(str).str.startswith('err').any()
+nd = ep.groupby(['task', 'init_id']).scene_hash.nunique()
+print("scene gate: scenes with >1 hash across seeds:", int((nd > 1).sum()), "/", len(nd))
+print(ep.assign(bad=ep.set_index(['task', 'init_id']).index.isin(nd[nd > 1].index))
+        .groupby('task').bad.mean().to_string())
+sys.exit(0 if (nd == 1).all() else 1)
+PYEOF
+  touch $OUT/gate/.ok
+  log "scene gate OK"
+fi
 
 # ---- 1. bandwidth calibration for cs_prefix_fixed: held-out seeds 20000+, frozen before eval ----
 if [ ! -f $OUT/calib_h/h_calibration.json ]; then
@@ -52,14 +77,15 @@ jobs_wait() { while [ "$(jobs -rp | wc -l)" -ge "$MAXJ" ]; do wait -n; done; }
 
 jobs_wait; run base            --bon_free 1 &
 jobs_wait; run cs_prefix       --bon_free 8 --bon_signal cs_prefix --log_diagnostics --cs_fixed_h $H_FIXED &
+jobs_wait; run random          --bon_free 8 --bon_signal random --bon_prefix_k 0 --bon_first_temp 0 &
 jobs_wait; run cs_endpoint     --bon_free 8 --bon_signal cs_endpoint &
 jobs_wait; run medoid_prefix   --bon_free 8 --bon_signal medoid_prefix &
 jobs_wait; run cs_prefix_fixed --bon_free 8 --bon_signal cs_prefix_fixed --cs_fixed_h $H_FIXED &
 wait
 
-# ---- 3. aggregation (strict: all 5 variants, exactly 500 episodes per seed in SEEDS) ----
-D="$OUT/main/base $OUT/main/cs_prefix $OUT/main/cs_endpoint $OUT/main/medoid_prefix $OUT/main/cs_prefix_fixed"
-for C in base cs_prefix; do
+# ---- 3. aggregation (strict: all 6 variants, exactly 500 episodes per seed in SEEDS) ----
+D="$OUT/main/base $OUT/main/cs_prefix $OUT/main/random $OUT/main/cs_endpoint $OUT/main/medoid_prefix $OUT/main/cs_prefix_fixed"
+for C in base cs_prefix random; do
   $PY scripts/rebuttal/aggregate_ablation.py ablation $D --control $C --out $OUT/main/vs_${C}_auto.md \
     --expect_seeds $SEEDS --expect_n_test 500 > $OUT/main/agg_vs_$C.txt 2>&1
   rc=$?

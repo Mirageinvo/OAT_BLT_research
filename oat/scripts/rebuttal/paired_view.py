@@ -26,7 +26,7 @@ same = ("checkpoint_sha256", "git_diff_sha256", "scene_protocol",
 expected = {"n_test": 500, "test_start_seed": 10000, "n_parallel_envs": 4,
             "use_k_tokens": 8, "temperature": 1.0, "topk": 10, "entropy_threshold": 0}
 assert ref["checkpoint_sha256"] and ref["scene_list_sha256"] and ref["git_commit"]
-assert ref["scene_protocol"].startswith("seeded_final_reset_v2:")
+assert ref["scene_protocol"].startswith("seeded_final_reset_v3:")
 rows_by_variant = {}
 for v, src, m in zip(variants, sources, manifests):
     print(f"{v}: git_commit={m['git_commit']} src={src}")
