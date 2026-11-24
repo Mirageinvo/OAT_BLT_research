@@ -33,15 +33,15 @@ CI = 95% paired bootstrap, scenes resampled within task, equal task weight.
 
 ## Interpretation per reviewer item
 
-- **72A3 (does selection beat the single-sample policy under a clean protocol?)** Yes: +13.1 pp [10.2, 16.0], every task.
-- **Equal-N control (is it just N=8 sampling?)** No: uniform choice among 8 candidates is indistinguishable from
-  N=1 (−1.5 [−4.7, +1.5]); CS-8 beats Random-8 by +14.7 [11.9, 17.5]. The gain comes from the selection rule.
-- **NTCF (ablations)** Scoring the whole executed prefix matters: endpoint-only scoring loses 6.9 pp [4.4, 9.3].
-  The adaptive bandwidth is not required: a bandwidth frozen on held-out seeds is within −1.2 [−3.2, +0.8].
-- **9QTC (CS vs medoid)** Medoid and CS choose differently in 11% of decisions (in 87% of episodes at least once),
-  but their SR is statistically indistinguishable (−0.5 [−2.3, +1.2]). Honest reading: the benefit is from
-  consensus (mode-seeking) selection over the prefix; this experiment does not show an advantage of the
-  kernel score over medoid. Do not claim CS > medoid.
+| reviewer | what to show |
+|---|---|
+| **72A3** | CS-8 vs base +13.13 pp [10.20, 16.00]; higher point estimate on all ten tasks. Random-8 separately isolates the contribution of ranking. |
+| **NTCF** | Scoring the whole executed prefix vs the endpoint only: +6.87 pp [4.40, 9.34] — the clearest ablation. Adaptive vs held-out-calibrated fixed bandwidth: no clear advantage detected (+1.20 [−0.80, 3.20] for adaptive). |
+| **9QTC** | CS and medoid select different executed prefixes in 11.3% of replans on CS trajectories (≥1 such replan in 87.3% of episodes), yet the SR difference is +0.53 pp [−1.20, 2.33] in favour of CS. They sometimes choose differently, but an SR advantage of the Gaussian kernel over the medoid is not established. Do not claim CS > medoid. |
+
+Wording rule: a CI containing 0 is "no convincing difference detected", never "no difference" / "equivalent" / "does not depend on".
+Main pair with two decimals: CS-8 71.13% vs Random-8 56.47% = +14.67 pp [11.87, 17.47]; vs base 58.00% = +13.13 pp [10.20, 16.00].
+No new runs before the rebuttal; remaining work = Table 2 K/R analysis.
 
 ## Not to be used
 
@@ -53,22 +53,29 @@ CI = 95% paired bootstrap, scenes resampled within task, equal task weight.
 
 ## Draft rebuttal text (English)
 
+We also fixed two reset issues in our LIBERO-LONG evaluation that could leave methods with different starting states,
+and reran all comparisons under a paired protocol: the same frozen checkpoint and candidate-generation settings, 500
+shared initial scenes and three generation seeds, with initial simulator-state hashes verified to match across all
+methods and repeats.
+
+Under this protocol, CS-8 reaches 71.13% versus 58.00% for the single-sample policy (+13.13 pp, paired 95% CI
+[10.20, 16.00]), with a higher point estimate on all ten tasks. Choosing uniformly at random among eight candidates
+reaches 56.47%, and we found no convincing difference from a single sample (−1.53 pp, [−4.67, 1.53]); CS-8 exceeds
+Random-8 by +14.67 pp ([11.87, 17.47]), so the gain is attributable to the selection rule rather than to drawing more
+samples. Scoring the whole executed prefix rather than only its endpoint improves success by 6.87 pp ([4.40, 9.34]),
+while we found no convincing advantage of the adaptive bandwidth over a bandwidth calibrated on held-out seeds
+(+1.20 pp, [−0.80, 3.20]). CS and a prefix medoid select different executed prefixes in 11.3% of replans (at least
+once in 87.3% of episodes), but the success-rate difference is +0.53 pp ([−1.20, 2.33]), so an advantage of the
+Gaussian kernel over the medoid is not established; we will state this explicitly.
+
+<details><summary>Longer reset description (only if a reviewer asks)</summary>
+
 During validation of our LIBERO-LONG evaluation, we found two reset issues. First, a pending worker auto-reset could
 discard the first action chunk after an explicit reset. Second, in three tasks with articulated fixtures, the LIBERO
 version we used accumulated fixture-initialization samplers across hard resets. The number of resets in a reused
 environment depended on when earlier episodes ended, so identical reset seeds did not guarantee matched starting
-states across methods. We corrected both issues and reran the comparisons with the same frozen checkpoint and
-candidate-generation settings on 500 shared initial scenes with three generation seeds. We verified that initial
-simulator-state hashes matched across all methods and repeats.
-
-Under this protocol, CS-8 reaches 71.1% versus 58.0% for the single-sample policy (+13.1 pp, paired 95% CI
-[10.2, 16.0]), improving on all ten tasks. Choosing uniformly at random among eight candidates gives 56.5%, no
-different from a single sample (−1.5 pp, [−4.7, 1.5]), so the gain comes from the selection rule rather than from
-drawing more samples (CS-8 vs Random-8: +14.7 pp, [11.9, 17.5]). Scoring only the chunk endpoint instead of the
-executed prefix lowers success by 6.9 pp ([4.4, 9.3]), while freezing the bandwidth on held-out seeds changes it by
-−1.2 pp ([−3.2, 0.8]). A prefix medoid selects a different candidate in 11% of decisions but reaches the same
-success rate (−0.5 pp, [−2.3, 1.2]); we therefore attribute the improvement to consensus selection over the executed
-prefix and will state that the kernel score and the medoid perform equivalently in this setting.
+states across methods.
+</details>
 
 ## Pending
 
